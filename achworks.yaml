@@ -1,0 +1,43 @@
+schemaVersion: achworks.dev/v1alpha1
+kind: Product
+
+metadata:
+  name: rixa
+  title: Rixa
+  description: Lightweight CMS product with independently owned site data and semantic static publication, planned on pinned AChrix public contracts.
+
+spec:
+  type: content-management-system
+  lifecycle: development
+  system: rixa
+  ownership: AChWorks
+
+  technology:
+    languages:
+      - Go
+    frameworks: []
+    runtimes: []
+
+  capabilities:
+    provides: []
+    consumes:
+      - versioned-application-base
+      - application-module-composition
+      - application-capability-contracts
+
+  dependencies:
+    - AChWorks/achrix
+
+  documentation:
+    path: docs/
+
+  source:
+    repository: AChWorks/rixa
+    url: https://github.com/AChWorks/rixa
+
+  extensions:
+    foundation:
+      repository: AChWorks/achrix
+      sourceVersion: v0.2.0
+      consumption: planned-versioned-go-dependency
+      specification: docs/PROJECT-SPEC.md

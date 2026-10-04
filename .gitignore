@@ -1,0 +1,8 @@
+# Operator secrets and local runtime/test state
+.env
+.env.*
+!.env.example
+*.local.yaml
+secrets/
+var/
+test-artifacts/
