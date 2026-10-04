@@ -4,7 +4,7 @@
 
 ## Readiness and usage
 
-This repository currently contains the accepted product specification and delivery plan. No runnable CMS, installation package or production release exists yet. GitHub [Issues](https://github.com/AChWorks/rixa/issues), [PRs](https://github.com/AChWorks/rixa/pulls) and [Releases](https://github.com/AChWorks/rixa/releases) own actual availability and evidence.
+This repository currently contains the accepted product specification and delivery plan. No runnable CMS, installation package or production release exists yet. The accepted work order prepares the concrete AChrix-owned Module gaps before CMS runtime; Issues own the required integration/release and later consumer-proof gates. GitHub [Issues](https://github.com/AChWorks/rixa/issues), [PRs](https://github.com/AChWorks/rixa/pulls) and [Releases](https://github.com/AChWorks/rixa/releases) own actual availability and evidence.
 
 To inspect/contribute, clone the public repository:
 
