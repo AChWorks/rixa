@@ -12,13 +12,18 @@ This is the stable outcome order, not live status. [GitHub Issues](https://githu
 
 [#1](https://github.com/AChWorks/rixa/issues/1) owns the documentation/bootstrap evidence. [#7](https://github.com/AChWorks/rixa/issues/7) owns native main-protection verification; it is separate governance work, not an excuse to invent CI checks or change visibility.
 
+## Foundation readiness before CMS runtime
+
+Prepare the concrete AChrix-owned slices before starting CMS runtime: optional address resolution (#4), measured resource configuration (#76), selected clean PNG/JPEG preparation (#77) and explicit private SVG attachments (#78). Consume only reviewed released APIs afterward. This order does not require whole #4 closure before its downstream real Rixa isolation/shared-update proof, and a Foundation measurement does not replace product/fleet evidence. Existing Core/Identity/Audit/Admin public contracts already cover the selected composition and fixed-grant starting flow; do not invent features or empty Modules as prerequisites.
+
 ## Foundation coordination
 
 | AChrix owner | Relationship |
 | --- | --- |
 | [#4 Multi-Site](https://github.com/AChWorks/achrix/issues/4) | Accepted optional reusable ownership in existing Foundation repository/Go module/shared release. Rixa #2 supplies its bounded real consumer contract, #3 supplies product proof; content/themes/publication stay here. |
-| [#76 resource configuration](https://github.com/AChWorks/achrix/issues/76) | Operator caps/defaults/admission require measured product bounds and explicit public configurability where needed. The linked AChrix Issue owns reusable implementation; Rixa #6 owns aggregate behavior. |
-| [#77 public image preparation/export](https://github.com/AChWorks/achrix/issues/77) | Rixa #2 established that private Read cannot supply public image publication. Resolve the explicit processing/privacy decision, then implement only the narrow Media seam; Rixa #5 owns artifact activation/withdrawal. |
+| [#76 resource configuration](https://github.com/AChWorks/achrix/issues/76) | Operator caps/defaults/admission require an initial bounded Foundation composition measurement and explicit public configurability where needed. The linked AChrix Issue owns that fixture and reusable implementation; Rixa #3/#6 later prove actual product/aggregate behavior. |
+| [#77 public image preparation/export](https://github.com/AChWorks/achrix/issues/77) | Rixa #2 established that private Read cannot supply public image publication. The owner selected clean PNG/JPEG representations with private originals; finalize and implement only the narrow Media seam; Rixa #5 owns artifact activation/withdrawal. |
+| [#78 private SVG](https://github.com/AChWorks/achrix/issues/78) | Explicit upload/private original attachment support; preserve existing default/common selection and no inline/public SVG permission. Consume a reviewed successor, not an API inferred from docs. |
 | [#50 Settings](https://github.com/AChWorks/achrix/issues/50) | Waits for concrete reusable application-level fields from the real editorial/configuration workflow; domain fields remain here. |
 | [#48 Search](https://github.com/AChWorks/achrix/issues/48) | No actual Rixa search flow has been selected; do not implement Search from the CMS label alone. |
 | [#5 Gateway Bridge](https://github.com/AChWorks/achrix/issues/5) | Future optional manual/AI publishing/management is desired. Ownership/packaging/security decision remains owner-gated; Gateway repository is outside scope. |

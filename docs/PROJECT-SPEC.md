@@ -38,6 +38,12 @@ Updates deliberately rebuild and validate a coherent product artifact; product e
 
 Optional Multi-Site is accepted in the existing AChrix repository/Go module/shared release. Its bounded real-consumer contract/proof is still required. No mandatory Core tenancy, new empty Module, separate repository/service or runtime plugin loader follows from that decision.
 
+## Media publication policy
+
+The owner selected bounded clean PNG/JPEG representations on 2026-10-04. Retain private originals; prepare a separate same-format representation under explicit exact-asset authorization, remove nonessential embedded metadata and specify orientation/color/animation/output/resource behavior before implementation. This is a deliberately narrow preparation flow; general resizing/conversion/transcoding and background processors remain deferred. Public activation, content references, withdrawal and retention stay Rixa-owned. [AChrix #77](https://github.com/AChWorks/achrix/issues/77) owns the exact reusable contract and implementation.
+
+SVG is an accepted explicitly selected private-attachment extension under [AChrix #78](https://github.com/AChWorks/achrix/issues/78). It is not available in published v0.2.0 and does not silently join the existing common/default upload selection. Structural admission and private attachment do not establish safe inline/public SVG. First public images remain PNG/JPEG; future public SVG needs a real passive publication profile and separate reviewed transport/resource contract.
+
 ## Public meaning, SEO and AI retrieval
 
 This requirement applies to the delivered public product, beyond AI-friendly code/project documentation or management APIs.
@@ -67,7 +73,7 @@ Use supported web standards/provider guidance; no separate universal AI schema/f
 | Topic | Preserved direction / execution condition |
 | --- | --- |
 | Custom roles and site users/registration | Future roles bundle capability/resource grants with bounded delegation/revocation/audit; site admins cannot grant global authority. First release uses fixed permissions and no public registration. |
-| Common Media attachments | Reuse the finite AChrix common upload profile; conversion/transcoding/extraction are not currently needed. Recognition is not safety/preview validation. Current SVG/SVGZ and other active formats are excluded; public images need their own safe publication seam. |
+| Common Media attachments | Reuse the finite AChrix common upload profile; conversion/transcoding/extraction are not currently needed. Recognition is not safety/preview validation. Published v0.2.0 excludes SVG/SVGZ; accepted explicit private SVG support is tracked separately in AChrix #78. Other active formats and SVGZ remain excluded. Public images use the selected clean PNG/JPEG seam; upload admission does not grant publication. |
 | Search / Settings / Notifications | Implement only a real search flow, concrete application-level settings or real delivery flow; do not create empty shared Modules. Product/domain settings remain product-owned. |
 | Commerce and larger CMS | Preserve isolated/extensible site ownership; no empty commerce Module, page builder, marketplace or WordPress feature-parity commitment. |
 | Gateway and AI content management | Desired optional installation/composition through normal permissions, supporting future manual/AI management. AChrix #5 still requires its separate ownership/packaging/security decision and real flow; Gateway-side work is out of this repository's authority. |

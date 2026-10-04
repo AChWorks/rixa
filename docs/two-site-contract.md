@@ -1,6 +1,6 @@
 # First Two-Site Consumer Contract
 
-This is the bounded technical contract for [Rixa #2](https://github.com/AChWorks/rixa/issues/2), under the accepted [product specification](PROJECT-SPEC.md) and [architecture](architecture.md). It describes future behavior, not a runnable implementation. GitHub owns remaining decisions/state; [AChrix #77](https://github.com/AChWorks/achrix/issues/77) owns the unresolved public-image policy. Do not silently select either option.
+This is the bounded technical contract for [Rixa #2](https://github.com/AChWorks/rixa/issues/2), under the accepted [product specification](PROJECT-SPEC.md) and [architecture](architecture.md). It describes future behavior, not a runnable implementation. GitHub owns remaining decisions/state; [AChrix #77](https://github.com/AChWorks/achrix/issues/77) owns the selected clean PNG/JPEG policy and its exact preparation contract; the owner accepted that policy on 2026-10-04. This document does not claim an implemented/released API.
 
 ## Source identity and coverage
 
@@ -15,7 +15,7 @@ Inspection uses published AChrix `v0.2.0` at `6624e4b40de33b92e3da0d187e10a667ca
 | [Admin](https://github.com/AChWorks/achrix/blob/6624e4b40de33b92e3da0d187e10a667ca798981/admin/admin.go), Identity/Media owning surfaces | Existing same-origin shell and private forms; typed product surfaces for real content/control operations | Navigation permission is not domain permission; no global account/site selector is supplied. |
 | [Media](https://github.com/AChWorks/achrix/blob/6624e4b40de33b92e3da0d187e10a667ca798981/media/media.go): `Create/List/Status/Read/Delete/Reconcile` | Private attachment admission, exact-asset reads and conditional deletion | Public image representation/export is absent: AChrix #77. |
 | No current Multi-Site package | Deterministic immutable address-to-site resolution is the bounded reusable need | AChrix #4; do not invent a callable API from an ownership label. |
-| Current database Module configuration | Fixed max four/min zero pools and existing finite work/hash/decoder admission | Validated operational tuning: AChrix #76, after actual initial measurements. |
+| Current database Module configuration | Fixed max four/min zero pools and existing finite work/hash/decoder admission | Validated operational tuning: AChrix #76 owns initial Foundation composition measurements, followed by actual Rixa resource proof. |
 
 The existing Go declarations own exact signatures. These proposed contracts do not add methods to a published version; consume the released extension only after its own validation/review/integration/release gates.
 
@@ -70,7 +70,7 @@ Explicit bounded migrations precede construction/activation. Construct selected 
 
 The first proof starts only declared active management compositions. Omitted features create no corresponding Module instance/pool/store/worker. Started-but-idle instances retain resources: minimum-zero pool configuration is neither zero connection count after startup nor hot unloading. Public artifact reads do not invoke these management Services.
 
-Two sites with Identity/Audit/Media and control Identity/Audit mean eight participating Module pools: fixed maxima could permit 32 connections in total, not 32 eagerly opened connections. Product persistence, migration/maintenance access and replicas are additional. Rixa #3 records an initial idle/demand sample; #6 owns aggregate budget/fairness/saturation/deadline/reclamation evidence. #76 receives exact missing knobs, not a speculative adaptive controller. No fixed fleet/site-count support is promised.
+Two sites with Identity/Audit/Media and control Identity/Audit mean eight participating Module pools: fixed maxima could permit 32 connections in total, not 32 eagerly opened connections. Product persistence, migration/maintenance access and replicas are additional. AChrix #76 owns the initial bounded Foundation composition measurement before tuning implementation, matching this selected two-site/control inventory without implementing CMS. Rixa #3 later records actual product idle/demand behavior; #6 owns aggregate budget/fairness/saturation/deadline/reclamation evidence. Fixture proof is not product/fleet proof. #76 receives exact missing knobs, not a speculative adaptive controller. No fixed fleet/site-count support is promised.
 
 Validate operator configuration before owned effects: unique hosts/site IDs; distinct exclusive absolute private roots; explicit least-privilege database/secret references; finite startup/shutdown, ingress, pending work and expensive computation budgets; selected features and exact dependency identities. Domain quotas and site appearance are separate from deployment secrets/security floors.
 
@@ -88,10 +88,10 @@ Correct/reroute/withdraw updates the active route/manifest coherently. Public se
 
 Original deletion is denied while retained content/public representations require it, unless an explicit domain operation first reconciles those relationships. The stock Media deletion surface must not bypass that product retention rule. Publication copies never mutate private originals. Site capture includes the relevant source, representations, manifests, identity/grant and runtime/key dependencies.
 
-## Public-image decision and release boundary
+## Accepted public-image policy and release boundary
 
-Media's existing `Read` remains an authenticated original attachment. No StorageRoot serving, guessed export, opaque-inline WebP/AVIF/SVG or read-to-publish permission is allowed. The concrete proposed clean representation versus original export policy and its tradeoffs live only in [AChrix #77](https://github.com/AChWorks/achrix/issues/77), pending owner decision. It changes processing/privacy scope and must be explicit before implementation.
+Media's existing `Read` remains an authenticated original attachment. No StorageRoot serving, guessed export, opaque-inline WebP/AVIF/SVG or read-to-publish permission is allowed. The owner selected bounded clean PNG/JPEG representations with private retained originals. [AChrix #77](https://github.com/AChWorks/achrix/issues/77) owns the exact format/metadata/orientation/color/animation/output/resource contract and separate exact-asset preparation authorization; it does not inherit publication rights from private Read. Ordinary unsupported profiles must fail preparation rather than silently change appearance. Public activation and retention stay product-owned.
 
 This decision needs no generic processor, video/document conversion, registry, queue or new repository. Other common attachments stay private in the first profile. Future formats get their own validity, metadata, appearance, work and compatibility contract.
 
-After the decision, update the affected product specification only for the accepted product-level change and finalize the smallest Media contract. Exact HIGH runtime candidates need independent read-only security/correctness review and applicable integration approval. New published APIs require a reviewed release before Rixa consumes them; neither these docs nor Foundation main update `v0.2.0`.
+Explicit private SVG admission is accepted under [AChrix #78](https://github.com/AChWorks/achrix/issues/78); first public publication still excludes SVG. The product specification now records the accepted narrow PNG/JPEG scope and private SVG extension. Finalize the smallest Media contract before implementation. Exact HIGH runtime candidates need independent read-only security/correctness review and applicable integration approval. New published APIs require a reviewed release before Rixa consumes them; neither these docs nor Foundation main update `v0.2.0`.

@@ -47,11 +47,11 @@ Apply [public SEO/AI meaning](PROJECT-SPEC.md#public-meaning-seo-and-ai-retrieva
 
 ## Media: attachment versus public representation
 
-[AChrix Media](https://github.com/AChWorks/achrix/blob/v0.2.0/media/README.md) owns a private authorized original-attachment library. Its default profile is PNG/JPEG; explicit common-profile opt-in includes finite common images, documents, archives/audio/video. It does not supply conversion, sanitization, safe preview or public static URLs. SVG/SVGZ/HTML/JavaScript/executables and explicit macro-enabled Office extensions are excluded. Non-PNG/JPEG images in the common profile remain opaque.
+[AChrix Media](https://github.com/AChWorks/achrix/blob/v0.2.0/media/README.md) owns a private authorized original-attachment library. Its default profile is PNG/JPEG; explicit common-profile opt-in includes finite common images, documents, archives/audio/video. It does not supply conversion, sanitization, safe preview or public static URLs. Published v0.2.0 excludes SVG/SVGZ/HTML/JavaScript/executables and explicit macro-enabled Office extensions. The accepted successor SVG slice in [AChrix #78](https://github.com/AChWorks/achrix/issues/78) is explicit private attachment admission; it preserves the existing default/common selection and grants no rendering/publication permission. Non-PNG/JPEG images in the common profile remain opaque.
 
 Collection discovery, original byte read, mutation and public publication permissions are distinct. Uploader identity/opaque IDs do not grant ownership. Common upload recognition is not malware scanning, complete validity or safety for public inline use.
 
-Never expose private StorageRoot or change authenticated attachment headers into public inline serving by assumption. The source-backed consumer investigation identified the missing public representation/export contract, owned by [AChrix #77](https://github.com/AChWorks/achrix/issues/77). Its concrete processing/privacy policy requires owner decision before implementation. Public image support is blocked on that contract, not achieved by documenting a URL. Conversion remains deferred; do not build a processor for a hypothetical requirement.
+Never expose private StorageRoot or change authenticated attachment headers into public inline serving by assumption. The source-backed consumer investigation identified the missing public representation/export contract, owned by [AChrix #77](https://github.com/AChWorks/achrix/issues/77). The owner selected bounded clean PNG/JPEG representations with retained private originals on 2026-10-04. Its exact metadata/orientation/color/animation/output/resource contract and reviewed released API are still required before runtime consumption. Public image support is not achieved by documenting a URL. General conversion remains deferred; only the accepted narrow same-format preparation is in scope.
 
 Content references, publication copies and deletion/retention must agree. A private original may need to remain retained independently of a published representation; withdrawal/export cleanup and stale artifact behavior require explicit supported semantics.
 
@@ -65,7 +65,7 @@ Prefer native demand-based mechanisms and explicit finite operator ceilings. Rai
 
 Typed validated operator tuning should preserve current defaults and compatibility, reject invalid/unbounded input and define construction/activation semantics. Pool and expensive-work admission must be considered together. Domain quotas may later expose an authorized settings workflow; secrets, authentication floors, protocol/storage invariants and raw deployment budgets are not site-editor settings.
 
-The real consumer proof owns initial measurements and aggregate limits; [AChrix #76](https://github.com/AChWorks/achrix/issues/76) owns proven missing reusable configuration seams. [#6](https://github.com/AChWorks/rixa/issues/6) owns product evidence and links its Foundation dependency.
+[AChrix #76](https://github.com/AChWorks/achrix/issues/76) owns the initial bounded Foundation composition measurement and proven missing reusable configuration seams. Rixa #3/#6 later own actual product and aggregate evidence; a Foundation fixture establishes no fleet or product-capacity promise.
 
 ## Supported starting development profile
 
@@ -77,7 +77,7 @@ No production hosting, RPO/RTO, live upgrade or off-host recovery profile is est
 
 ## Dependency upgrades and extension ownership
 
-Initial executable consumption pins `github.com/AChWorks/achrix@v0.2.0` with its own go.mod/go.sum. Do not use replacement workspaces, copied Core runtime, private imports or edited dependency caches. Official packages in one Foundation Go module share a compatible version; retain source-backed product/Core/Module/migration identities.
+The inspected starting baseline is `github.com/AChWorks/achrix@v0.2.0`; it lacks the required resolver. Initial executable consumption must pin the reviewed released successor supplying its required Foundation slices, with product-owned go.mod/go.sum. Do not use replacement workspaces, copied Core runtime, private imports or edited dependency caches. Official packages in one Foundation Go module share a compatible version; retain source-backed product/Core/Module/migration identities.
 
 To extend, use public interfaces/typed collaborators. Keep content/theme/product policy local. When no public seam fits, record a concrete minimal AChrix contract gap and obtain a compatible released dependency before claiming it is available. Adding docs to Foundation main does not update an immutable release or a deployed product.
 
@@ -95,4 +95,4 @@ This limited independence proof does not activate paused [AChrix #19](https://gi
 
 ## Open coordination
 
-The detailed consumer contract is [two-site-contract.md](two-site-contract.md); its unresolved public-image decision and executable proof remain GitHub-owned work, linked by [Roadmap](roadmap.md). Koinon defines ecosystem discovery/contract guidance but is not a runtime dependency or writable target. Gateway-side work remains separately owned; optional future integration still needs AChrix #5's owner/security decision.
+The detailed consumer contract is [two-site-contract.md](two-site-contract.md); its remaining exact public-image preparation contract/released API and executable product proof remain GitHub-owned work, linked by [Roadmap](roadmap.md). Koinon defines ecosystem discovery/contract guidance but is not a runtime dependency or writable target. Gateway-side work remains separately owned; optional future integration still needs AChrix #5's owner/security decision.
