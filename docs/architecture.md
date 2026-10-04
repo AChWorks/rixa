@@ -1,6 +1,6 @@
 # Rixa Architecture and Consumption
 
-This document owns the accepted ownership model and starting technical profile. It is not an implemented API inventory. Resolve the bounded consumer contract in [#2](https://github.com/AChWorks/rixa/issues/2) before shared runtime implementation.
+This document owns the accepted ownership model and starting technical profile. It is not an implemented API inventory. The [two-site consumer contract](two-site-contract.md) records the source-backed request/authorization/composition matrix and bounded Foundation needs for [#2](https://github.com/AChWorks/rixa/issues/2). It is a design contract, not implemented runtime.
 
 ## Ownership and first shape
 
@@ -19,7 +19,7 @@ The UI is deliberately small: reuse the Admin shell/owning Module surfaces where
 
 A request selects an allowlisted configured site through trusted ingress/host routing. An arbitrary Host, forwarded header, site ID, path, asset ID or caller-supplied role cannot establish authorization. Unknown/disabled sites fail closed. Product bindings carry the verified site scope into every operation and owned cache/job/asset path.
 
-Infrastructure operators and site-owned identities/grants are distinct. The first profile needs fixed infrastructure administrator and site administrator permissions; not a universal RBAC/ABAC engine. Define the actual authentication/control-store and site-store composition in #2, including principal origin, session scope/revocation and delegated authority, before code.
+Infrastructure operators and site-owned identities/grants are distinct. The first profile needs fixed infrastructure administrator and site administrator permissions; not a universal RBAC/ABAC engine. The consumer contract separates control Identity/Audit from site-owned Identity/Audit and uses distinct exact HTTPS hostnames, verified principal origin and fixed bounded delegation. Path prefixes or different ports cannot isolate the existing host-only root session cookie.
 
 Capabilities identify behavior; permissions/grants allow a principal to act on a resource/scope; roles bundle those grants. Check capabilities/resources, not translated role labels. Site administrators cannot assign global authority or grant rights beyond their delegation. A future custom-role flow must not silently inherit new capabilities.
 
@@ -51,7 +51,7 @@ Apply [public SEO/AI meaning](PROJECT-SPEC.md#public-meaning-seo-and-ai-retrieva
 
 Collection discovery, original byte read, mutation and public publication permissions are distinct. Uploader identity/opaque IDs do not grant ownership. Common upload recognition is not malware scanning, complete validity or safety for public inline use.
 
-Never expose private StorageRoot or change authenticated attachment headers into public inline serving by assumption. #2 must resolve a supported product publication/export/representation seam, requesting a minimal reusable Foundation extension only if existing public contracts cannot satisfy it. Public image support is blocked on that contract, not achieved by documenting a URL. Conversion remains deferred; do not build a processor for a hypothetical requirement.
+Never expose private StorageRoot or change authenticated attachment headers into public inline serving by assumption. The source-backed consumer investigation identified the missing public representation/export contract, owned by [AChrix #77](https://github.com/AChWorks/achrix/issues/77). Its concrete processing/privacy policy requires owner decision before implementation. Public image support is blocked on that contract, not achieved by documenting a URL. Conversion remains deferred; do not build a processor for a hypothetical requirement.
 
 Content references, publication copies and deletion/retention must agree. A private original may need to remain retained independently of a published representation; withdrawal/export cleanup and stale artifact behavior require explicit supported semantics.
 
@@ -95,4 +95,4 @@ This limited independence proof does not activate paused [AChrix #19](https://gi
 
 ## Open coordination
 
-The actual consumer contract, public Media seam and executable proof remain GitHub-owned work, linked by [Roadmap](roadmap.md). Koinon defines ecosystem discovery/contract guidance but is not a runtime dependency or writable target. Gateway-side work remains separately owned; optional future integration still needs AChrix #5's owner/security decision.
+The detailed consumer contract is [two-site-contract.md](two-site-contract.md); its unresolved public-image decision and executable proof remain GitHub-owned work, linked by [Roadmap](roadmap.md). Koinon defines ecosystem discovery/contract guidance but is not a runtime dependency or writable target. Gateway-side work remains separately owned; optional future integration still needs AChrix #5's owner/security decision.

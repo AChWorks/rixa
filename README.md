@@ -20,7 +20,7 @@ Start from the relevant Issue and [Contributing](CONTRIBUTING.md). The first exe
 | Question | Authoritative source |
 | --- | --- |
 | Purpose, users, accepted scope, success and non-goals | [Product specification](docs/PROJECT-SPEC.md) |
-| Composition, site isolation, publication and dependency upgrade | [Architecture](docs/architecture.md) |
+| Composition, site isolation, publication and dependency upgrade | [Architecture](docs/architecture.md), [two-site contract](docs/two-site-contract.md) |
 | Outcome order and Foundation coordination | [Roadmap](docs/roadmap.md) |
 | Development, validation, integration and secrets | [Contributing](CONTRIBUTING.md), [AGENTS](AGENTS.md) |
 | Live work, dependencies, review, validation and delivery | [Issues](https://github.com/AChWorks/rixa/issues), [milestone](https://github.com/AChWorks/rixa/milestone/1), [PRs](https://github.com/AChWorks/rixa/pulls), Git/CI, Releases |

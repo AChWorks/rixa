@@ -18,7 +18,7 @@ This is the stable outcome order, not live status. [GitHub Issues](https://githu
 | --- | --- |
 | [#4 Multi-Site](https://github.com/AChWorks/achrix/issues/4) | Accepted optional reusable ownership in existing Foundation repository/Go module/shared release. Rixa #2 supplies its bounded real consumer contract, #3 supplies product proof; content/themes/publication stay here. |
 | [#76 resource configuration](https://github.com/AChWorks/achrix/issues/76) | Operator caps/defaults/admission require measured product bounds and explicit public configurability where needed. The linked AChrix Issue owns reusable implementation; Rixa #6 owns aggregate behavior. |
-| Media/public image gap | Resolve in Rixa #2/#5 using existing public seams first. Open/reuse a narrow AChrix Issue only for a proven reusable gap; no assumed public URL service. |
+| [#77 public image preparation/export](https://github.com/AChWorks/achrix/issues/77) | Rixa #2 established that private Read cannot supply public image publication. Resolve the explicit processing/privacy decision, then implement only the narrow Media seam; Rixa #5 owns artifact activation/withdrawal. |
 | [#50 Settings](https://github.com/AChWorks/achrix/issues/50) | Waits for concrete reusable application-level fields from the real editorial/configuration workflow; domain fields remain here. |
 | [#48 Search](https://github.com/AChWorks/achrix/issues/48) | No actual Rixa search flow has been selected; do not implement Search from the CMS label alone. |
 | [#5 Gateway Bridge](https://github.com/AChWorks/achrix/issues/5) | Future optional manual/AI publishing/management is desired. Ownership/packaging/security decision remains owner-gated; Gateway repository is outside scope. |
