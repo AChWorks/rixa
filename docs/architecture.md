@@ -29,7 +29,7 @@ Start the proof with one PostgreSQL installation and separately addressable site
 
 Each site owns content, local accounts/sessions when enabled, authorization state, Media metadata/originals and future domain schemas. Identity and its Audit stay in the same supported database/transaction boundary. Shared control-plane/operator/site-domain mapping data has declared dependencies; a portable site must not secretly require source-installation global account IDs.
 
-AChrix Application composition permits one provider per capability ID per Application. Use explicit site-bound compositions for single-provider Modules; do not duplicate providers in one Application, tenant-filter SQL by a path prefix, or change qualified tables by search_path. Reusable address-resolution semantics belong to the [AChrix Multi-Site contract](https://github.com/AChWorks/achrix/blob/main/multisite/README.md), not a copied product tenancy framework.
+AChrix Application composition permits one provider per capability ID per Application. Use explicit site-bound compositions for single-provider Modules; do not duplicate providers in one Application, tenant-filter SQL by a path prefix, or change qualified tables by search_path. Reusable address-resolution semantics belong to the [AChrix Multi-Site contract](https://github.com/AChWorks/achrix/blob/HEAD/multisite/README.md), not a copied product tenancy framework.
 
 Single-site composition remains supported without Multi-Site. Omit unneeded imports/runtime constructors where useful. Packaged-but-disabled code does not mean independent package versions, hot unloading, deleted data or bypassed dependencies. Changes to the active graph normally construct/validate/activate a new Application instance/artifact. Deferred activation is earned by measured resource savings and must retain bounded readiness, draining and cleanup; the required AChrix surface does not imply a generic runtime feature loader.
 
@@ -47,7 +47,7 @@ Apply [public SEO/AI meaning](PROJECT-SPEC.md#public-meaning-seo-and-ai-retrieva
 
 ## Media: attachment versus public representation
 
-[AChrix Media](https://github.com/AChWorks/achrix/blob/main/media/README.md) owns a private authorized original-attachment library. Its default profile is PNG/JPEG; explicit common-profile opt-in includes finite common images, documents, archives/audio/video. It does not supply general conversion, sanitization, safe preview or public static URLs. The reviewed public Media surface includes explicit private SVG opt-in while preserving the existing default/common selection; SVGZ/HTML/JavaScript/executables and explicit macro-enabled Office extensions remain excluded, and private SVG grants no rendering/publication permission. Non-PNG/JPEG images in the common profile remain opaque.
+[AChrix Media](https://github.com/AChWorks/achrix/blob/HEAD/media/README.md) owns a private authorized original-attachment library. Its default profile is PNG/JPEG; explicit common-profile opt-in includes finite common images, documents, archives/audio/video. It does not supply general conversion, sanitization, safe preview or public static URLs. The reviewed public Media surface includes explicit private SVG opt-in while preserving the existing default/common selection; SVGZ/HTML/JavaScript/executables and explicit macro-enabled Office extensions remain excluded, and private SVG grants no rendering/publication permission. Non-PNG/JPEG images in the common profile remain opaque.
 
 Collection discovery, original byte read, mutation and public publication permissions are distinct. Uploader identity/opaque IDs do not grant ownership. Common upload recognition is not malware scanning, complete validity or safety for public inline use.
 
@@ -69,7 +69,7 @@ AChrix exposes instance-owned typed `MaxConns`/`MaxOperations` with preserved fi
 
 ## Supported starting development profile
 
-The selected Foundation developer line is Go 1.27.1, PostgreSQL 18 UTF-8, Linux amd64 and private local filesystem storage with its required durability/locking semantics. Follow the [owning supported matrix](https://github.com/AChWorks/achrix/blob/main/docs/operations/operability-performance.md#supported-environment), not an invented broader hosting promise. First runnable Rixa will verify its product-specific profile.
+Executable Rixa must use the selected Foundation dependency's [supported environment](https://github.com/AChWorks/achrix/blob/HEAD/docs/operations/operability-performance.md#supported-environment) and the required private-filesystem durability/locking semantics, rather than copying those version pins into this product architecture. Rixa verifies its own product-specific profile through executable evidence.
 
 Use verified PostgreSQL TLS for remote hosts, protected secrets and trusted HTTPS ingress. Explicit migrations run with deadlines before activation; request handling/startup does not install schema. Preserve immutable migration identities and retained relationships. Readiness precedes ingress; ingress/domain draining precedes Module shutdown. Context cancellation does not forcibly interrupt arbitrary blocking I/O.
 
