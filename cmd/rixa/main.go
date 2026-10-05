@@ -83,7 +83,7 @@ func run(args []string) error {
 		if err != nil {
 			return err
 		}
-		resolved, err := config.ResolveRuntime(os.LookupEnv)
+		resolved, err := config.ResolveRuntime(context.Background(), os.LookupEnv)
 		if err != nil {
 			return err
 		}

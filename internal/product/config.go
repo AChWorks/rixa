@@ -4,6 +4,7 @@ package product
 
 import (
 	"bytes"
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"errors"
@@ -18,11 +19,11 @@ import (
 	"time"
 
 	"github.com/AChWorks/achrix"
-	"github.com/jackc/pgx/v5"
 )
 
 var (
 	ErrConfiguration = errors.New("invalid rixa configuration")
+	ErrUnavailable   = errors.New("rixa unavailable")
 
 	siteIDSyntax    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
 	envNameSyntax   = regexp.MustCompile(`^[A-Z][A-Z0-9_]{1,127}$`)
@@ -156,7 +157,7 @@ func (c Config) validateStructure() error {
 	if c.Language != "en" && c.Language != "fa" {
 		return fmt.Errorf("%w: language", ErrConfiguration)
 	}
-	controlAuthority, err := originAuthority(c.Control.Origin)
+	controlAuthority, controlHostname, err := originParts(c.Control.Origin)
 	if err != nil || !envNameSyntax.MatchString(c.Control.DatabaseEnv) {
 		return fmt.Errorf("%w: control", ErrConfiguration)
 	}
@@ -168,6 +169,7 @@ func (c Config) validateStructure() error {
 	}
 
 	authorities := map[string]bool{controlAuthority: true}
+	hostnames := map[string]bool{controlHostname: true}
 	ids := make(map[string]bool, len(c.Sites))
 	dbEnvs := map[string]bool{c.Control.DatabaseEnv: true}
 	roots := make(map[string]bool, len(c.Sites))
@@ -176,11 +178,12 @@ func (c Config) validateStructure() error {
 			return fmt.Errorf("%w: site identity", ErrConfiguration)
 		}
 		ids[site.ID] = true
-		authority, e := originAuthority(site.Origin)
-		if e != nil || authorities[authority] {
+		authority, hostname, e := originParts(site.Origin)
+		if e != nil || authorities[authority] || hostnames[hostname] {
 			return fmt.Errorf("%w: site origin", ErrConfiguration)
 		}
 		authorities[authority] = true
+		hostnames[hostname] = true
 		if !envNameSyntax.MatchString(site.DatabaseEnv) || dbEnvs[site.DatabaseEnv] {
 			return fmt.Errorf("%w: site database reference", ErrConfiguration)
 		}
@@ -196,15 +199,24 @@ func (c Config) validateStructure() error {
 	return nil
 }
 
-func originAuthority(raw string) (string, error) {
+func originParts(raw string) (authority, hostname string, err error) {
 	u, err := url.Parse(raw)
 	if err != nil || u == nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.Path != "" || u.RawPath != "" || u.RawQuery != "" || u.Fragment != "" || u.Opaque != "" || u.String() != raw {
-		return "", ErrConfiguration
+		return "", "", ErrConfiguration
 	}
 	if strings.ContainsAny(u.Host, "\r\n\t ") {
-		return "", ErrConfiguration
+		return "", "", ErrConfiguration
 	}
-	return u.Host, nil
+	hostname = strings.ToLower(u.Hostname())
+	if hostname == "" {
+		return "", "", ErrConfiguration
+	}
+	return u.Host, hostname, nil
+}
+
+func originAuthority(raw string) (string, error) {
+	authority, _, err := originParts(raw)
+	return authority, err
 }
 
 func (c Config) ValidateRuntimeFiles() error {
@@ -254,7 +266,13 @@ func loopbackHost(host string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
-func (c Config) ResolveRuntime(getenv func(string) (string, bool)) (RuntimeConfig, error) {
+func (c Config) ResolveRuntime(parent context.Context, getenv func(string) (string, bool)) (RuntimeConfig, error) {
+	return c.resolveRuntime(parent, getenv, validateRuntimeTargets)
+}
+
+type runtimeValidator func(context.Context, *RuntimeConfig) error
+
+func (c Config) resolveRuntime(parent context.Context, getenv func(string) (string, bool), validate runtimeValidator) (RuntimeConfig, error) {
 	if getenv == nil {
 		getenv = os.LookupEnv
 	}
@@ -265,11 +283,6 @@ func (c Config) ResolveRuntime(getenv func(string) (string, bool)) (RuntimeConfi
 	if !ok || controlDSN == "" {
 		return RuntimeConfig{}, fmt.Errorf("%w: missing database secret %s", ErrConfiguration, c.Control.DatabaseEnv)
 	}
-	controlIdentity, err := databaseIdentity(controlDSN)
-	if err != nil {
-		return RuntimeConfig{}, fmt.Errorf("%w: database secret %s", ErrConfiguration, c.Control.DatabaseEnv)
-	}
-	seenDB := map[string]string{controlIdentity: c.Control.DatabaseEnv}
 	result := RuntimeConfig{
 		Config:  c,
 		Control: ResolvedControl{ControlConfig: c.Control, DSN: controlDSN},
@@ -282,45 +295,19 @@ func (c Config) ResolveRuntime(getenv func(string) (string, bool)) (RuntimeConfi
 			if !exists || dsn == "" {
 				return RuntimeConfig{}, fmt.Errorf("%w: missing database secret %s", ErrConfiguration, site.DatabaseEnv)
 			}
-			id, e := databaseIdentity(dsn)
-			if e != nil {
-				return RuntimeConfig{}, fmt.Errorf("%w: database secret %s", ErrConfiguration, site.DatabaseEnv)
-			}
-			if previous, duplicate := seenDB[id]; duplicate {
-				return RuntimeConfig{}, fmt.Errorf("%w: %s and %s resolve to the same database", ErrConfiguration, previous, site.DatabaseEnv)
-			}
-			seenDB[id] = site.DatabaseEnv
-			if e = validatePrivateRoot(site.MediaRoot); e != nil {
-				return RuntimeConfig{}, fmt.Errorf("%w: media root for %s", ErrConfiguration, site.ID)
-			}
 			resolved.DSN = dsn
 		}
 		result.Sites = append(result.Sites, resolved)
 	}
+	if validate != nil {
+		if err := validate(parent, &result); err != nil {
+			return RuntimeConfig{}, err
+		}
+	}
 	return result, nil
 }
 
-func validatePrivateRoot(path string) error {
-	info, err := os.Lstat(path)
-	if err != nil || !info.IsDir() {
-		return ErrConfiguration
-	}
-	// Group/other access would undermine the product-owned private root boundary.
-	if info.Mode().Perm()&0o077 != 0 {
-		return ErrConfiguration
-	}
-	return nil
-}
-
-func databaseIdentity(dsn string) (string, error) {
-	cfg, err := pgx.ParseConfig(dsn)
-	if err != nil || cfg == nil || cfg.Host == "" || cfg.Database == "" || cfg.User == "" {
-		return "", ErrConfiguration
-	}
-	return fmt.Sprintf("%s|%d|%s", strings.ToLower(cfg.Host), cfg.Port, cfg.Database), nil
-}
-
-func (c Config) DatabaseTargets(getenv func(string) (string, bool)) ([]ResolvedDatabase, error) {
+func (c Config) DatabaseTargets(parent context.Context, getenv func(string) (string, bool)) ([]ResolvedDatabase, error) {
 	if getenv == nil {
 		getenv = os.LookupEnv
 	}
@@ -330,12 +317,6 @@ func (c Config) DatabaseTargets(getenv func(string) (string, bool)) ([]ResolvedD
 		return nil, fmt.Errorf("%w: missing database secret %s", ErrConfiguration, c.Control.DatabaseEnv)
 	}
 	targets = append(targets, ResolvedDatabase{Kind: DatabaseControl, ID: "control", DSN: control})
-	seen := make(map[string]string, len(c.Sites)+1)
-	id, err := databaseIdentity(control)
-	if err != nil {
-		return nil, fmt.Errorf("%w: database secret %s", ErrConfiguration, c.Control.DatabaseEnv)
-	}
-	seen[id] = c.Control.DatabaseEnv
 	for _, site := range c.Sites {
 		if site.Disabled {
 			continue
@@ -344,15 +325,10 @@ func (c Config) DatabaseTargets(getenv func(string) (string, bool)) ([]ResolvedD
 		if !exists || dsn == "" {
 			return nil, fmt.Errorf("%w: missing database secret %s", ErrConfiguration, site.DatabaseEnv)
 		}
-		dbID, e := databaseIdentity(dsn)
-		if e != nil {
-			return nil, fmt.Errorf("%w: database secret %s", ErrConfiguration, site.DatabaseEnv)
-		}
-		if previous, duplicate := seen[dbID]; duplicate {
-			return nil, fmt.Errorf("%w: %s and %s resolve to the same database", ErrConfiguration, previous, site.DatabaseEnv)
-		}
-		seen[dbID] = site.DatabaseEnv
 		targets = append(targets, ResolvedDatabase{Kind: DatabaseSite, ID: site.ID, DSN: dsn})
+	}
+	if err := validateDatabaseTargets(parent, targets); err != nil {
+		return nil, err
 	}
 	return targets, nil
 }

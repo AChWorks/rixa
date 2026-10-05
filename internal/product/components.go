@@ -37,6 +37,9 @@ type ControlRuntime struct {
 	Identity       *identity.Service
 	Handler        http.Handler
 	AdminPrincipal achrix.Principal
+
+	web           *identity.Web
+	authenticator shell.Authenticator
 }
 
 type routerRuntime struct {
@@ -50,10 +53,11 @@ type Runtime struct {
 	Sites   map[string]*SiteRuntime
 	Handler http.Handler
 
-	router       *routerRuntime
-	applications []*achrix.Application
-	mu           sync.Mutex
-	started      bool
+	router         *routerRuntime
+	controlService *ControlService
+	applications   []*achrix.Application
+	mu             sync.Mutex
+	started        bool
 }
 
 func BuildRuntime(config RuntimeConfig, logger *slog.Logger) (*Runtime, error) {
@@ -111,6 +115,18 @@ func BuildRuntime(config RuntimeConfig, logger *slog.Logger) (*Runtime, error) {
 		r.router = router
 		r.applications = append(r.applications, router.app)
 	}
+	r.controlService = &ControlService{control: control, sites: r.Sites}
+	controlSurface := newControlSurface(config.Config.Sites, r.controlService)
+	controlShell, err := shell.New(
+		shell.Config{Origin: config.Control.Origin, AuthPath: "/auth", Language: config.Language},
+		control.authenticator,
+		control.App,
+		controlSurface,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("control admin: %w", err)
+	}
+	control.Handler = managementHandler(control.web, controlShell)
 	r.Handler = newIngressHandler(r)
 	return r, nil
 }
@@ -151,21 +167,12 @@ func buildControl(config RuntimeConfig, adminPrincipal achrix.Principal, readabl
 	if err != nil {
 		return nil, fmt.Errorf("control authenticator: %w", err)
 	}
-	inventory := newInventorySurface(config.Config.Sites)
-	adminShell, err := shell.New(
-		shell.Config{Origin: config.Control.Origin, AuthPath: "/auth", Language: config.Language},
-		authenticator,
-		app,
-		inventory,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("control admin: %w", err)
-	}
 	return &ControlRuntime{
 		App:            app,
 		Identity:       identityService,
-		Handler:        managementHandler(web, adminShell),
 		AdminPrincipal: adminPrincipal,
+		web:            web,
+		authenticator:  authenticator,
 	}, nil
 }
 

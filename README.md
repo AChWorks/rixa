@@ -19,7 +19,7 @@ Start from the relevant Issue and [Contributing](CONTRIBUTING.md). Use only buil
 
 The first executable slice provides an explicitly migrated management runtime for control administration plus isolated site administration. It is a development profile, not a production distribution or completed CMS.
 
-Use [the example configuration](config/rixa.example.json) as a starting point. Configuration stores only environment-variable names for database credentials; keep real DSNs and bootstrap passwords outside Git. Each enabled site requires its own database and an existing exclusive private Media directory with no group/other access. Runtime TLS uses the exact configured HTTPS origins and a trusted certificate/key pair. The current development listener is deliberately limited to loopback.
+Use [the example configuration](config/rixa.example.json) as a starting point. Configuration stores only environment-variable names for database credentials; keep real DSNs and bootstrap passwords outside Git. Control and every declared site require distinct HTTPS **hostnames**; changing only the port is not a separate browser authentication boundary. Each enabled site requires its own PostgreSQL database and an existing exclusive private Media directory. Runtime preflight connects to each selected database and compares the PostgreSQL system identity plus database OID, so equivalent endpoint aliases cannot collapse site isolation. Media roots must be real, symlink-free, non-overlapping `0700` directories. Runtime TLS uses the exact configured HTTPS authorities and a trusted certificate/key pair. The current development listener is deliberately limited to loopback.
 
 The supported operator sequence is:
 
@@ -46,7 +46,7 @@ go run ./cmd/rixa check --config /absolute/path/to/rixa.json
 go run ./cmd/rixa run --config /absolute/path/to/rixa.json
 ```
 
-A single declared site omits the optional Multi-Site resolver. Disabled declared sites keep their configuration but do not resolve database secrets or construct Identity/Audit/Media runtime resources. Control and site sessions remain distinct; forwarded headers, raw site IDs and caller-supplied principals never establish authority.
+A single declared site omits the optional Multi-Site resolver. Disabled declared sites keep their configuration but do not resolve database secrets or construct Identity/Audit/Media runtime resources. Control and site sessions remain distinct; forwarded headers, raw site IDs and caller-supplied principals never establish authority. After signing in to the control origin, the `Sites` administration surface can create an account in an enabled declared site. The surface derives the actor only from the authenticated control session, then `ControlService` re-authorizes the site target and enters that site's normal Application policy using the bounded site operator principal.
 
 The exact AChrix dependency identity is machine-owned by `achworks.yaml`, `go.mod` and `go.sum`. The runtime CI verifies ordinary checksum-backed module consumption with no `replace` or `go.work`, then runs the real PostgreSQL/isolation/TLS lifecycle proof.
 

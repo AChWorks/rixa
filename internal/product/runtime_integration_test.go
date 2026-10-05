@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"image"
@@ -23,7 +24,14 @@ import (
 	"time"
 
 	"github.com/AChWorks/achrix"
+	"github.com/AChWorks/achrix/identity"
 	"github.com/jackc/pgx/v5"
+)
+
+const (
+	testControlPassword = "A-Strong-Control-Password-2026!"
+	testSiteAPassword   = "A-Strong-Site-A-Password-2026!"
+	testSiteBPassword   = "A-Strong-Site-B-Password-2026!"
 )
 
 func TestRuntimeIsolationLifecycleAndTLSIngress(t *testing.T) {
@@ -80,18 +88,27 @@ func TestRuntimeIsolationLifecycleAndTLSIngress(t *testing.T) {
 	}
 	getenv := mapLookup(secrets)
 
+	aliasSecrets := map[string]string{
+		"RIXA_TEST_CONTROL": dsns["control"],
+		"RIXA_TEST_A":       dsnHostAlias(t, dsns["control"], "localhost"),
+		"RIXA_TEST_B":       dsns["b"],
+	}
+	if err := Migrate(ctx, config, mapLookup(aliasSecrets)); !errors.Is(err, ErrConfiguration) {
+		t.Fatalf("equivalent PostgreSQL endpoint aliases were not rejected before migration effects: %v", err)
+	}
+
 	if err := Migrate(ctx, config, getenv); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	controlBootstrap, err := BootstrapAdmin(ctx, config, "control", "control-admin", "A-Strong-Control-Password-2026!", getenv, nil)
+	controlBootstrap, err := BootstrapAdmin(ctx, config, "control", "control-admin", testControlPassword, getenv, nil)
 	if err != nil {
 		t.Fatalf("bootstrap control: %v", err)
 	}
-	aBootstrap, err := BootstrapAdmin(ctx, config, "site:site-a", "site-a-admin", "A-Strong-Site-A-Password-2026!", getenv, nil)
+	aBootstrap, err := BootstrapAdmin(ctx, config, "site:site-a", "site-a-admin", testSiteAPassword, getenv, nil)
 	if err != nil {
 		t.Fatalf("bootstrap site A: %v", err)
 	}
-	bBootstrap, err := BootstrapAdmin(ctx, config, "site:site-b", "site-b-admin", "A-Strong-Site-B-Password-2026!", getenv, nil)
+	bBootstrap, err := BootstrapAdmin(ctx, config, "site:site-b", "site-b-admin", testSiteBPassword, getenv, nil)
 	if err != nil {
 		t.Fatalf("bootstrap site B: %v", err)
 	}
@@ -103,7 +120,7 @@ func TestRuntimeIsolationLifecycleAndTLSIngress(t *testing.T) {
 	config.Sites[0].AdminPrincipal = aBootstrap.Account.ID
 	config.Sites[1].AdminPrincipal = bBootstrap.Account.ID
 
-	resolved, err := config.ResolveRuntime(getenv)
+	resolved, err := config.ResolveRuntime(ctx, getenv)
 	if err != nil {
 		t.Fatalf("resolve runtime: %v", err)
 	}
@@ -206,7 +223,7 @@ func TestRuntimeIsolationLifecycleAndTLSIngress(t *testing.T) {
 
 	singleConfig := config
 	singleConfig.Sites = append([]SiteConfig(nil), config.Sites[:1]...)
-	singleResolved, err := singleConfig.ResolveRuntime(getenv)
+	singleResolved, err := singleConfig.ResolveRuntime(ctx, getenv)
 	if err != nil {
 		t.Fatalf("single resolve: %v", err)
 	}
@@ -276,7 +293,7 @@ func testTrustedTLSIngress(t *testing.T, parent context.Context, config Config, 
 	})
 	config.TLS = TLSConfig{CertFile: cert, KeyFile: key}
 
-	resolved, err := config.ResolveRuntime(getenv)
+	resolved, err := config.ResolveRuntime(parent, getenv)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -301,20 +318,29 @@ func testTrustedTLSIngress(t *testing.T, parent context.Context, config Config, 
 			return http.ErrUseLastResponse
 		},
 	}
-	request := func(host, path string, forwarded bool) (*http.Response, error) {
-		req, e := http.NewRequestWithContext(parent, http.MethodGet, "https://"+net.JoinHostPort(host, strconv.Itoa(port))+path, nil)
+	request := func(host, method, path string, body []byte, headers map[string]string, cookie *http.Cookie) (*http.Response, error) {
+		var input *bytes.Reader
+		if body == nil {
+			input = bytes.NewReader(nil)
+		} else {
+			input = bytes.NewReader(body)
+		}
+		req, e := http.NewRequestWithContext(parent, method, "https://"+net.JoinHostPort(host, strconv.Itoa(port))+path, input)
 		if e != nil {
 			return nil, e
 		}
-		if forwarded {
-			req.Header.Set("X-Forwarded-Host", net.JoinHostPort("a.rixa.test", strconv.Itoa(port)))
+		for key, value := range headers {
+			req.Header.Set(key, value)
+		}
+		if cookie != nil {
+			req.AddCookie(cookie)
 		}
 		return client.Do(req)
 	}
 
 	deadline := time.Now().Add(8 * time.Second)
 	for {
-		response, requestErr := request("a.rixa.test", "/admin/login", false)
+		response, requestErr := request("a.rixa.test", http.MethodGet, "/admin/login", nil, nil, nil)
 		if requestErr == nil {
 			_ = response.Body.Close()
 			if response.StatusCode != http.StatusOK {
@@ -340,7 +366,11 @@ func testTrustedTLSIngress(t *testing.T, parent context.Context, config Config, 
 		{host: "unknown.rixa.test", status: http.StatusNotFound},
 		{host: "unknown.rixa.test", forwarded: true, status: http.StatusNotFound},
 	} {
-		response, requestErr := request(test.host, "/admin/login", test.forwarded)
+		headers := map[string]string{}
+		if test.forwarded {
+			headers["X-Forwarded-Host"] = net.JoinHostPort("a.rixa.test", strconv.Itoa(port))
+		}
+		response, requestErr := request(test.host, http.MethodGet, "/admin/login", nil, headers, nil)
 		if requestErr != nil {
 			cancel()
 			t.Fatalf("%s request: %v", test.host, requestErr)
@@ -350,6 +380,128 @@ func testTrustedTLSIngress(t *testing.T, parent context.Context, config Config, 
 			cancel()
 			t.Fatalf("%s status=%d want=%d", test.host, response.StatusCode, test.status)
 		}
+	}
+
+	type authenticatedSession struct {
+		cookie    *http.Cookie
+		csrf      string
+		principal achrix.Principal
+	}
+	login := func(host, origin, loginValue, password string) authenticatedSession {
+		t.Helper()
+		payload, marshalErr := json.Marshal(map[string]string{"login": loginValue, "password": password})
+		if marshalErr != nil {
+			t.Fatal(marshalErr)
+		}
+		response, requestErr := request(host, http.MethodPost, "/auth/login", payload, map[string]string{
+			"Content-Type":       "application/json",
+			"Origin":             origin,
+			"X-Identity-Request": "1",
+		}, nil)
+		if requestErr != nil {
+			t.Fatal(requestErr)
+		}
+		defer response.Body.Close()
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("%s login status=%d", host, response.StatusCode)
+		}
+		var session struct {
+			Principal achrix.Principal `json:"principal"`
+			CSRF      string           `json:"csrf"`
+		}
+		if decodeErr := json.NewDecoder(response.Body).Decode(&session); decodeErr != nil {
+			t.Fatal(decodeErr)
+		}
+		var sessionCookie *http.Cookie
+		for _, cookie := range response.Cookies() {
+			if cookie.Name == identity.CookieName {
+				sessionCookie = cookie
+				break
+			}
+		}
+		if sessionCookie == nil || session.CSRF == "" || session.Principal == "" {
+			t.Fatal("login did not return a complete authenticated session")
+		}
+		return authenticatedSession{sessionCookie, session.CSRF, session.Principal}
+	}
+
+	controlSession := login("control.rixa.test", config.Control.Origin, "control-admin", testControlPassword)
+	siteSession := login("a.rixa.test", config.Sites[0].Origin, "site-a-admin", testSiteAPassword)
+	if controlSession.principal != runtime.Control.AdminPrincipal {
+		t.Fatalf("control login principal=%s want=%s", controlSession.principal, runtime.Control.AdminPrincipal)
+	}
+	if siteSession.principal != runtime.Sites["site-a"].adminPrincipal {
+		t.Fatalf("site login principal=%s want=%s", siteSession.principal, runtime.Sites["site-a"].adminPrincipal)
+	}
+	if _, directErr := runtime.Sites["site-a"].Identity.CreateAccount(parent, runtime.Control.AdminPrincipal, "direct-control-denied", "Direct-Control-Denied-2026!"); !errors.Is(directErr, achrix.ErrDenied) {
+		t.Fatalf("control principal bypassed target site policy: %v", directErr)
+	}
+
+	postControl := func(session authenticatedSession, body map[string]string, extraHeaders map[string]string) (*http.Response, []byte) {
+		t.Helper()
+		payload, marshalErr := json.Marshal(body)
+		if marshalErr != nil {
+			t.Fatal(marshalErr)
+		}
+		headers := map[string]string{
+			"Content-Type": "application/json",
+			"Origin":       config.Control.Origin,
+			"X-CSRF-Token": session.csrf,
+		}
+		for key, value := range extraHeaders {
+			headers[key] = value
+		}
+		response, requestErr := request("control.rixa.test", http.MethodPost, "/admin/sites/account-create", payload, headers, session.cookie)
+		if requestErr != nil {
+			t.Fatal(requestErr)
+		}
+		data := new(bytes.Buffer)
+		_, _ = data.ReadFrom(response.Body)
+		_ = response.Body.Close()
+		return response, data.Bytes()
+	}
+
+	response, data := postControl(controlSession, map[string]string{
+		"site_id": "site-a", "login": "https-control-created", "password": "HTTPS-Control-Created-2026!",
+	}, map[string]string{"X-Principal": string(runtime.Sites["site-a"].adminPrincipal)})
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("authenticated control management status=%d body=%s", response.StatusCode, data)
+	}
+	created, lookupErr := runtime.Sites["site-a"].Identity.LookupAccount(parent, runtime.Sites["site-a"].adminPrincipal, "https-control-created")
+	if lookupErr != nil || created.ID == "" {
+		t.Fatalf("authenticated control management did not reach target site: account=%#v err=%v", created, lookupErr)
+	}
+
+	for _, siteID := range []string{"disabled", "unknown"} {
+		response, _ = postControl(controlSession, map[string]string{
+			"site_id": siteID, "login": "forbidden-" + siteID, "password": "Forbidden-Site-Password-2026!",
+		}, nil)
+		if response.StatusCode != http.StatusForbidden {
+			t.Fatalf("control management of %s status=%d want=403", siteID, response.StatusCode)
+		}
+	}
+
+	response, _ = postControl(siteSession, map[string]string{
+		"site_id": "site-a", "login": "site-session-forbidden", "password": "Site-Session-Forbidden-2026!",
+	}, map[string]string{"X-Principal": string(runtime.Control.AdminPrincipal)})
+	if response.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("site session invoked control management: status=%d want=401", response.StatusCode)
+	}
+
+	forgedPayload, _ := json.Marshal(map[string]string{
+		"site_id": "site-a", "login": "forged-body", "password": "Forged-Body-Password-2026!", "principal": string(runtime.Control.AdminPrincipal),
+	})
+	response, requestErr := request("control.rixa.test", http.MethodPost, "/admin/sites/account-create", forgedPayload, map[string]string{
+		"Content-Type": "application/json",
+		"Origin":       config.Control.Origin,
+		"X-CSRF-Token": controlSession.csrf,
+	}, controlSession.cookie)
+	if requestErr != nil {
+		t.Fatal(requestErr)
+	}
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("caller-supplied principal body accepted: status=%d", response.StatusCode)
 	}
 
 	cancel()
@@ -411,6 +563,20 @@ func dsnDatabase(t *testing.T, dsn, database string) string {
 		t.Fatal(err)
 	}
 	u.Path = "/" + database
+	return u.String()
+}
+
+func dsnHostAlias(t *testing.T, dsn, host string) string {
+	t.Helper()
+	u, err := url.Parse(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := u.Port()
+	if port == "" {
+		port = "5432"
+	}
+	u.Host = net.JoinHostPort(host, port)
 	return u.String()
 }
 

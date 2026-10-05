@@ -3,6 +3,7 @@
 package product
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -58,7 +59,7 @@ func TestResolveRuntimeSkipsDisabledSiteResources(t *testing.T) {
 		"RIXA_TEST_CONTROL": "postgres://control:secret@127.0.0.1:5432/control?sslmode=disable",
 		"RIXA_TEST_A":       "postgres://a:secret@127.0.0.1:5432/site_a?sslmode=disable",
 	}
-	resolved, err := config.ResolveRuntime(mapLookup(values))
+	resolved, err := config.resolveRuntime(context.Background(), mapLookup(values), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,10 +107,10 @@ func TestSingleSiteCompositionOmitsMultiSite(t *testing.T) {
 	if err := config.validateStructure(); err != nil {
 		t.Fatal(err)
 	}
-	resolved, err := config.ResolveRuntime(mapLookup(map[string]string{
+	resolved, err := config.resolveRuntime(context.Background(), mapLookup(map[string]string{
 		"RIXA_TEST_CONTROL": "postgres://control:secret@127.0.0.1:5432/control?sslmode=disable",
 		"RIXA_TEST_SITE":    "postgres://site:secret@127.0.0.1:5432/site?sslmode=disable",
-	}))
+	}), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,34 +120,6 @@ func TestSingleSiteCompositionOmitsMultiSite(t *testing.T) {
 	}
 	if runtime.UsesMultiSite() {
 		t.Fatal("single-site profile composed Multi-Site")
-	}
-}
-
-func TestResolveRuntimeRejectsSameDatabase(t *testing.T) {
-	dir := t.TempDir()
-	root := filepath.Join(dir, "media")
-	if err := os.Mkdir(root, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	cert, key, _ := writeTestCertificate(t, dir, []string{"control.rixa.test", "site.rixa.test"})
-	config := Config{
-		Listen:          "127.0.0.1:18445",
-		TLS:             TLSConfig{CertFile: cert, KeyFile: key},
-		Language:        "en",
-		StartupTimeout:  time.Second,
-		ShutdownTimeout: time.Second,
-		Control:         ControlConfig{Origin: "https://control.rixa.test:18445", DatabaseEnv: "RIXA_CONTROL", AdminPrincipal: testControlAdmin},
-		Sites: []SiteConfig{{
-			ID: "site", Origin: "https://site.rixa.test:18445", DatabaseEnv: "RIXA_SITE", MediaRoot: root, AdminPrincipal: testSiteAAdmin,
-		}},
-	}
-	if err := config.validateStructure(); err != nil {
-		t.Fatal(err)
-	}
-	dsn := "postgres://same:secret@127.0.0.1:5432/shared?sslmode=disable"
-	_, err := config.ResolveRuntime(mapLookup(map[string]string{"RIXA_CONTROL": dsn, "RIXA_SITE": dsn}))
-	if !errors.Is(err, ErrConfiguration) {
-		t.Fatalf("expected configuration error, got %v", err)
 	}
 }
 
@@ -168,7 +141,7 @@ func mapLookup(values map[string]string) func(string) (string, bool) {
 	}
 }
 
-func TestResolveRuntimeRejectsLooseTLSKeyAndSymlinkMediaRoot(t *testing.T) {
+func TestRuntimeValidationRejectsLooseTLSKeyAndSymlinkMediaRoot(t *testing.T) {
 	dir := t.TempDir()
 	realRoot := filepath.Join(dir, "real-media")
 	if err := os.Mkdir(realRoot, 0o700); err != nil {
@@ -185,20 +158,75 @@ func TestResolveRuntimeRejectsLooseTLSKeyAndSymlinkMediaRoot(t *testing.T) {
 		Control: ControlConfig{Origin: "https://control.rixa.test:18446", DatabaseEnv: "RIXA_CONTROL", AdminPrincipal: testControlAdmin},
 		Sites:   []SiteConfig{{ID: "site", Origin: "https://site.rixa.test:18446", DatabaseEnv: "RIXA_SITE", MediaRoot: linkRoot, AdminPrincipal: testSiteAAdmin}},
 	}
-	values := mapLookup(map[string]string{
-		"RIXA_CONTROL": "postgres://control:secret@127.0.0.1:5432/control?sslmode=disable",
-		"RIXA_SITE":    "postgres://site:secret@127.0.0.1:5432/site?sslmode=disable",
-	})
 	if err := os.Chmod(key, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := config.ResolveRuntime(values); !errors.Is(err, ErrConfiguration) {
+	if err := config.ValidateRuntimeFiles(); !errors.Is(err, ErrConfiguration) {
 		t.Fatalf("loose TLS key permissions accepted: %v", err)
 	}
 	if err := os.Chmod(key, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := config.ResolveRuntime(values); !errors.Is(err, ErrConfiguration) {
+	if err := validateMediaRoots([]ResolvedSite{{SiteConfig: config.Sites[0]}}); !errors.Is(err, ErrConfiguration) {
 		t.Fatalf("symlink media root accepted: %v", err)
+	}
+}
+
+func TestConfigRejectsSharedAuthenticationHostnameAcrossPorts(t *testing.T) {
+	base := Config{
+		Language: "en",
+		Control:  ControlConfig{Origin: "https://shared.rixa.test:8443", DatabaseEnv: "RIXA_CONTROL"},
+		Sites:    []SiteConfig{{ID: "a", Origin: "https://site-a.rixa.test:8443", DatabaseEnv: "RIXA_A", MediaRoot: "/var/lib/rixa/a"}},
+	}
+
+	controlCollision := base
+	controlCollision.Sites = []SiteConfig{{ID: "a", Origin: "https://shared.rixa.test:9443", DatabaseEnv: "RIXA_A", MediaRoot: "/var/lib/rixa/a"}}
+	if err := controlCollision.validateStructure(); !errors.Is(err, ErrConfiguration) {
+		t.Fatalf("control/site hostname collision accepted: %v", err)
+	}
+
+	siteCollision := base
+	siteCollision.Sites = []SiteConfig{
+		{ID: "a", Origin: "https://sites.rixa.test:8443", DatabaseEnv: "RIXA_A", MediaRoot: "/var/lib/rixa/a"},
+		{ID: "b", Origin: "https://sites.rixa.test:9443", DatabaseEnv: "RIXA_B", MediaRoot: "/var/lib/rixa/b"},
+	}
+	if err := siteCollision.validateStructure(); !errors.Is(err, ErrConfiguration) {
+		t.Fatalf("site/site hostname collision accepted: %v", err)
+	}
+}
+
+func TestMediaRootsRejectParentSymlinkAliasesAndNestedTrees(t *testing.T) {
+	dir := t.TempDir()
+	realParent := filepath.Join(dir, "real")
+	rootA := filepath.Join(realParent, "a")
+	nested := filepath.Join(rootA, "nested")
+	for _, path := range []string{realParent, rootA, nested} {
+		if err := os.Mkdir(path, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	aliasParent := filepath.Join(dir, "alias")
+	if err := os.Symlink(realParent, aliasParent); err != nil {
+		t.Fatal(err)
+	}
+	aliasA := filepath.Join(aliasParent, "a")
+	if err := validateMediaRoots([]ResolvedSite{{SiteConfig: SiteConfig{ID: "alias", MediaRoot: aliasA}}}); !errors.Is(err, ErrConfiguration) {
+		t.Fatalf("parent symlink alias accepted: %v", err)
+	}
+	if err := validateMediaRoots([]ResolvedSite{
+		{SiteConfig: SiteConfig{ID: "a", MediaRoot: rootA}},
+		{SiteConfig: SiteConfig{ID: "nested", MediaRoot: nested}},
+	}); !errors.Is(err, ErrConfiguration) {
+		t.Fatalf("nested media roots accepted: %v", err)
+	}
+	rootB := filepath.Join(realParent, "b")
+	if err := os.Mkdir(rootB, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateMediaRoots([]ResolvedSite{
+		{SiteConfig: SiteConfig{ID: "a", MediaRoot: rootA}},
+		{SiteConfig: SiteConfig{ID: "b", MediaRoot: rootB}},
+	}); err != nil {
+		t.Fatalf("separate private roots rejected: %v", err)
 	}
 }

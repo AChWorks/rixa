@@ -23,17 +23,9 @@ func Serve(parent context.Context, runtime *Runtime, logger *slog.Logger) error 
 	if err != nil {
 		return err
 	}
-	started := false
-	defer func() {
-		if !started {
-			_ = listener.Close()
-		}
-	}()
-
 	if err = runtime.Start(parent); err != nil {
-		return err
+		return errors.Join(err, listener.Close())
 	}
-	started = true
 
 	server := &http.Server{
 		Addr:    runtime.Config.Listen,
