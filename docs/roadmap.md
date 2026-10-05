@@ -1,33 +1,26 @@
-# Rixa Outcome Roadmap
+# Rixa Roadmap
 
-This is the stable outcome order, not live status. [GitHub Issues](https://github.com/AChWorks/rixa/issues) own current task state/contracts, dependencies, blockers and review; [First usable Rixa](https://github.com/AChWorks/rixa/milestone/1) groups product acceptance.
+This document owns the durable outcome order, not live task status. [GitHub Issues](https://github.com/AChWorks/rixa/issues), PRs, CI and Releases own current contracts, dependency pins, blockers, review state and delivery evidence.
 
-| Order | Outcome / owner | Dependency |
+| Order | Outcome | Durable dependency / proof boundary |
 | --- | --- | --- |
-| 1 | [#2: bounded consumer contracts](https://github.com/AChWorks/rixa/issues/2): trusted two-site context, initial fixed permissions, real composition and public Media/publication seam | Bootstrap #1; inspect current released public APIs. Produces the real consumer input for AChrix #4. |
-| 2 | [#3: executable composition/isolation](https://github.com/AChWorks/rixa/issues/3): pinned dependency, real PostgreSQL/private storage, single/two-site administration and relevant CI | #2 plus the required integrated/released AChrix #4 slice; establish safe implementation/proof order before READY. |
-| 3 | [#4: editorial/appearance management](https://github.com/AChWorks/rixa/issues/4): posts/pages, visual editor, private draft/preview and site-owned theme configuration | #2/#3; real fields inform Settings only where reusable. |
-| 4 | [#5: coherent public publication](https://github.com/AChWorks/rixa/issues/5): static HTML, authorized images, basic SEO and truthful AI-readable meaning | Real content/composition and resolved public Media seam. |
-| 5 | [#6: measured operation/independence](https://github.com/AChWorks/rixa/issues/6): aggregate resources, coherent isolated site transfer/restore and later retained shared-update proof | Real composition/publication; actual compatible reviewed released update for the later retained-state criterion. Initial #3 does not wait for that update; narrow Foundation gaps are coordinated, not duplicated. |
+| 1 | [**#2 — Bounded consumer contract**](https://github.com/AChWorks/rixa/issues/2) — trusted single/two-site context, fixed initial permissions, composition boundaries and private/public Media separation | Establish the product-owned contract against intentionally public AChrix APIs before runtime implementation. |
+| 2 | [**#3 — Executable composition and isolation**](https://github.com/AChWorks/rixa/issues/3) — normal pinned AChrix consumption, real PostgreSQL/private storage, single/two-site administration, lifecycle and meaningful CI | Requires a reviewed Foundation dependency that supplies the accepted Core/Identity/Audit/Media/Admin and optional Multi-Site surface. Prove real site isolation; Foundation fixtures are not product proof. |
+| 3 | [**#4 — Editorial and appearance management**](https://github.com/AChWorks/rixa/issues/4) — posts/pages, revisions, visual formatted-text editing, private draft/preview and site-owned appearance/header/footer/home behavior | Builds on the executable authorization/data boundary. Real product fields may later justify reusable Settings behavior; product/domain fields remain Rixa-owned. |
+| 4 | [**#5 — Coherent public publication**](https://github.com/AChWorks/rixa/issues/5) — static semantic HTML, authorized image representations, sitemap/metadata, basic SEO and truthful AI-readable meaning | Requires real content and composition. Publication owns private staging, coherent activation, source freshness, correction/withdrawal and retention. |
+| 5 | [**#6 — Measured operation and site independence**](https://github.com/AChWorks/rixa/issues/6) — aggregate resource behavior, coherent isolated site transfer/restore and retained state across a genuine compatible reviewed Foundation update | Uses real product composition/publication and a real later compatible release when available. Do not fabricate update evidence or turn a controlled transfer proof into a generic updater/recovery product. |
 
-[#1](https://github.com/AChWorks/rixa/issues/1) owns the documentation/bootstrap evidence. [#7](https://github.com/AChWorks/rixa/issues/7) owns native main-protection verification; it is separate governance work, not an excuse to invent CI checks or change visibility.
+## Foundation boundaries used by the roadmap
 
-## Foundation readiness before CMS runtime
+Rixa consumes stable public AChrix contracts rather than mirroring AChrix Issue state in this roadmap:
 
-The concrete AChrix-owned readiness slices—optional address resolution (#4), measured resource configuration (#76), selected clean PNG/JPEG preparation (#77), explicit private SVG attachments (#78), and the #83/#84 Module error-privacy corrections—are now published together in the current reviewed AChrix release. The Foundation prerequisite for Rixa #3 is therefore satisfied: #3 is the next executable product outcome and may consume the exact dependency recorded by its live contract through ordinary pinned dependency resolution. GitHub Issue #3 owns the live READY/IN_PROGRESS state and its HIGH_ASSURANCE review gate. This does not require whole #4 closure before its downstream real Rixa isolation/shared-update proof, and a Foundation measurement does not replace product/fleet evidence. Existing Core/Identity/Audit/Admin public contracts already cover the selected composition and fixed-grant starting flow; do not invent features or empty Modules as prerequisites.
-
-## Foundation coordination
-
-| AChrix owner | Relationship |
+| Need | Durable owner / constraint |
 | --- | --- |
-| [#4 Multi-Site](https://github.com/AChWorks/achrix/issues/4) | Accepted optional reusable ownership in existing Foundation repository/Go module/shared release. Rixa #2 supplies its bounded real consumer contract, #3 supplies real isolation proof and #6 owns retained state across a genuine compatible reviewed released shared update; content/themes/publication stay here. |
-| [#76 resource configuration](https://github.com/AChWorks/achrix/issues/76) | Typed per-instance pool/owned-lease options are available in the current reviewed AChrix release with preserved defaults and supported nested minima. Foundation default/raised fixture observations do not replace Rixa #3/#6 actual product/aggregate proof. |
-| [#77 public image preparation/export](https://github.com/AChWorks/achrix/issues/77) | Rixa #2 established that private Read cannot supply public image publication. The owner selected clean PNG/JPEG with private originals; the reviewed finite preparation contract is available in the current reviewed AChrix release. Rixa #5 still owns staging/activation/freshness/withdrawal. |
-| [#78 private SVG](https://github.com/AChWorks/achrix/issues/78) | Explicit upload/private original attachment support is available in the current reviewed AChrix release; preserve existing default/common selection and no inline/public SVG permission. |
-| [#83 Media error privacy](https://github.com/AChWorks/achrix/issues/83), [#84 Identity/Audit error privacy](https://github.com/AChWorks/achrix/issues/84) | Completed bounded public Go error-boundary corrections are included in the current reviewed AChrix release; preserve their canonical categories/cancellation, diagnostic budgets and honest unknown mutation outcomes. They are no longer release blockers. |
-| [#50 Settings](https://github.com/AChWorks/achrix/issues/50) | Waits for concrete reusable application-level fields from the real editorial/configuration workflow; domain fields remain here. |
-| [#48 Search](https://github.com/AChWorks/achrix/issues/48) | No actual Rixa search flow has been selected; do not implement Search from the CMS label alone. |
-| [#5 Gateway Bridge](https://github.com/AChWorks/achrix/issues/5) | Future optional manual/AI publishing/management is desired. Ownership/packaging/security decision remains owner-gated; Gateway repository is outside scope. |
-| [#19 lifecycle proof](https://github.com/AChWorks/achrix/issues/19), [#49 recovery](https://github.com/AChWorks/achrix/issues/49) | #19 remains paused pending separate owner instruction; #49 remains downstream. Site-transfer development proof does not complete/activate either. |
+| Composition, authorization and lifecycle | [AChrix public contracts](https://github.com/AChWorks/achrix/blob/HEAD/docs/architecture/contracts-and-interfaces.md); product policy and domain behavior remain Rixa-owned. |
+| Optional exact authority-to-site resolution | [AChrix Multi-Site](https://github.com/AChWorks/achrix/blob/HEAD/multisite/README.md); address resolution grants no site/domain authority. |
+| Identity, Audit, Admin and private Media | Their public AChrix Module contracts; Rixa owns roles/grants, site binding, content relationships and deployment. |
+| Resource tuning | AChrix typed Module resource controls and [operations contract](https://github.com/AChWorks/achrix/blob/HEAD/docs/operations/operability-performance.md); Rixa still measures aggregate/fairness behavior. |
+| Public image preparation and private SVG | [AChrix Media](https://github.com/AChWorks/achrix/blob/HEAD/media/README.md); Rixa owns publication, staging, freshness, withdrawal and retention. |
+| Search, Settings, Notifications, Gateway and generic lifecycle/recovery | Demand/evidence driven. Do not create empty shared Modules or activate deferred infrastructure merely because Rixa is a CMS. |
 
-Do not generalize custom roles, registration, commerce, conversion, advanced search, Notifications, page builders, update UI or adaptive resource controllers before an actual accepted flow justifies them. Later product scope follows the same ownership and compatibility rules; acceptance of a reusable boundary is not permission to create empty Modules.
+Exact Foundation release identity belongs to machine/runtime dependency state and the active implementation evidence. A compatible release change should not require rewriting this roadmap unless the accepted product outcome or public-contract requirement itself changes.
