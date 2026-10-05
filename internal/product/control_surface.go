@@ -44,29 +44,25 @@ func newControlSurface(sites []SiteConfig, service controlSiteManager) shell.Sur
 
 func serveControlSurface(service controlSiteManager, sites []SiteConfig, w http.ResponseWriter, r *http.Request, view shell.Request) {
 	if r.Method == http.MethodGet {
-		switch r.URL.Path {
-		case "/":
-			items := make([]inventoryItem, 0, len(sites))
-			for _, site := range sites {
-				items = append(items, inventoryItem{
-					ID:        site.ID,
-					Origin:    site.Origin,
-					Disabled:  site.Disabled,
-					CanManage: !site.Disabled && view.Allowed(CapabilityControlSiteManage, site.ID),
-				})
-			}
-			if err := view.Render(shell.Page{
-				Title:    (shell.Text{English: "Sites", Persian: "سایت‌ها"}).In(view.Language),
-				Template: inventoryTemplate,
-				Data:     inventoryView{Language: view.Language, Sites: items},
-			}); err != nil {
-				controlSurfaceFail(w, ErrUnavailable)
-			}
-		case "/sites.js":
-			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
-			_, _ = io.WriteString(w, controlSurfaceJS)
-		default:
+		if r.URL.Path != "/" {
 			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		items := make([]inventoryItem, 0, len(sites))
+		for _, site := range sites {
+			items = append(items, inventoryItem{
+				ID:        site.ID,
+				Origin:    site.Origin,
+				Disabled:  site.Disabled,
+				CanManage: !site.Disabled && view.Allowed(CapabilityControlSiteManage, site.ID),
+			})
+		}
+		if err := view.Render(shell.Page{
+			Title:    (shell.Text{English: "Sites", Persian: "سایت‌ها"}).In(view.Language),
+			Template: inventoryTemplate,
+			Data:     inventoryView{Language: view.Language, Sites: items},
+		}); err != nil {
+			controlSurfaceFail(w, ErrUnavailable)
 		}
 		return
 	}
@@ -142,63 +138,11 @@ var inventoryTemplate = template.Must(template.New("inventory").Parse(`{{define 
 <table>
 <thead><tr><th>{{if eq .Language "fa"}}شناسه{{else}}ID{{end}}</th><th>{{if eq .Language "fa"}}مبدأ{{else}}Origin{{end}}</th><th>{{if eq .Language "fa"}}وضعیت{{else}}State{{end}}</th></tr></thead>
 <tbody>{{range .Sites}}<tr><td dir="ltr">{{.ID}}</td><td dir="ltr">{{.Origin}}</td><td>{{if .Disabled}}{{if eq $.Language "fa"}}غیرفعال{{else}}disabled{{end}}{{else}}{{if eq $.Language "fa"}}فعال{{else}}enabled{{end}}{{end}}</td></tr>
-{{if .CanManage}}<tr><td colspan="3"><form data-site-account data-site="{{.ID}}">
+{{if .CanManage}}<tr><td colspan="3"><form data-admin-form action="/admin/sites/account-create" method="post">
+<input type="hidden" name="site_id" value="{{.ID}}">
 <label>{{if eq $.Language "fa"}}شناسه ورود{{else}}Login{{end}} <input name="login" dir="ltr" maxlength="64" autocomplete="off" required></label>
 <label>{{if eq $.Language "fa"}}رمز اولیه{{else}}Initial password{{end}} <input name="password" type="password" autocomplete="new-password" required></label>
 <button type="submit">{{if eq $.Language "fa"}}ایجاد حساب در این سایت{{else}}Create site account{{end}}</button>
-<output aria-live="polite"></output>
 </form></td></tr>{{end}}{{end}}</tbody>
 </table>
-<script src="/admin/sites/sites.js" defer></script>
 {{end}}`))
-
-const controlSurfaceJS = `(() => {
-  "use strict";
-  const forms = document.querySelectorAll("form[data-site-account]");
-  if (!forms.length) return;
-
-  async function csrf() {
-    const response = await fetch("/auth/csrf", {
-      credentials: "same-origin",
-      headers: {"X-Identity-Request": "1", "Accept": "application/json"}
-    });
-    if (!response.ok) throw new Error("csrf");
-    const payload = await response.json();
-    if (!payload.csrf) throw new Error("csrf");
-    return payload.csrf;
-  }
-
-  for (const form of forms) {
-    form.addEventListener("submit", async (event) => {
-      event.preventDefault();
-      const output = form.querySelector("output");
-      const login = form.elements.login.value;
-      const passwordField = form.elements.password;
-      output.textContent = "";
-      try {
-        const token = await csrf();
-        const response = await fetch("/admin/sites/account-create", {
-          method: "POST",
-          credentials: "same-origin",
-          headers: {
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "X-CSRF-Token": token
-          },
-          body: JSON.stringify({
-            site_id: form.dataset.site,
-            login,
-            password: passwordField.value
-          })
-        });
-        passwordField.value = "";
-        if (!response.ok) throw new Error("request");
-        const account = await response.json();
-        output.textContent = account.login + " (" + account.id + ")";
-      } catch (_) {
-        passwordField.value = "";
-        output.textContent = "Request failed";
-      }
-    });
-  }
-})();`

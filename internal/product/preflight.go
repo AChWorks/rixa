@@ -4,14 +4,17 @@ package product
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 const databaseProbeTimeout = 3 * time.Second
@@ -26,6 +29,8 @@ type mediaRootIdentity struct {
 	canonical string
 	info      os.FileInfo
 }
+
+type databaseConnector func(context.Context, *pgx.ConnConfig) (*pgx.Conn, error)
 
 func validateRuntimeTargets(parent context.Context, runtime *RuntimeConfig) error {
 	if runtime == nil {
@@ -60,16 +65,24 @@ func validateDatabaseTargets(parent context.Context, targets []ResolvedDatabase)
 	return nil
 }
 
-func inspectDatabaseTarget(parent context.Context, dsn string) (identity databaseTargetIdentity, err error) {
-	cfg, parseErr := pgx.ParseConfig(dsn)
-	if parseErr != nil || cfg == nil || cfg.Database == "" || cfg.User == "" {
+func inspectDatabaseTarget(parent context.Context, dsn string) (databaseTargetIdentity, error) {
+	return inspectDatabaseTargetWithConnector(parent, dsn, pgx.ConnectConfig)
+}
+
+func inspectDatabaseTargetWithConnector(parent context.Context, dsn string, connect databaseConnector) (identity databaseTargetIdentity, err error) {
+	cfg, configErr := safeDatabaseConnectionConfig(dsn)
+	if configErr != nil {
+		return identity, configErr
+	}
+	if connect == nil {
 		return identity, ErrConfiguration
 	}
+
 	ctx, cancel := context.WithTimeout(parent, databaseProbeTimeout)
 	defer cancel()
 
-	conn, connectErr := pgx.ConnectConfig(ctx, cfg)
-	if connectErr != nil {
+	conn, connectErr := connect(ctx, cfg)
+	if connectErr != nil || conn == nil {
 		return identity, safePreflightError(ctx)
 	}
 	defer func() {
@@ -89,6 +102,38 @@ func inspectDatabaseTarget(parent context.Context, dsn string) (identity databas
 		return databaseTargetIdentity{}, safePreflightError(ctx)
 	}
 	return identity, nil
+}
+
+// safeDatabaseConnectionConfig mirrors the released AChrix v0.3.0 PostgreSQL
+// admission boundary before Rixa performs its additional physical-identity probe.
+// The probe must never be the first operation to discover an unsafe remote DSN.
+func safeDatabaseConnectionConfig(dsn string) (*pgx.ConnConfig, error) {
+	if len(dsn) == 0 || len(dsn) > 4096 {
+		return nil, ErrConfiguration
+	}
+	poolConfig, err := pgxpool.ParseConfig(dsn)
+	if err != nil || poolConfig == nil || poolConfig.ConnConfig == nil {
+		return nil, ErrConfiguration
+	}
+	cfg := poolConfig.ConnConfig
+	if cfg.Database == "" || cfg.User == "" || !safeDatabaseHostTLS(cfg.Host, cfg.TLSConfig) {
+		return nil, ErrConfiguration
+	}
+	for _, fallback := range cfg.Fallbacks {
+		if fallback == nil || !safeDatabaseHostTLS(fallback.Host, fallback.TLSConfig) {
+			return nil, ErrConfiguration
+		}
+	}
+	// Keep the extra identity probe no more permissive than the bounded AChrix
+	// database setup path.
+	cfg.ConnectTimeout = time.Second
+	return cfg, nil
+}
+
+func safeDatabaseHostTLS(host string, tlsConfig *tls.Config) bool {
+	ip := net.ParseIP(host)
+	local := strings.HasPrefix(host, "/") || host == "localhost" || ip != nil && ip.IsLoopback()
+	return local || tlsConfig != nil && !tlsConfig.InsecureSkipVerify && tlsConfig.ServerName != ""
 }
 
 func safePreflightError(ctx context.Context) error {

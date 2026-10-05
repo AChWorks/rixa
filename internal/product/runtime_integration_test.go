@@ -433,6 +433,74 @@ func testTrustedTLSIngress(t *testing.T, parent context.Context, config Config, 
 	if siteSession.principal != runtime.Sites["site-a"].adminPrincipal {
 		t.Fatalf("site login principal=%s want=%s", siteSession.principal, runtime.Sites["site-a"].adminPrincipal)
 	}
+
+	controlPage, requestErr := request("control.rixa.test", http.MethodGet, "/admin/sites", nil, nil, controlSession.cookie)
+	if requestErr != nil {
+		t.Fatal(requestErr)
+	}
+	pageBody := new(bytes.Buffer)
+	_, _ = pageBody.ReadFrom(controlPage.Body)
+	_ = controlPage.Body.Close()
+	if controlPage.StatusCode != http.StatusOK {
+		t.Fatalf("control Sites page status=%d body=%s", controlPage.StatusCode, pageBody.Bytes())
+	}
+	for _, expected := range []string{
+		`/admin/assets/admin.js`,
+		`data-admin-form`,
+		`action="/admin/sites/account-create"`,
+		`name="site_id" value="site-a"`,
+	} {
+		if !strings.Contains(pageBody.String(), expected) {
+			t.Fatalf("control Sites page missing %q", expected)
+		}
+	}
+
+	adminScript, scriptErr := request("control.rixa.test", http.MethodGet, "/admin/assets/admin.js", nil, nil, nil)
+	if scriptErr != nil {
+		t.Fatal(scriptErr)
+	}
+	scriptBody := new(bytes.Buffer)
+	_, _ = scriptBody.ReadFrom(adminScript.Body)
+	_ = adminScript.Body.Close()
+	if adminScript.StatusCode != http.StatusOK {
+		t.Fatalf("AChrix Admin script status=%d", adminScript.StatusCode)
+	}
+	for _, expected := range []string{
+		`referrer:location.origin+"/"`,
+		`referrerPolicy:"same-origin"`,
+		`form[data-admin-form]`,
+	} {
+		if !strings.Contains(scriptBody.String(), expected) {
+			t.Fatalf("served AChrix Admin script missing %q", expected)
+		}
+	}
+
+	refreshControlCSRF := func() string {
+		t.Helper()
+		response, refreshErr := request("control.rixa.test", http.MethodGet, "/auth/csrf", nil, map[string]string{
+			"Referer":            config.Control.Origin + "/",
+			"X-Identity-Request": "1",
+		}, controlSession.cookie)
+		if refreshErr != nil {
+			t.Fatal(refreshErr)
+		}
+		defer response.Body.Close()
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("control CSRF refresh status=%d", response.StatusCode)
+		}
+		var payload struct {
+			CSRF string `json:"csrf"`
+		}
+		if decodeErr := json.NewDecoder(response.Body).Decode(&payload); decodeErr != nil {
+			t.Fatal(decodeErr)
+		}
+		if payload.CSRF == "" {
+			t.Fatal("control CSRF refresh returned an empty token")
+		}
+		return payload.CSRF
+	}
+	controlSession.csrf = refreshControlCSRF()
+
 	if _, directErr := runtime.Sites["site-a"].Identity.CreateAccount(parent, runtime.Control.AdminPrincipal, "direct-control-denied", "Direct-Control-Denied-2026!"); !errors.Is(directErr, achrix.ErrDenied) {
 		t.Fatalf("control principal bypassed target site policy: %v", directErr)
 	}
@@ -491,7 +559,7 @@ func testTrustedTLSIngress(t *testing.T, parent context.Context, config Config, 
 	forgedPayload, _ := json.Marshal(map[string]string{
 		"site_id": "site-a", "login": "forged-body", "password": "Forged-Body-Password-2026!", "principal": string(runtime.Control.AdminPrincipal),
 	})
-	response, requestErr := request("control.rixa.test", http.MethodPost, "/admin/sites/account-create", forgedPayload, map[string]string{
+	response, requestErr = request("control.rixa.test", http.MethodPost, "/admin/sites/account-create", forgedPayload, map[string]string{
 		"Content-Type": "application/json",
 		"Origin":       config.Control.Origin,
 		"X-CSRF-Token": controlSession.csrf,
