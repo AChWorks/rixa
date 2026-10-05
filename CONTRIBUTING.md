@@ -18,7 +18,7 @@ LOW/MEDIUM work may use explicitly recorded self-review where risk permits; self
 
 Inspect the affected behavior, failure paths, environment and full diff, then run the minimum sufficient meaningful evidence. Runtime/security/persistence/concurrency changes require relevant executable proof; documentation-only edits need inspection/link/schema/example checks where affected.
 
-Use `git diff --check <base> <candidate>` for a committed change (or the appropriate working/staged diff). Check changed relative links/anchors, real commands and schema-valid discovery metadata. Validate `achworks.yaml` against the current authoritative [Koinon descriptor schema](https://github.com/AChWorks/koinon/blob/main/schemas/descriptor.schema.json), and record the exact schema commit identity used in that PR/validation evidence rather than hard-coding it in this durable guide.
+Use `git diff --check <base> <candidate>` for a committed change (or the appropriate working/staged diff). Check changed relative links/anchors, real commands and schema-valid discovery metadata. Validate `achworks.yaml` against the current authoritative [Koinon descriptor schema](https://github.com/AChWorks/koinon/blob/HEAD/schemas/descriptor.schema.json), and record the exact schema commit identity used in that PR/validation evidence rather than hard-coding it in this durable guide.
 
 Reuse unaffected evidence with its identity/assumptions, never relabel it as fresh. Do not duplicate broad local/CI suites or add a matrix for short tests. Expand only for actual changes, failures, unresolved interaction or required gates. Use real supported PostgreSQL for database proof; skips are not success. Product CI is introduced with the first runtime slice and binds checks to actual candidate/base.
 
