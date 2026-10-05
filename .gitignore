@@ -6,3 +6,7 @@
 secrets/
 var/
 test-artifacts/
+
+# Local build outputs and JSON runtime overrides
+/rixa
+*.local.json

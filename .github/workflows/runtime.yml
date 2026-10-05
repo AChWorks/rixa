@@ -1,0 +1,77 @@
+name: Runtime
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: runtime-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  runtime:
+    name: runtime
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:18.6
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+
+    env:
+      CI: "true"
+      GOWORK: "off"
+      RIXA_TEST_POSTGRES_DSN: postgres://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Verify dependency mode
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -f go.work
+          ! grep -Eq '^[[:space:]]*replace[[:space:]]' go.mod
+          expected="$(awk '/^[[:space:]]*sourceVersion:/ {print $2; exit}' achworks.yaml)"
+          actual="$(go list -m -f '{{.Version}}' github.com/AChWorks/achrix)"
+          test -n "$expected"
+          test "$actual" = "$expected"
+          test "$(go env GOWORK)" = "off"
+          test "$(go env GOSUMDB)" != "off"
+
+      - name: Verify module manifests
+        run: go mod tidy -diff
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Runtime proof
+        run: go test -race ./...
+
+      - name: Build product
+        shell: bash
+        run: |
+          set -euo pipefail
+          go build -trimpath -o "$RUNNER_TEMP/rixa" ./cmd/rixa
+          "$RUNNER_TEMP/rixa" version

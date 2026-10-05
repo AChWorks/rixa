@@ -15,6 +15,41 @@ cd rixa
 
 Start from the relevant Issue and [Contributing](CONTRIBUTING.md). Use only build/run/configuration commands and checks that exist in the selected implementation/release state; do not infer runnable setup from planned architecture.
 
+## Development runtime
+
+The first executable slice provides an explicitly migrated management runtime for control administration plus isolated site administration. It is a development profile, not a production distribution or completed CMS.
+
+Use [the example configuration](config/rixa.example.json) as a starting point. Configuration stores only environment-variable names for database credentials; keep real DSNs and bootstrap passwords outside Git. Each enabled site requires its own database and an existing exclusive private Media directory with no group/other access. Runtime TLS uses the exact configured HTTPS origins and a trusted certificate/key pair. The current development listener is deliberately limited to loopback.
+
+The supported operator sequence is:
+
+```bash
+# 1. Export the database DSNs named by the configuration.
+# 2. Run explicit AChrix schema migrations before startup.
+go run ./cmd/rixa migrate --config /absolute/path/to/rixa.json
+
+# 3. Create the fixed initial administrators. Password values stay in environment.
+export RIXA_BOOTSTRAP_PASSWORD='replace-with-a-real-secret'
+go run ./cmd/rixa bootstrap-admin --config /absolute/path/to/rixa.json \
+  --scope control --login control-admin --password-env RIXA_BOOTSTRAP_PASSWORD
+go run ./cmd/rixa bootstrap-admin --config /absolute/path/to/rixa.json \
+  --scope site:site-a --login site-a-admin --password-env RIXA_BOOTSTRAP_PASSWORD
+
+# Record each returned principal in the matching admin_principal field.
+# Repeat the site bootstrap for every enabled site.
+
+# 4. Verify migrations, configuration, private roots, composition and readiness
+#    without opening HTTP ingress.
+go run ./cmd/rixa check --config /absolute/path/to/rixa.json
+
+# 5. Start bounded HTTPS management ingress.
+go run ./cmd/rixa run --config /absolute/path/to/rixa.json
+```
+
+A single declared site omits the optional Multi-Site resolver. Disabled declared sites keep their configuration but do not resolve database secrets or construct Identity/Audit/Media runtime resources. Control and site sessions remain distinct; forwarded headers, raw site IDs and caller-supplied principals never establish authority.
+
+The exact AChrix dependency identity is machine-owned by `achworks.yaml`, `go.mod` and `go.sum`. The runtime CI verifies ordinary checksum-backed module consumption with no `replace` or `go.work`, then runs the real PostgreSQL/isolation/TLS lifecycle proof.
+
 ## Where truth lives
 
 | Question | Authoritative source |
