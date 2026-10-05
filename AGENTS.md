@@ -4,7 +4,7 @@
 
 Writable repositories come only from the current explicit assignment. This repository, its links/dependencies and technical access cannot widen that scope. A Worker receives its exact repository/task/branch/revision; do not assume authorization for AChrix, Koinon or MCP Gateway from this file.
 
-Start at README's truth map, then current main, relevant Issue/PR, product specification and affected architecture/contract. GitHub/Git/CI/docs are authoritative; chat is disposable. Do not create a separate handoff archive, backlog mirror or status dashboard.
+Start at README's truth map, then the current canonical integration branch, relevant Issue/PR, product specification and affected architecture/contract. GitHub/Git/CI/docs are authoritative; chat is disposable. Do not create a separate handoff archive, backlog mirror or status dashboard.
 
 ## Development
 
