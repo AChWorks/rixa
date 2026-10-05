@@ -6,13 +6,11 @@ Start with [README](README.md), the canonical [product specification](docs/PROJE
 
 Use the smallest reliable real implementation. Product semantics stay in Rixa; request proven reusable Foundation contract changes in its authorized repository. Avoid runtime source copying, private imports, empty Modules, speculative layers/controllers and unrelated refactoring/dependencies.
 
-The repository is initially documentation/planning only. First executable work adds real manifests, secret/configuration handling, supported runtime setup and meaningful build/test/CI commands. Do not add a placeholder Go program, dummy tests or broad CI solely to make this bootstrap look runnable.
+Executable work must add only the real manifests, secret/configuration handling, supported runtime setup and meaningful build/test/CI needed by actual behavior. Do not add a placeholder Go program, dummy tests or broad CI solely to make planning appear runnable.
 
 ## Branch, review and integration policy
 
-After the reviewed initial bootstrap commit, use focused branches and PRs targeting canonical main. Squash merges, preserve unrelated work, resolve review findings/threads, and never force-push/delete main or bypass required checks. Review the full effective diff and exact candidate/current base.
-
-The active main ruleset requires PRs, squash merges and resolved review threads, blocks force pushes/deletion and has no bypass actors. It requires zero approval votes for appropriately reviewed LOW/MEDIUM work; it does not waive risk-required independent review or owner gates. [#7](https://github.com/AChWorks/rixa/issues/7) owns native protection verification. Re-read effective rules/checks before integration; never add invented status checks or buy/change a plan as a workaround.
+Use focused branches and Pull Requests against the repository's canonical integration branch. Preserve unrelated work, resolve applicable review findings/threads, and never force through protected state or bypass required checks. Live GitHub rulesets own enforced merge methods, approvals, checks, branch protections and bypass policy; re-read them before integration instead of copying their current settings into this guide. Review the full effective diff and exact candidate/current base, and never add invented status checks or buy/change a plan as a workaround.
 
 LOW/MEDIUM work may use explicitly recorded self-review where risk permits; self-review is not independent review. HIGH security/data/tenant/public-export/recovery work requires fresh independent read-only security/correctness review tied to the exact candidate and contract, plus the applicable integration approval. Reviewers do not change code/test/deployment state unless separately authorized.
 
