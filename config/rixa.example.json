@@ -1,0 +1,31 @@
+{
+  "listen": "127.0.0.1:8443",
+  "tls": {
+    "cert_file": "/etc/rixa/tls/dev.crt",
+    "key_file": "/etc/rixa/tls/dev.key"
+  },
+  "language": "en",
+  "startup_timeout": "10s",
+  "shutdown_timeout": "10s",
+  "control": {
+    "origin": "https://control.rixa.test:8443",
+    "database_env": "RIXA_CONTROL_DSN",
+    "admin_principal": ""
+  },
+  "sites": [
+    {
+      "id": "site-a",
+      "origin": "https://a.rixa.test:8443",
+      "database_env": "RIXA_SITE_A_DSN",
+      "media_root": "/var/lib/rixa/site-a/media",
+      "admin_principal": ""
+    },
+    {
+      "id": "site-b",
+      "origin": "https://b.rixa.test:8443",
+      "database_env": "RIXA_SITE_B_DSN",
+      "media_root": "/var/lib/rixa/site-b/media",
+      "admin_principal": ""
+    }
+  ]
+}

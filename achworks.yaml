@@ -4,7 +4,7 @@ kind: Product
 metadata:
   name: rixa
   title: Rixa
-  description: Lightweight CMS product with independently owned site data and semantic static publication, planned on pinned AChrix public contracts.
+  description: Lightweight CMS product with independently owned site data and semantic static publication, built on pinned AChrix public contracts.
 
 spec:
   type: content-management-system
@@ -39,5 +39,5 @@ spec:
     foundation:
       repository: AChWorks/achrix
       sourceVersion: v0.3.0
-      consumption: planned-versioned-go-dependency
+      consumption: versioned-go-dependency
       specification: docs/PROJECT-SPEC.md
