@@ -40,9 +40,9 @@ Optional Multi-Site is accepted in the existing AChrix repository/Go module/shar
 
 ## Media publication policy
 
-The owner selected bounded clean PNG/JPEG representations on 2026-10-04. Retain private originals; prepare a separate same-format representation under explicit exact-asset authorization, remove nonessential embedded metadata and follow the finite orientation/color/animation/output/resource profile framed in [the consumer contract](two-site-contract.md#accepted-public-image-policy-and-release-boundary). Preparation and product publication use distinct permissions; exact source binding and private staging never imply future freshness or activation. This is a deliberately narrow preparation flow; general resizing/conversion/transcoding and background processors remain deferred. Public activation, content references, withdrawal and retention stay Rixa-owned. The current [AChrix Media public-image contract](https://github.com/AChWorks/achrix/blob/main/media/README.md#clean-public-image-preparation) owns the reusable preparation semantics.
+The owner selected bounded clean PNG/JPEG representations on 2026-10-04. Retain private originals; prepare a separate same-format representation under explicit exact-asset authorization, remove nonessential embedded metadata and follow the finite orientation/color/animation/output/resource profile framed in [the consumer contract](two-site-contract.md#accepted-public-image-policy-and-release-boundary). Preparation and product publication use distinct permissions; exact source binding and private staging never imply future freshness or activation. This is a deliberately narrow preparation flow; general resizing/conversion/transcoding and background processors remain deferred. Public activation, content references, withdrawal and retention stay Rixa-owned. The current [AChrix Media public-image contract](https://github.com/AChWorks/achrix/blob/HEAD/media/README.md#clean-public-image-preparation) owns the reusable preparation semantics.
 
-The current reviewed [AChrix Media contract](https://github.com/AChWorks/achrix/blob/main/media/README.md) includes explicit private-attachment SVG opt-in. It does not silently join the existing common/default upload selection. Structural admission and private attachment do not establish safe inline/public SVG. First public images remain PNG/JPEG; future public SVG needs a real passive publication profile and separate reviewed transport/resource contract.
+The current reviewed [AChrix Media contract](https://github.com/AChWorks/achrix/blob/HEAD/media/README.md) includes explicit private-attachment SVG opt-in. It does not silently join the existing common/default upload selection. Structural admission and private attachment do not establish safe inline/public SVG. First public images remain PNG/JPEG; future public SVG needs a real passive publication profile and separate reviewed transport/resource contract.
 
 ## Public meaning, SEO and AI retrieval
 
@@ -54,7 +54,7 @@ Corrections, withdrawal and route changes must keep page content, metadata, stru
 
 Operators own appropriate discovery/index/snippet and provider-specific model-training controls. Robots/noindex and crawler user-agent identity are not access control. Private drafts, previews and site-private data must not leak through any public representation.
 
-Use supported web standards/provider guidance; no separate universal AI schema/file is assumed. No indexing, citation, ranking, recommendation or perfect AI interpretation is guaranteed. Detailed Foundation guidance: [AChrix Web](https://github.com/AChWorks/achrix/blob/main/docs/web/seo-and-semantic-web.md#public-content-and-ai-retrieval).
+Use supported web standards/provider guidance; no separate universal AI schema/file is assumed. No indexing, citation, ranking, recommendation or perfect AI interpretation is guaranteed. Detailed Foundation guidance: [AChrix Web](https://github.com/AChWorks/achrix/blob/HEAD/docs/web/seo-and-semantic-web.md#public-content-and-ai-retrieval).
 
 ## Security, resource and engineering constraints
 
