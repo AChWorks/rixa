@@ -4,7 +4,7 @@
 
 ## Readiness and usage
 
-This repository currently contains the accepted product specification and delivery plan. No runnable CMS, installation package or production release exists yet. The Foundation-first prerequisite is now satisfied by the reviewed AChrix `v0.3.0` release; the first executable Rixa composition is the next implementation outcome, while GitHub Issues continue to own its exact live state, review gates and proof. GitHub [Issues](https://github.com/AChWorks/rixa/issues), [PRs](https://github.com/AChWorks/rixa/pulls) and [Releases](https://github.com/AChWorks/rixa/releases) own actual availability and evidence.
+This repository currently contains the accepted product specification and delivery plan. No runnable CMS, installation package or production release exists yet. The Foundation-first prerequisite is now satisfied by the current reviewed AChrix release; the first executable Rixa composition is the next implementation outcome, while GitHub Issues continue to own its exact live state, dependency pin, review gates and proof. GitHub [Issues](https://github.com/AChWorks/rixa/issues), [PRs](https://github.com/AChWorks/rixa/pulls) and [Releases](https://github.com/AChWorks/rixa/releases) own actual availability and evidence.
 
 To inspect/contribute, clone the public repository:
 
@@ -27,6 +27,6 @@ Start from the relevant Issue and [Contributing](CONTRIBUTING.md). The first exe
 | Product identity and discovery | [achworks.yaml](achworks.yaml) |
 | License | [MPL-2.0](LICENSE) |
 
-AChrix is consumed as a normal pinned Go dependency through public contracts. The reviewed Foundation release for the first executable Rixa slice is `v0.3.0`; Rixa #3 owns that first runtime composition and is now unblocked by Foundation readiness, but implementation has not started yet. A product manifest is added with real runtime code. Rixa owns content, templates, publication and deployment; it neither copies Core nor becomes a requirement for other AChrix products. [AChrix v0.3 consumption](https://github.com/AChWorks/achrix/blob/v0.3.0/docs/architecture/consumption-and-packaging.md) owns its supported usage.
+AChrix is consumed as a normal pinned Go dependency through public contracts. The active implementation Issue and machine-readable dependency metadata own the exact reviewed Foundation version; Rixa #3 owns the first runtime composition and is now unblocked by Foundation readiness, but implementation has not started yet. A product manifest is added with real runtime code. Rixa owns content, templates, publication and deployment; it neither copies Core nor becomes a requirement for other AChrix products. [AChrix consumption](https://github.com/AChWorks/achrix/blob/main/docs/architecture/consumption-and-packaging.md) owns its supported usage.
 
 The repository is public. First-party repository content is MPL-2.0 unless an explicit file/artifact notice says otherwise; third-party licenses/notices remain applicable. Naming does not claim domain or trademark clearance.
