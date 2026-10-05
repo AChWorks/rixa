@@ -27,6 +27,6 @@ Start from the relevant Issue and [Contributing](CONTRIBUTING.md). Use only buil
 | Product identity and discovery | [achworks.yaml](achworks.yaml) |
 | License | [MPL-2.0](LICENSE) |
 
-AChrix is consumed as a normal pinned Go dependency through public contracts. Machine/runtime dependency state—`achworks.yaml` and, when Go runtime exists, product `go.mod`/`go.sum`—plus active PR/CI evidence own the exact reviewed Foundation identity. Rixa owns content, templates, publication and deployment; it neither copies Core nor becomes a requirement for other AChrix products. [AChrix consumption](https://github.com/AChWorks/achrix/blob/main/docs/architecture/consumption-and-packaging.md) owns its supported usage.
+AChrix is consumed as a normal pinned Go dependency through public contracts. Machine/runtime dependency state—`achworks.yaml` and, when Go runtime exists, product `go.mod`/`go.sum`—plus active PR/CI evidence own the exact reviewed Foundation identity. Rixa owns content, templates, publication and deployment; it neither copies Core nor becomes a requirement for other AChrix products. [AChrix consumption](https://github.com/AChWorks/achrix/blob/HEAD/docs/architecture/consumption-and-packaging.md) owns its supported usage.
 
 The repository is public. First-party repository content is MPL-2.0 unless an explicit file/artifact notice says otherwise; third-party licenses/notices remain applicable. Naming does not claim domain or trademark clearance.
