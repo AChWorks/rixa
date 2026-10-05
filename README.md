@@ -27,6 +27,6 @@ Start from the relevant Issue and [Contributing](CONTRIBUTING.md). The first exe
 | Product identity and discovery | [achworks.yaml](achworks.yaml) |
 | License | [MPL-2.0](LICENSE) |
 
-AChrix is consumed as a normal pinned Go dependency through public contracts. The inspected starting release is `v0.2.0`; the accepted contract requires a reviewed released successor for its new Foundation APIs before runtime consumption. A product manifest is added with real runtime code. Rixa owns content, templates, publication and deployment; it neither copies Core nor becomes a requirement for other AChrix products. [AChrix consumption](https://github.com/AChWorks/achrix/blob/main/docs/architecture/consumption-and-packaging.md) owns its supported usage.
+AChrix is consumed as a normal pinned Go dependency through public contracts. The reviewed Foundation release for the first executable Rixa slice is `v0.3.0`; runtime consumption itself remains owned by Rixa #3 and has not started yet. A product manifest is added with real runtime code. Rixa owns content, templates, publication and deployment; it neither copies Core nor becomes a requirement for other AChrix products. [AChrix v0.3 consumption](https://github.com/AChWorks/achrix/blob/v0.3.0/docs/architecture/consumption-and-packaging.md) owns its supported usage.
 
 The repository is public. First-party repository content is MPL-2.0 unless an explicit file/artifact notice says otherwise; third-party licenses/notices remain applicable. Naming does not claim domain or trademark clearance.

@@ -38,6 +38,6 @@ spec:
   extensions:
     foundation:
       repository: AChWorks/achrix
-      sourceVersion: v0.2.0
+      sourceVersion: v0.3.0
       consumption: planned-versioned-go-dependency
       specification: docs/PROJECT-SPEC.md
