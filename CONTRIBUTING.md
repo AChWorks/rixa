@@ -20,7 +20,7 @@ LOW/MEDIUM work may use explicitly recorded self-review where risk permits; self
 
 Inspect the affected behavior, failure paths, environment and full diff, then run the minimum sufficient meaningful evidence. Runtime/security/persistence/concurrency changes require relevant executable proof; documentation-only edits need inspection/link/schema/example checks where affected.
 
-Use `git diff --check <base> <candidate>` for a committed change (or the appropriate working/staged diff). Check changed relative links/anchors, real commands and schema-valid discovery metadata. Validate achworks.yaml against the current pinned [Koinon descriptor schema](https://github.com/AChWorks/koinon/blob/766eb6fd8ab31e7b56e693aa7196c0f651357214/schemas/descriptor.schema.json), recording the schema identity used.
+Use `git diff --check <base> <candidate>` for a committed change (or the appropriate working/staged diff). Check changed relative links/anchors, real commands and schema-valid discovery metadata. Validate `achworks.yaml` against the current authoritative [Koinon descriptor schema](https://github.com/AChWorks/koinon/blob/main/schemas/descriptor.schema.json), and record the exact schema commit identity used in that PR/validation evidence rather than hard-coding it in this durable guide.
 
 Reuse unaffected evidence with its identity/assumptions, never relabel it as fresh. Do not duplicate broad local/CI suites or add a matrix for short tests. Expand only for actual changes, failures, unresolved interaction or required gates. Use real supported PostgreSQL for database proof; skips are not success. Product CI is introduced with the first runtime slice and binds checks to actual candidate/base.
 
@@ -33,5 +33,7 @@ Use explicit bounded migrations and immutable ledgers; startup/requests do not i
 Keep tokens/passwords/signing keys, private datasets and credentials out of Git, Issues and public manifests. Use protected operator/runtime sources and least privilege. Tests operate only on clearly owned disposable targets. Do not restart/mutate live infrastructure or destructively restore user data under a bootstrap task.
 
 Done requires current acceptance reconciled against actual evidence; merged is not automatically released/deployed. Issues own live contracts/state; PRs/Git/CI own implementation/review/validation; Releases and supported deployment systems own actual delivery. Production, paid/visibility decisions and live destructive effects retain their separate gates.
+
+Durable product/architecture/usage documentation describes stable behavior and points to the authoritative owner of mutable truth instead of duplicating release tags, commit SHAs, external schema pins or other rotating evidence. Exact AChrix dependency identity belongs in machine/runtime state such as `achworks.yaml`, the product `go.mod`/`go.sum` once runtime exists, and the active Issue/PR/CI evidence that proves the selected release. Historical migration/benchmark/release evidence may retain exact identities when reproducibility is its purpose.
 
 First-party content is [MPL-2.0](LICENSE) unless explicitly scoped otherwise; preserve third-party notices and do not invent an Apache SDK designation or claim signed contribution consent from a template.
