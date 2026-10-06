@@ -4,10 +4,15 @@ package product
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -125,6 +130,12 @@ func TestRuntimeResourceBoundProfile(t *testing.T) {
 		t.Fatalf("startup demand=%#v configured ceiling=%d", started, budget.RuntimeDBMaxConnectionsPerReplica)
 	}
 
+	if _, err = runtime.ControlService().ApplySitePublication(ctx, runtime.Control.AdminPrincipal, "site-b", PublicationRequest{
+		OperationID: newOperationID(),
+	}); err != nil {
+		t.Fatalf("publish site B mixed-load fixture: %v", err)
+	}
+
 	aAdmin := runtime.Sites["site-a"].adminPrincipal
 	bAdmin := runtime.Sites["site-b"].adminPrincipal
 	accountA, err := runtime.Sites["site-a"].Identity.CreateAccount(ctx, aAdmin, "resource-member-a", "Resource-Member-A-Password-2026!")
@@ -178,6 +189,39 @@ func TestRuntimeResourceBoundProfile(t *testing.T) {
 		t.Fatalf("saturated site A did not fail fast with identity.ErrLimited: %v", limitedErr)
 	}
 
+	const publicBurst = 8
+	publicStart := make(chan struct{})
+	publicResults := make(chan error, publicBurst)
+	for range publicBurst {
+		go func() {
+			<-publicStart
+			req := httptest.NewRequest(http.MethodGet, "https://b.resource.test:20443/", nil)
+			req.Host = "b.resource.test:20443"
+			req.TLS = &tls.ConnectionState{}
+			rec := httptest.NewRecorder()
+			runtime.Handler.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK {
+				publicResults <- fmt.Errorf("site B public status=%d", rec.Code)
+				return
+			}
+			if !strings.Contains(rec.Body.String(), "No published posts.") {
+				publicResults <- fmt.Errorf("site B public response missing published empty-state")
+				return
+			}
+			publicResults <- nil
+		}()
+	}
+	close(publicStart)
+	for range publicBurst {
+		if publicErr := <-publicResults; publicErr != nil {
+			t.Fatal(publicErr)
+		}
+	}
+	mixed := observeDatabaseDemand(t, ctx, adminDSN, dsns)
+	if mixed.Active != blocked.Active {
+		t.Fatalf("static public burst changed active database demand: before=%#v after=%#v", blocked, mixed)
+	}
+
 	otherCtx, otherCancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	other, otherErr := runtime.Sites["site-b"].Identity.Account(otherCtx, bAdmin, accountB.ID)
 	otherCancel()
@@ -210,10 +254,11 @@ func TestRuntimeResourceBoundProfile(t *testing.T) {
 		t.Fatalf("released admission was not reusable: %v", reuseErr)
 	}
 
-	fmt.Printf("RIXA_RESOURCE_OBSERVATION active_sites=%d publication_sites=%d db_ceiling=%d warm_reserve=%d constructor_total=%d startup_total=%d saturation_site_a_total=%d saturation_site_a_active=%d post_burst_total=%d post_burst_active=%d\n",
+	fmt.Printf("RIXA_RESOURCE_OBSERVATION runner_goos=%s runner_goarch=%s runner_cpus=%d runner_mem_total_kib=%s active_sites=%d publication_sites=%d db_ceiling=%d warm_reserve=%d constructor_total=%d startup_total=%d saturation_site_a_total=%d saturation_site_a_active=%d mixed_public_reads=%d mixed_active=%d post_burst_total=%d post_burst_active=%d\n",
+		goruntime.GOOS, goruntime.GOARCH, goruntime.NumCPU(), runnerMemoryTotalKiB(),
 		budget.ActiveSites, budget.PublicationSites, budget.RuntimeDBMaxConnectionsPerReplica,
 		budget.RuntimeDBWarmReservePerReplica, before.Total, started.Total, blocked.Total, blocked.Active,
-		reclaimed.Total, reclaimed.Active)
+		publicBurst, mixed.Active, reclaimed.Total, reclaimed.Active)
 
 	stopCtx, stopCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	if err = runtime.Shutdown(stopCtx); err != nil {
@@ -292,4 +337,22 @@ func waitForActiveDatabaseDemand(t *testing.T, ctx context.Context, adminDSN, ds
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+}
+
+
+func runnerMemoryTotalKiB() string {
+	data, err := os.ReadFile("/proc/meminfo")
+	if err != nil {
+		return "unknown"
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if !strings.HasPrefix(line, "MemTotal:") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) >= 2 {
+			return fields[1]
+		}
+	}
+	return "unknown"
 }
