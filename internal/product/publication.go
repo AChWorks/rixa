@@ -153,8 +153,10 @@ type PublicationService struct {
 
 	mu     sync.Mutex
 	readMu sync.Mutex
-	ready  atomic.Bool
-	state atomic.Pointer[publicationReadState]
+	ready           atomic.Bool
+	state           atomic.Pointer[publicationReadState]
+	lifecycleCtx    context.Context
+	lifecycleCancel context.CancelFunc
 }
 
 func newPublicationService(site ResolvedSite, app *achrix.Application, editorial *EditorialService, mediaService *media.Service) (*PublicationService, error) {
@@ -171,13 +173,35 @@ func newPublicationService(site ResolvedSite, app *achrix.Application, editorial
 	if err != nil {
 		return nil, ErrConfiguration
 	}
+	lifecycleCtx, lifecycleCancel := context.WithCancel(context.Background())
 	return &PublicationService{
 		siteID: site.ID, origin: site.Origin, authority: authority,
 		root: site.PublicRoot, policy: site.PublicPolicy,
 		app: app, editorial: editorial, media: mediaService,
 		slots: make(chan struct{}, publicReadConcurrency),
 		applyGate: make(chan struct{}, 1),
+		lifecycleCtx: lifecycleCtx, lifecycleCancel: lifecycleCancel,
 	}, nil
+}
+
+func (s *PublicationService) Stop(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	s.ready.Store(false)
+	if s.lifecycleCancel != nil {
+		s.lifecycleCancel()
+	}
+	if s.applyGate == nil {
+		return nil
+	}
+	select {
+	case s.applyGate <- struct{}{}:
+		<-s.applyGate
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (s *PublicationService) State(contentID string, kind ContentKind) PublicationState {
@@ -227,6 +251,11 @@ func (s *PublicationService) Apply(ctx context.Context, actor achrix.Principal, 
 	}
 	ctx, cancel := context.WithTimeout(ctx, publicationApplyTimeout)
 	defer cancel()
+	if s.lifecycleCtx == nil {
+		return PublicationResult{}, ErrEditorialUnavailable
+	}
+	stopLifecycleCancel := context.AfterFunc(s.lifecycleCtx, cancel)
+	defer stopLifecycleCancel()
 	if request.ExpectedGeneration != "" && !validEditorialID(request.ExpectedGeneration) {
 		return PublicationResult{}, ErrEditorialInvalid
 	}
