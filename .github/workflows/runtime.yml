@@ -69,6 +69,11 @@ jobs:
       - name: Runtime proof
         run: go test -race ./...
 
+      - name: Measure resource profile
+        env:
+          RIXA_RESOURCE_OBSERVATION: "1"
+        run: go test -race ./internal/product -run '^TestRuntimeResourceBoundProfile$' -count=1 -v
+
       - name: Measure static HTTPS path
         run: go test ./internal/product -run '^$' -bench '^BenchmarkStaticPublicationHTTPSRead$' -benchtime=250ms -count=1 -benchmem
 

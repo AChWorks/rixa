@@ -199,7 +199,19 @@ func (s *PublicationService) Stop(ctx context.Context) error {
 	if s.lifecycleCancel != nil {
 		s.lifecycleCancel()
 	}
-	if s.applyGate == nil {
+	return s.drainApplyGate(ctx)
+}
+
+func (s *PublicationService) rollbackReady(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	s.ready.Store(false)
+	return s.drainApplyGate(ctx)
+}
+
+func (s *PublicationService) drainApplyGate(ctx context.Context) error {
+	if s == nil || s.applyGate == nil {
 		return nil
 	}
 	select {
