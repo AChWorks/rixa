@@ -78,7 +78,7 @@ var publicPageTemplate = template.Must(template.New("public-page").Parse(`<!doct
 <header>{{if .ShowSiteTitle}}<p><strong><a href="/">{{.SiteTitle}}</a></strong></p>{{end}}{{if .HeaderTagline}}<p dir="auto">{{.HeaderTagline}}</p>{{end}}</header>
 <main><article>
 <h1 dir="auto">{{.Title}}</h1>
-<p class="rixa-meta"><span>Published <time datetime="{{.PublishedAt.Format "2006-01-02T15:04:05Z07:00"}}">{{.PublishedAt.Format "2006-01-02"}}</time></span> · <span>Updated <time datetime="{{.ModifiedAt.Format "2006-01-02T15:04:05Z07:00"}}">{{.ModifiedAt.Format "2006-01-02"}}</time></span></p>
+<p class="rixa-meta"><span>{{if eq .Language "fa"}}انتشار{{else}}Published{{end}} <time datetime="{{.PublishedAt.Format "2006-01-02T15:04:05Z07:00"}}">{{.PublishedAt.Format "2006-01-02"}}</time></span> · <span>{{if eq .Language "fa"}}به‌روزرسانی{{else}}Updated{{end}} <time datetime="{{.ModifiedAt.Format "2006-01-02T15:04:05Z07:00"}}">{{.ModifiedAt.Format "2006-01-02"}}</time></span></p>
 <div>{{.Body}}</div>
 </article></main>
 {{if .FooterText}}<footer dir="auto">{{.FooterText}}</footer>{{end}}
@@ -98,7 +98,7 @@ var publicHomeTemplate = template.Must(template.New("public-home").Parse(`<!doct
 </head>
 <body>
 <header>{{if .ShowSiteTitle}}<h1 dir="auto">{{.SiteTitle}}</h1>{{end}}{{if .HeaderTagline}}<p dir="auto">{{.HeaderTagline}}</p>{{end}}{{if .SiteDescription}}<p dir="auto">{{.SiteDescription}}</p>{{end}}</header>
-<main><h2>Latest posts</h2>{{if .Items}}<ol>{{range .Items}}<li><a href="{{.URL}}" dir="auto">{{.Title}}</a></li>{{end}}</ol>{{else}}<p>No published posts.</p>{{end}}</main>
+<main>{{if .ShowSiteTitle}}<h2>{{if eq .Language "fa"}}آخرین نوشته‌ها{{else}}Latest posts{{end}}</h2>{{else}}<h1>{{if eq .Language "fa"}}آخرین نوشته‌ها{{else}}Latest posts{{end}}</h1>{{end}}{{if .Items}}<ol>{{range .Items}}<li><a href="{{.URL}}" dir="auto">{{.Title}}</a></li>{{end}}</ol>{{else}}<p>{{if eq .Language "fa"}}هنوز نوشته‌ای منتشر نشده است.{{else}}No published posts.{{end}}</p>{{end}}</main>
 {{if .FooterText}}<footer dir="auto">{{.FooterText}}</footer>{{end}}
 </body></html>`))
 
