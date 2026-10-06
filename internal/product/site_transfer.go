@@ -873,8 +873,7 @@ func writeSiteTransferMetadata(root string, manifest SiteTransferManifest) error
 	if err != nil || int64(len(data)) > maxSiteTransferManifestBytes {
 		return fmt.Errorf("%w: encode transfer manifest", ErrSiteTransfer)
 	}
-	data = append(data, '
-')
+	data = append(data, '\n')
 	manifestPath := filepath.Join(root, siteTransferManifestFile)
 	if err = writePrivateTransferFile(manifestPath, data); err != nil {
 		return err
@@ -884,8 +883,7 @@ func writeSiteTransferMetadata(root string, manifest SiteTransferManifest) error
 	if err != nil {
 		return fmt.Errorf("%w: encode transfer completion marker", ErrSiteTransfer)
 	}
-	completeData = append(completeData, '
-')
+	completeData = append(completeData, '\n')
 	if err = writePrivateTransferFile(filepath.Join(root, siteTransferCompleteFile), completeData); err != nil {
 		return err
 	}
