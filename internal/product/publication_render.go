@@ -448,13 +448,14 @@ func publicationSitemap(manifest *publicationManifest) ([]byte, error) {
 			return
 		}
 		seen[route] = struct{}{}
-		values = append(values, location{
-			Loc: manifest.Origin + route,
-			LastMod: modified.UTC().Format(time.RFC3339),
-		})
+		item := location{Loc: manifest.Origin + route}
+		if !modified.IsZero() {
+			item.LastMod = modified.UTC().Format(time.RFC3339)
+		}
+		values = append(values, item)
 	}
 	if route, ok := manifest.Routes["/"]; ok && route.Kind == "file" {
-		modified := manifest.CreatedAt
+		modified := time.Time{}
 		if route.ContentID != "" {
 			modified = manifest.Entries[route.ContentID].ModifiedAt
 		}
