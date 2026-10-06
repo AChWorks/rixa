@@ -225,9 +225,6 @@ func (s *PublicationService) Apply(ctx context.Context, actor achrix.Principal, 
 	}
 	ctx, cancel := context.WithTimeout(ctx, publicationApplyTimeout)
 	defer cancel()
-	if !validOperationID(request.OperationID) {
-		return PublicationResult{}, ErrEditorialInvalid
-	}
 	if request.ExpectedGeneration != "" && !validEditorialID(request.ExpectedGeneration) {
 		return PublicationResult{}, ErrEditorialInvalid
 	}
