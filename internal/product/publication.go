@@ -365,8 +365,9 @@ func (s *PublicationService) Apply(ctx context.Context, actor achrix.Principal, 
 
 	gen := &publishedGeneration{manifest: manifest, root: finalDir}
 	pointerCommitted, pointerErr := s.activateGeneration(generation)
+	var retired []*publishedGeneration
 	if pointerCommitted {
-		s.installGeneration(gen)
+		retired = s.installGeneration(gen)
 	}
 	if pointerErr != nil {
 		if pointerCommitted {
@@ -376,7 +377,7 @@ func (s *PublicationService) Apply(ctx context.Context, actor achrix.Principal, 
 		return PublicationResult{}, ErrEditorialUnavailable
 	}
 
-	s.cleanupRetired()
+	s.cleanupRetired(retired)
 	return PublicationResult{
 		Generation: generation, ContentID: request.ContentID,
 		Route: manifest.Operation.Route, CreatedAt: now,
@@ -392,7 +393,6 @@ func buildPublicationLayout(snapshot publicationSnapshot, previous *publicationM
 			copyEntry.Active = false
 			copyEntry.CanonicalRoute = ""
 			copyEntry.Revision = 0
-			copyEntry.SourceKey = ""
 			copyEntry.File = ""
 			entries[id] = copyEntry
 		}
@@ -417,6 +417,13 @@ func buildPublicationLayout(snapshot publicationSnapshot, previous *publicationM
 			entry.FirstPublishedAt = now
 		}
 		entries[content.ID] = entry
+	}
+
+	for id, entry := range entries {
+		if !entry.Active {
+			entry.SourceKey = ""
+			entries[id] = entry
+		}
 	}
 
 	if request.ContentID != "" {
@@ -735,20 +742,24 @@ func (s *PublicationService) findOperation(operationID string) (PublicationOpera
 	return PublicationOperation{}, false
 }
 
-func (s *PublicationService) installGeneration(generation *publishedGeneration) {
+func (s *PublicationService) installGeneration(generation *publishedGeneration) []*publishedGeneration {
 	old := s.state.Load()
 	generations := []*publishedGeneration{generation}
-	if old != nil {
+	var retired []*publishedGeneration
+	if old != nil && len(old.generations) != 0 &&
+		old.generations[0].manifest.Generation == generation.manifest.ParentGeneration {
 		for _, existing := range old.generations {
-			if existing.manifest.Generation == generation.manifest.ParentGeneration || len(generations) > 1 {
-				if len(generations) >= publicationHistoryLimit {
-					break
-				}
+			if len(generations) < publicationHistoryLimit {
 				generations = append(generations, existing)
+			} else {
+				retired = append(retired, existing)
 			}
 		}
+	} else if old != nil {
+		retired = append(retired, old.generations...)
 	}
 	s.state.Store(newPublicationReadState(generations))
+	return retired
 }
 
 func newPublicationReadState(generations []*publishedGeneration) *publicationReadState {
@@ -763,28 +774,12 @@ func newPublicationReadState(generations []*publishedGeneration) *publicationRea
 	return state
 }
 
-func (s *PublicationService) cleanupRetired() {
-	current := s.state.Load()
-	if current == nil {
-		return
-	}
-	retained := make(map[string]struct{}, len(current.generations))
-	for _, generation := range current.generations {
-		retained[generation.manifest.Generation] = struct{}{}
-	}
-	entries, err := os.ReadDir(filepath.Join(s.root, "generations"))
-	if err != nil {
-		return
-	}
-	for _, entry := range entries {
-		if !entry.IsDir() || !validEditorialID(entry.Name()) {
+func (s *PublicationService) cleanupRetired(retired []*publishedGeneration) {
+	for _, generation := range retired {
+		if generation == nil || generation.readers.Load() != 0 {
 			continue
 		}
-		if _, keep := retained[entry.Name()]; keep {
-			continue
-		}
-		path := filepath.Join(s.root, "generations", entry.Name())
-		_ = os.RemoveAll(path)
+		_ = os.RemoveAll(generation.root)
 	}
 }
 
