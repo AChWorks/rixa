@@ -195,10 +195,11 @@ func CaptureSite(parent context.Context, config Config, siteID, destination stri
 		defer publicUnlock()
 	}
 
-	before, err := inspectSiteTransferDatabase(parent, target.DSN, site.AdminPrincipal)
+	fence, before, err := beginSiteTransferDatabaseFence(parent, target.DSN, site.AdminPrincipal)
 	if err != nil {
 		return SiteTransferManifest{}, err
 	}
+	defer func() { _ = fence.Close(context.Background()) }()
 	if before.OtherSessions != 0 {
 		return SiteTransferManifest{}, fmt.Errorf("%w: source database has %d other sessions; stop ingress/runtime first", ErrSiteTransfer, before.OtherSessions)
 	}
@@ -233,7 +234,7 @@ func CaptureSite(parent context.Context, config Config, siteID, destination stri
 		publicEntries = entries
 	}
 
-	after, err := inspectSiteTransferDatabase(parent, target.DSN, site.AdminPrincipal)
+	after, err := inspectSiteTransferDatabaseQuery(parent, fence, site.AdminPrincipal)
 	if err != nil {
 		return SiteTransferManifest{}, err
 	}
@@ -678,6 +679,83 @@ func siteTransferLocalHost(host string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
+type siteTransferDatabaseQuery interface {
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+	QueryRow(context.Context, string, ...any) pgx.Row
+}
+
+type siteTransferDatabaseFence struct {
+	conn *pgx.Conn
+	tx   pgx.Tx
+}
+
+func (f *siteTransferDatabaseFence) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+	return f.tx.Query(ctx, sql, args...)
+}
+
+func (f *siteTransferDatabaseFence) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	return f.tx.QueryRow(ctx, sql, args...)
+}
+
+func (f *siteTransferDatabaseFence) Close(ctx context.Context) error {
+	if f == nil {
+		return nil
+	}
+	var err error
+	if f.tx != nil {
+		err = errors.Join(err, f.tx.Rollback(ctx))
+		f.tx = nil
+	}
+	if f.conn != nil {
+		err = errors.Join(err, f.conn.Close(ctx))
+		f.conn = nil
+	}
+	return err
+}
+
+func beginSiteTransferDatabaseFence(parent context.Context, dsn, adminPrincipal string) (*siteTransferDatabaseFence, siteTransferSnapshot, error) {
+	cfg, err := pgx.ParseConfig(dsn)
+	if err != nil || cfg == nil || !siteTransferLocalHost(cfg.Host) || len(cfg.Fallbacks) != 0 || cfg.TLSConfig != nil {
+		return nil, siteTransferSnapshot{}, fmt.Errorf("%w: source database profile", ErrSiteTransfer)
+	}
+	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
+	defer cancel()
+	conn, err := pgx.ConnectConfig(ctx, cfg)
+	if err != nil {
+		return nil, siteTransferSnapshot{}, fmt.Errorf("%w: inspect database", ErrSiteTransfer)
+	}
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		_ = conn.Close(context.Background())
+		return nil, siteTransferSnapshot{}, fmt.Errorf("%w: begin database capture fence", ErrSiteTransfer)
+	}
+	fence := &siteTransferDatabaseFence{conn: conn, tx: tx}
+	fail := func(e error) (*siteTransferDatabaseFence, siteTransferSnapshot, error) {
+		_ = fence.Close(context.Background())
+		return nil, siteTransferSnapshot{}, e
+	}
+	if _, err = tx.Exec(ctx, "SET LOCAL lock_timeout='2s'"); err != nil {
+		return fail(fmt.Errorf("%w: configure database capture fence", ErrSiteTransfer))
+	}
+	const lockSQL = `
+		LOCK TABLE
+			identity.schema_migrations, identity.accounts, identity.credentials, identity.sessions,
+			audit.schema_migrations, audit.records,
+			media.schema_migrations, media.assets,
+			rixa.schema_migrations, rixa.content_items, rixa.content_revisions, rixa.content_media_refs,
+			rixa.appearance_revisions, rixa.appearance_head, rixa.operations
+		IN SHARE MODE
+	`
+	if _, err = tx.Exec(ctx, lockSQL); err != nil {
+		return fail(fmt.Errorf("%w: source database is not quiescent", ErrSiteTransfer))
+	}
+	snapshot, err := inspectSiteTransferDatabaseQuery(parent, fence, adminPrincipal)
+	if err != nil {
+		return fail(err)
+	}
+	return fence, snapshot, nil
+}
+
 func inspectSiteTransferDatabase(parent context.Context, dsn, adminPrincipal string) (siteTransferSnapshot, error) {
 	cfg, err := pgx.ParseConfig(dsn)
 	if err != nil || cfg == nil || !siteTransferLocalHost(cfg.Host) || len(cfg.Fallbacks) != 0 || cfg.TLSConfig != nil {
@@ -690,24 +768,30 @@ func inspectSiteTransferDatabase(parent context.Context, dsn, adminPrincipal str
 		return siteTransferSnapshot{}, fmt.Errorf("%w: inspect database", ErrSiteTransfer)
 	}
 	defer conn.Close(context.Background())
+	return inspectSiteTransferDatabaseQuery(ctx, conn, adminPrincipal)
+}
+
+func inspectSiteTransferDatabaseQuery(parent context.Context, query siteTransferDatabaseQuery, adminPrincipal string) (siteTransferSnapshot, error) {
+	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
+	defer cancel()
 
 	var result siteTransferSnapshot
 	var versionText string
-	if err = conn.QueryRow(ctx, "SHOW server_version_num").Scan(&versionText); err != nil {
+	if err = query.QueryRow(ctx, "SHOW server_version_num").Scan(&versionText); err != nil {
 		return siteTransferSnapshot{}, fmt.Errorf("%w: inspect PostgreSQL version", ErrSiteTransfer)
 	}
 	result.PostgreSQLVersionNum, err = strconv.Atoi(versionText)
 	if err != nil || result.PostgreSQLVersionNum/10000 != 18 {
 		return siteTransferSnapshot{}, fmt.Errorf("%w: PostgreSQL 18 is required by this transfer profile", ErrSiteTransfer)
 	}
-	if err = conn.QueryRow(ctx, "SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid()").Scan(&result.OtherSessions); err != nil {
+	if err = query.QueryRow(ctx, "SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid()").Scan(&result.OtherSessions); err != nil {
 		return siteTransferSnapshot{}, fmt.Errorf("%w: inspect database sessions", ErrSiteTransfer)
 	}
-	if err = conn.QueryRow(ctx, "SELECT count(*) FROM media.assets WHERE state IN ('pending','deleting')").Scan(&result.Unfinished); err != nil {
+	if err = query.QueryRow(ctx, "SELECT count(*) FROM media.assets WHERE state IN ('pending','deleting')").Scan(&result.Unfinished); err != nil {
 		return siteTransferSnapshot{}, fmt.Errorf("%w: inspect Media state", ErrSiteTransfer)
 	}
 	var enabledAdmin int64
-	if err = conn.QueryRow(ctx, "SELECT count(*) FROM identity.accounts WHERE id=$1 AND enabled", adminPrincipal).Scan(&enabledAdmin); err != nil || enabledAdmin != 1 {
+	if err = query.QueryRow(ctx, "SELECT count(*) FROM identity.accounts WHERE id=$1 AND enabled", adminPrincipal).Scan(&enabledAdmin); err != nil || enabledAdmin != 1 {
 		return siteTransferSnapshot{}, fmt.Errorf("%w: site administrator account missing or disabled", ErrSiteTransfer)
 	}
 
@@ -718,7 +802,7 @@ func inspectSiteTransferDatabase(parent context.Context, dsn, adminPrincipal str
 		{"media", "SELECT version,checksum FROM media.schema_migrations ORDER BY version"},
 		{"rixa", "SELECT version,identity FROM rixa.schema_migrations ORDER BY version"},
 	} {
-		rows, queryErr := conn.Query(ctx, item.query)
+		rows, queryErr := query.Query(ctx, item.query)
 		if queryErr != nil {
 			return siteTransferSnapshot{}, fmt.Errorf("%w: %s migration ledger", ErrSiteTransfer, item.name)
 		}
@@ -756,15 +840,15 @@ func inspectSiteTransferDatabase(parent context.Context, dsn, adminPrincipal str
 		{&result.Summary.SourceSessionRows, "SELECT count(*) FROM identity.sessions"},
 	}
 	for _, item := range summaryQueries {
-		if err = conn.QueryRow(ctx, item.query).Scan(item.target); err != nil {
+		if err = query.QueryRow(ctx, item.query).Scan(item.target); err != nil {
 			return siteTransferSnapshot{}, fmt.Errorf("%w: summarize site database", ErrSiteTransfer)
 		}
 	}
-	if err = conn.QueryRow(ctx, "SELECT r.revision,r.theme FROM rixa.appearance_head h JOIN rixa.appearance_revisions r ON r.revision=h.head_revision WHERE h.singleton").Scan(&result.Summary.AppearanceRevision, &result.Summary.Theme); err != nil {
+	if err = query.QueryRow(ctx, "SELECT r.revision,r.theme FROM rixa.appearance_head h JOIN rixa.appearance_revisions r ON r.revision=h.head_revision WHERE h.singleton").Scan(&result.Summary.AppearanceRevision, &result.Summary.Theme); err != nil {
 		return siteTransferSnapshot{}, fmt.Errorf("%w: summarize site appearance", ErrSiteTransfer)
 	}
 
-	rows, err := conn.Query(ctx, "SELECT id,revision,size,sha256 FROM media.assets WHERE state='ready' ORDER BY id")
+	rows, err := query.Query(ctx, "SELECT id,revision,size,sha256 FROM media.assets WHERE state='ready' ORDER BY id")
 	if err != nil {
 		return siteTransferSnapshot{}, fmt.Errorf("%w: list ready Media", ErrSiteTransfer)
 	}
@@ -783,7 +867,7 @@ func inspectSiteTransferDatabase(parent context.Context, dsn, adminPrincipal str
 	rows.Close()
 
 	var brokenRefs int64
-	if err = conn.QueryRow(ctx, "SELECT count(*) FROM rixa.content_media_refs r LEFT JOIN media.assets a ON a.id=r.asset_id AND a.revision=r.asset_revision AND a.state='ready' WHERE a.id IS NULL").Scan(&brokenRefs); err != nil || brokenRefs != 0 {
+	if err = query.QueryRow(ctx, "SELECT count(*) FROM rixa.content_media_refs r LEFT JOIN media.assets a ON a.id=r.asset_id AND a.revision=r.asset_revision AND a.state='ready' WHERE a.id IS NULL").Scan(&brokenRefs); err != nil || brokenRefs != 0 {
 		return siteTransferSnapshot{}, fmt.Errorf("%w: content/Media references are not coherent", ErrSiteTransfer)
 	}
 	return result, nil
