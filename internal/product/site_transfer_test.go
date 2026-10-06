@@ -224,6 +224,50 @@ func TestSiteTransferRestoreSourceRejectsTargetOverlap(t *testing.T) {
 	}
 }
 
+func TestSiteTransferRestoreIsolationRejectsCrossSitePrivateRootOverlap(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		sourceUnder bool
+		targetUnder bool
+	}{
+		{name: "source overlaps other site", sourceUnder: true},
+		{name: "target overlaps other site", targetUnder: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			base := t.TempDir()
+			otherMedia := filepath.Join(base, "site-b-media")
+			otherPublic := filepath.Join(base, "site-b-public")
+			targetParent := filepath.Join(base, "target")
+			for _, root := range []string{otherMedia, otherPublic, targetParent} {
+				if err := os.Mkdir(root, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			source := filepath.Join(base, "bundle")
+			if test.sourceUnder {
+				source = filepath.Join(otherPublic, "bundle")
+			}
+			if err := os.Mkdir(source, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			mediaTarget := filepath.Join(targetParent, "site-a-media")
+			if test.targetUnder {
+				mediaTarget = filepath.Join(otherMedia, "site-a-media")
+			}
+			config := Config{Sites: []SiteConfig{
+				{ID: "site-a", MediaRoot: mediaTarget, PublicRoot: filepath.Join(targetParent, "site-a-public")},
+				{ID: "site-b", MediaRoot: otherMedia, PublicRoot: otherPublic},
+			}}
+			if err := validateSiteTransferRestoreIsolation(config, config.Sites[0], source); !errors.Is(err, ErrConfiguration) {
+				t.Fatalf("cross-site restore overlap accepted: %v", err)
+			}
+			if _, err := os.Lstat(mediaTarget); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("rejected restore created Media target: %v", err)
+			}
+		})
+	}
+}
+
 func TestSiteTransferArchivePathAdmission(t *testing.T) {
 	for _, value := range []string{"file", "dir/file", "a-b_c.1"} {
 		if !validSiteTransferArchivePath(value) {

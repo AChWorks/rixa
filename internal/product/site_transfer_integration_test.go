@@ -186,6 +186,22 @@ func TestSiteTransferRoundTrip(t *testing.T) {
 	}
 	stopCancel()
 
+	aliasCaptureConfig := source
+	aliasCaptureConfig.Sites = append([]SiteConfig(nil), source.Sites...)
+	aliasCaptureConfig.Sites[1].DatabaseEnv = "TRANSFER_SOURCE_B_ALIAS"
+	aliasCaptureEnv := mapLookup(map[string]string{
+		"TRANSFER_SOURCE_CONTROL": dsns["source-control"],
+		"TRANSFER_SOURCE_A":       dsns["source-a"],
+		"TRANSFER_SOURCE_B_ALIAS": dsns["source-a"],
+	})
+	aliasCaptureRoot := filepath.Join(base, "capture-db-alias")
+	if _, err = CaptureSite(ctx, aliasCaptureConfig, "site-a", aliasCaptureRoot, aliasCaptureEnv, tooling); !errors.Is(err, ErrConfiguration) {
+		t.Fatalf("capture accepted aliased PostgreSQL targets: %v", err)
+	}
+	if _, err = os.Lstat(aliasCaptureRoot); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("rejected aliased capture created bundle: %v", err)
+	}
+
 	fence, _, err := beginSiteTransferDatabaseFence(ctx, dsns["source-a"], source.Sites[0].AdminPrincipal)
 	if err != nil {
 		t.Fatalf("begin source database capture fence: %v", err)
@@ -255,8 +271,63 @@ func TestSiteTransferRoundTrip(t *testing.T) {
 	}
 	targetEnv := mapLookup(map[string]string{
 		"TRANSFER_TARGET_CONTROL": dsns["target-control"],
-		"TRANSFER_TARGET_A": dsns["target-a"],
+		"TRANSFER_TARGET_A":       dsns["target-a"],
 	})
+
+	overlapOtherMedia := filepath.Join(targetParent, "site-b-media")
+	overlapOtherPublic := filepath.Join(targetParent, "site-b-public")
+	for _, root := range []string{overlapOtherMedia, overlapOtherPublic} {
+		if err = os.Mkdir(root, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	overlapConfig := target
+	overlapConfig.Sites = append([]SiteConfig(nil), target.Sites...)
+	overlapConfig.Sites[0].MediaRoot = filepath.Join(overlapOtherMedia, "site-a-media")
+	overlapConfig.Sites[0].PublicRoot = filepath.Join(targetParent, "site-a-overlap-public")
+	overlapConfig.Sites = append(overlapConfig.Sites, SiteConfig{
+		ID: "site-b", Origin: "https://site-b-target.transfer.test:22444", DatabaseEnv: "TRANSFER_TARGET_OTHER",
+		MediaRoot: overlapOtherMedia, PublicRoot: overlapOtherPublic, PublicPolicy: testPublicPolicy(),
+		AdminPrincipal: source.Sites[1].AdminPrincipal,
+	})
+	overlapEnv := mapLookup(map[string]string{
+		"TRANSFER_TARGET_CONTROL": dsns["target-control"],
+		"TRANSFER_TARGET_A":       dsns["target-a"],
+		"TRANSFER_TARGET_OTHER":   dsns["dirty"],
+	})
+	if _, err = RestoreSite(ctx, overlapConfig, "site-a", captureRoot, overlapEnv, tooling); !errors.Is(err, ErrConfiguration) {
+		t.Fatalf("restore accepted target nested in another site's private root: %v", err)
+	}
+	if got := queryTransferCount(t, ctx, dsns["target-a"], "SELECT count(*) FROM pg_namespace WHERE nspname IN ('identity','audit','media','rixa')"); got != 0 {
+		t.Fatalf("cross-site root rejection mutated target database: %d", got)
+	}
+	if entries, readErr := os.ReadDir(overlapOtherMedia); readErr != nil || len(entries) != 0 {
+		t.Fatalf("cross-site root rejection staged inside other site: entries=%d err=%v", len(entries), readErr)
+	}
+
+	aliasRestoreParent := filepath.Join(base, "alias-target")
+	if err = os.Mkdir(aliasRestoreParent, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	aliasRestoreConfig := target
+	aliasRestoreConfig.Sites = append([]SiteConfig(nil), target.Sites...)
+	aliasRestoreConfig.Sites[0].DatabaseEnv = "TRANSFER_TARGET_A_ALIAS"
+	aliasRestoreConfig.Sites[0].MediaRoot = filepath.Join(aliasRestoreParent, "media")
+	aliasRestoreConfig.Sites[0].PublicRoot = filepath.Join(aliasRestoreParent, "public")
+	aliasRestoreEnv := mapLookup(map[string]string{
+		"TRANSFER_TARGET_CONTROL": dsns["target-control"],
+		"TRANSFER_TARGET_A_ALIAS": dsns["target-control"],
+	})
+	if _, err = RestoreSite(ctx, aliasRestoreConfig, "site-a", captureRoot, aliasRestoreEnv, tooling); !errors.Is(err, ErrConfiguration) {
+		t.Fatalf("restore accepted aliased PostgreSQL targets: %v", err)
+	}
+	if got := queryTransferCount(t, ctx, dsns["target-control"], "SELECT count(*) FROM pg_namespace WHERE nspname IN ('identity','audit','media','rixa')"); got != 0 {
+		t.Fatalf("aliased restore mutated shared target database: %d", got)
+	}
+	if _, statErr := os.Lstat(aliasRestoreConfig.Sites[0].MediaRoot); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("aliased restore created Media root: %v", statErr)
+	}
+
 	restoredManifest, err := RestoreSite(ctx, target, "site-a", captureRoot, targetEnv, tooling)
 	if err != nil {
 		t.Fatalf("restore: %v", err)

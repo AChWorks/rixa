@@ -149,6 +149,9 @@ func CaptureSite(parent context.Context, config Config, siteID, destination stri
 	if err := config.validateStructure(); err != nil {
 		return SiteTransferManifest{}, err
 	}
+	if getenv == nil {
+		getenv = os.LookupEnv
+	}
 	if err := validateSiteTransferCaptureDestination(config, destination); err != nil {
 		return SiteTransferManifest{}, err
 	}
@@ -159,11 +162,11 @@ func CaptureSite(parent context.Context, config Config, siteID, destination stri
 	if site.AdminPrincipal == "" || !accountIDSyntax.MatchString(site.AdminPrincipal) {
 		return SiteTransferManifest{}, fmt.Errorf("%w: source site administrator", ErrSiteTransfer)
 	}
-	if err = createPrivateTransferDirectory(destination); err != nil {
+	if _, err = config.DatabaseTargets(parent, getenv); err != nil {
 		return SiteTransferManifest{}, err
 	}
-	if getenv == nil {
-		getenv = os.LookupEnv
+	if err = createPrivateTransferDirectory(destination); err != nil {
+		return SiteTransferManifest{}, err
 	}
 	target, err := config.BootstrapDatabase("site:"+siteID, getenv)
 	if err != nil {
@@ -298,11 +301,14 @@ func RestoreSite(parent context.Context, config Config, siteID, source string, g
 	if err := config.validateStructure(); err != nil {
 		return SiteTransferManifest{}, err
 	}
+	if getenv == nil {
+		getenv = os.LookupEnv
+	}
 	site, err := transferSiteConfig(config, siteID)
 	if err != nil {
 		return SiteTransferManifest{}, err
 	}
-	if err = validateSiteTransferRestoreSource(source, site); err != nil {
+	if err = validateSiteTransferRestoreIsolation(config, site, source); err != nil {
 		return SiteTransferManifest{}, err
 	}
 	manifest, err := readSiteTransferMetadata(source)
@@ -312,8 +318,8 @@ func RestoreSite(parent context.Context, config Config, siteID, source string, g
 	if err = validateSiteTransferCompatibility(site, manifest); err != nil {
 		return SiteTransferManifest{}, err
 	}
-	if getenv == nil {
-		getenv = os.LookupEnv
+	if _, err = config.DatabaseTargets(parent, getenv); err != nil {
+		return SiteTransferManifest{}, err
 	}
 	target, err := config.BootstrapDatabase("site:"+siteID, getenv)
 	if err != nil {
@@ -598,6 +604,61 @@ func validateSiteTransferRestoreSource(source string, site SiteConfig) error {
 	for _, target := range []string{site.MediaRoot, site.PublicRoot} {
 		if target != "" && pathsOverlap(source, target) {
 			return fmt.Errorf("%w: transfer source overlaps restore root", ErrSiteTransfer)
+		}
+	}
+	return nil
+}
+
+func validateSiteTransferRestoreIsolation(config Config, site SiteConfig, source string) error {
+	if err := validateSiteTransferRestoreSource(source, site); err != nil {
+		return err
+	}
+	if err := ensureNewTransferRootTarget(site.MediaRoot); err != nil {
+		return err
+	}
+	if site.PublicRoot != "" {
+		if err := ensureNewTransferRootTarget(site.PublicRoot); err != nil {
+			return err
+		}
+		if pathsOverlap(site.MediaRoot, site.PublicRoot) {
+			return fmt.Errorf("%w: restore private roots are not exclusive", ErrConfiguration)
+		}
+	}
+
+	sourceInfo, err := os.Stat(source)
+	if err != nil {
+		return fmt.Errorf("%w: transfer source directory", ErrSiteTransfer)
+	}
+	var existing []mediaRootIdentity
+	for _, configured := range config.Sites {
+		if configured.Disabled || configured.ID == site.ID {
+			continue
+		}
+		for _, root := range []struct {
+			kind string
+			path string
+		}{
+			{kind: "media", path: configured.MediaRoot},
+			{kind: "public", path: configured.PublicRoot},
+		} {
+			if root.path == "" {
+				continue
+			}
+			current, inspectErr := inspectMediaRoot(configured.ID+":"+root.kind, root.path)
+			if inspectErr != nil {
+				return fmt.Errorf("%w: %s root for %s", ErrConfiguration, root.kind, configured.ID)
+			}
+			for _, previous := range existing {
+				if os.SameFile(previous.info, current.info) || pathsOverlap(previous.canonical, current.canonical) {
+					return fmt.Errorf("%w: private roots %s and %s are not exclusive", ErrConfiguration, previous.siteID, current.siteID)
+				}
+			}
+			if os.SameFile(sourceInfo, current.info) || pathsOverlap(source, current.canonical) ||
+				pathsOverlap(site.MediaRoot, current.canonical) ||
+				(site.PublicRoot != "" && pathsOverlap(site.PublicRoot, current.canonical)) {
+				return fmt.Errorf("%w: restore transfer paths overlap private root %s", ErrConfiguration, current.siteID)
+			}
+			existing = append(existing, current)
 		}
 	}
 	return nil
