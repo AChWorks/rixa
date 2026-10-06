@@ -23,9 +23,6 @@ import (
 	"time"
 
 	"github.com/AChWorks/achrix"
-	"github.com/AChWorks/achrix/audit"
-	"github.com/AChWorks/achrix/identity"
-	"github.com/AChWorks/achrix/media"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -408,7 +405,7 @@ func RestoreSite(parent context.Context, config Config, siteID, source string, g
 			return SiteTransferManifest{}, fmt.Errorf("%w: staged public tree verification", ErrSiteTransfer)
 		}
 	}
-	if err = verifyRestoredSiteTransferContracts(parent, target.DSN, mediaStage); err != nil {
+	if err = verifyRestoredSiteTransferContracts(parent, config, site, target.DSN, mediaStage, publicStage); err != nil {
 		return SiteTransferManifest{}, err
 	}
 
@@ -431,50 +428,48 @@ func RestoreSite(parent context.Context, config Config, siteID, source string, g
 	return manifest, nil
 }
 
-type siteTransferReadyModule interface {
-	Start(context.Context) error
-	Ready(context.Context) error
-	Stop(context.Context) error
-}
-
-func verifyRestoredSiteTransferContracts(parent context.Context, dsn, mediaRoot string) error {
+func verifyRestoredSiteTransferContracts(parent context.Context, config Config, site SiteConfig, dsn, mediaRoot, publicRoot string) (result error) {
+	admin, err := Principal(site.AdminPrincipal)
+	if err != nil {
+		return fmt.Errorf("%w: restored site administrator identity", ErrSiteTransfer)
+	}
+	verifySite := site
+	verifySite.MediaRoot = mediaRoot
+	if verifySite.PublicRoot != "" {
+		if publicRoot == "" {
+			return fmt.Errorf("%w: restored public staging root", ErrSiteTransfer)
+		}
+		verifySite.PublicRoot = publicRoot
+	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	auditModule, err := audit.NewPostgres(dsn, audit.Config{}, logger)
+	runtime, err := buildSite(config, ResolvedSite{SiteConfig: verifySite, DSN: dsn}, admin, admin, logger)
 	if err != nil {
-		return fmt.Errorf("%w: restored Audit configuration", ErrSiteTransfer)
+		return fmt.Errorf("%w: restored site composition", ErrSiteTransfer)
 	}
-	identityModule, err := identity.NewPostgres(dsn, identity.Config{}, logger)
-	if err != nil {
-		return fmt.Errorf("%w: restored Identity configuration", ErrSiteTransfer)
-	}
-	mediaModule, err := media.NewPostgres(dsn, media.Config{StorageRoot: mediaRoot}, logger)
-	if err != nil {
-		return fmt.Errorf("%w: restored Media configuration", ErrSiteTransfer)
-	}
-	for name, module := range map[string]siteTransferReadyModule{
-		"audit": auditModule, "identity": identityModule, "media": mediaModule,
-	} {
-		ctx, cancel := context.WithTimeout(parent, 5*time.Second)
-		startErr := module.Start(ctx)
-		if startErr == nil {
-			startErr = module.Ready(ctx)
-		}
-		cancel()
+	defer func() {
 		stopCtx, stopCancel := context.WithTimeout(context.WithoutCancel(parent), 5*time.Second)
-		stopErr := module.Stop(stopCtx)
-		stopCancel()
-		if startErr != nil || stopErr != nil {
-			return fmt.Errorf("%w: restored %s runtime contract", ErrSiteTransfer, name)
+		defer stopCancel()
+		if runtime.Publication != nil {
+			result = errors.Join(result, runtime.Publication.Stop(stopCtx))
 		}
-	}
-	store, err := newEditorialStore(dsn)
-	if err != nil {
-		return fmt.Errorf("%w: restored Rixa editorial configuration", ErrSiteTransfer)
-	}
-	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
+		result = errors.Join(result, runtime.App.Shutdown(stopCtx))
+	}()
+
+	ctx, cancel := context.WithTimeout(parent, 10*time.Second)
 	defer cancel()
-	if err = store.ready(ctx); err != nil {
-		return fmt.Errorf("%w: restored Rixa editorial ledger/readiness", ErrSiteTransfer)
+	if err = runtime.App.Start(ctx); err != nil {
+		return fmt.Errorf("%w: restored site application start", ErrSiteTransfer)
+	}
+	if err = runtime.App.Ready(ctx); err != nil {
+		return fmt.Errorf("%w: restored site application readiness", ErrSiteTransfer)
+	}
+	if err = runtime.Editorial.Ready(ctx); err != nil {
+		return fmt.Errorf("%w: restored Rixa editorial readiness", ErrSiteTransfer)
+	}
+	if runtime.Publication != nil {
+		if err = runtime.Publication.Ready(); err != nil {
+			return fmt.Errorf("%w: restored public publication readiness", ErrSiteTransfer)
+		}
 	}
 	return nil
 }
