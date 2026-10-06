@@ -216,6 +216,10 @@ func renderPublication(publicDir string, manifest *publicationManifest, snapshot
 		total += n
 	}
 
+	if err := syncDir(contentDir); err != nil {
+		return 0, ErrEditorialUnavailable
+	}
+
 	for _, asset := range assets {
 		if _, exists := manifest.Files[asset.File]; exists {
 			continue
