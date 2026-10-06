@@ -226,7 +226,7 @@ func renderPublication(publicDir string, manifest *publicationManifest, snapshot
 		}
 		manifest.Files[asset.File] = publicationFile{
 			Path: asset.File, ContentType: asset.MIME,
-			Cache: "public, max-age=31536000, immutable",
+			Cache: generatedFileCache,
 			Size: asset.Size, SHA256: asset.SHA256,
 		}
 	}
