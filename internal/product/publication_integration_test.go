@@ -101,6 +101,15 @@ func testStaticPublicationRuntime(t *testing.T, ctx context.Context, runtime *Ru
 	if post.Code != http.StatusOK {
 		t.Fatalf("post status=%d body=%s", post.Code, post.Body.String())
 	}
+	if strings.Contains(post.Body.String(), "نسخه دوم English") {
+		t.Fatal("unpublished newer draft leaked into first public generation")
+	}
+	defaultRoute := defaultPublicationRoute(ContentPost, fixture.PostID)
+	if defaultRoute != "/news/launch/" {
+		if response := request("a.rixa.test:19443", defaultRoute); response.Code != http.StatusNotFound {
+			t.Fatalf("never-public default route leaked as alias: route=%s status=%d", defaultRoute, response.Code)
+		}
+	}
 	for _, expected := range []string{
 		"<h1 dir=\"auto\">نوشته English</h1>",
 		"alt=\"تصویر اصلی\"",
@@ -128,6 +137,9 @@ func testStaticPublicationRuntime(t *testing.T, ctx context.Context, runtime *Ru
 	if !strings.Contains(asset.Header().Get("Cache-Control"), "immutable") ||
 		asset.Header().Get("X-Content-Type-Options") != "nosniff" || asset.Body.Len() == 0 {
 		t.Fatal("public image did not use immutable hardened serving")
+	}
+	if response := request("b.rixa.test:19443", assetPath); response.Code != http.StatusNotFound {
+		t.Fatalf("site A public representation crossed into site B: status=%d", response.Code)
 	}
 	privateGuess := request("a.rixa.test:19443", "/assets/"+strings.ToLower(sourceAssetID))
 	if privateGuess.Code != http.StatusNotFound {
