@@ -30,36 +30,7 @@ const (
 	publicReadConcurrency      = 32
 )
 
-var publicRouteSegmentSyntax = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._~-]{0,127}// SPDX-License-Identifier: MPL-2.0
-
-package product
-
-import (
-	"context"
-	"errors"
-	"fmt"
-	"os"
-	"path/filepath"
-	"regexp"
-	"sort"
-	"strings"
-	"sync"
-	"sync/atomic"
-	"time"
-
-	"github.com/AChWorks/achrix"
-	"github.com/AChWorks/achrix/media"
-)
-
-const (
-	PublicationTarget          = "publication"
-	publicationManifestVersion = 1
-	maxPublicationAssets          = 64
-	maxPublicationEntries         = 512
-	maxPublicationAliasesPerEntry = 16
-	maxPublicationBytes     int64  = 256 << 20
-	publicationHistoryLimit       = 16
-)
+var publicRouteSegmentSyntax = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._~-]{0,127}$`)
 
 type PublicationRequest struct {
 	OperationID        string
