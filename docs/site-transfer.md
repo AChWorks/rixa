@@ -25,7 +25,7 @@ Capture is intentionally quiesced:
 2. while the source Application is still available, reconcile Media unfinished work until no processed/busy work remains, then stop it;
 3. run `rixa capture-site`.
 
-The tool independently fails closed when it sees another PostgreSQL session on the site database, pending/deleting Media state, a busy/invalid private Media root, or a changing database/private tree. Media/public trees are re-inspected again after the final database snapshot check so a late tree mutation is not silently omitted from the completed bundle. It takes an exclusive Linux `flock` on the Media root for the capture; the public root gets a transfer lock too, but the publication runtime does not consume that lock, so process quiescence remains an explicit requirement rather than a false live-snapshot guarantee.
+Before creating any bundle directory, the tool validates every enabled declared Media/Public root as canonical private storage and rejects a bundle destination that contains, equals or sits inside any of those roots. This prevents a failed capture attempt from mutating the source tree merely because an unsafe destination was chosen. The tool independently fails closed when it sees another PostgreSQL session on the site database, pending/deleting Media state, a busy/invalid private Media root, or a changing database/private tree. Media/public trees are re-inspected again after the final database snapshot check so a late tree mutation is not silently omitted from the completed bundle. It takes an exclusive Linux `flock` on the Media root for the capture; the public root gets a transfer lock too, but the publication runtime does not consume that lock, so process quiescence remains an explicit requirement rather than a false live-snapshot guarantee.
 
 `pg_dump` uses a custom archive with `--no-owner --no-privileges --exclude-table-data=identity.sessions`. Media/public trees use standard uncompressed tar plus a per-entry SHA-256 manifest. No custom database/archive format is invented.
 
@@ -35,6 +35,7 @@ A bundle is restorable only after `manifest.json` is written and hashed by `comp
 
 Restore accepts only:
 
+- a canonical private completed bundle directory that is disjoint from the target Media/Public roots;
 - a completed hash-valid bundle for the exact current Rixa/AChrix identities;
 - a separate empty local PostgreSQL target database;
 - nonexistent target Media/public roots under canonical existing parents;

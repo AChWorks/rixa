@@ -149,6 +149,9 @@ func CaptureSite(parent context.Context, config Config, siteID, destination stri
 	if err := config.validateStructure(); err != nil {
 		return SiteTransferManifest{}, err
 	}
+	if err := validateSiteTransferCaptureDestination(config, destination); err != nil {
+		return SiteTransferManifest{}, err
+	}
 	site, err := transferSiteConfig(config, siteID)
 	if err != nil {
 		return SiteTransferManifest{}, err
@@ -296,6 +299,9 @@ func RestoreSite(parent context.Context, config Config, siteID, source string, g
 	}
 	site, err := transferSiteConfig(config, siteID)
 	if err != nil {
+		return SiteTransferManifest{}, err
+	}
+	if err = validateSiteTransferRestoreSource(source, site); err != nil {
 		return SiteTransferManifest{}, err
 	}
 	manifest, err := readSiteTransferMetadata(source)
@@ -556,9 +562,68 @@ func validSiteTransferArtifact(artifact SiteTransferArtifact) bool {
 	return err == nil
 }
 
-func createPrivateTransferDirectory(path string) error {
+func validateSiteTransferCaptureDestination(config Config, destination string) error {
+	if err := validateDeclaredMediaRoots(config.Sites); err != nil {
+		return err
+	}
+	if err := validateNewSiteTransferDirectoryPath(destination); err != nil {
+		return err
+	}
+	for _, site := range config.Sites {
+		if site.Disabled {
+			continue
+		}
+		for _, root := range []string{site.MediaRoot, site.PublicRoot} {
+			if root != "" && pathsOverlap(destination, root) {
+				return fmt.Errorf("%w: transfer destination overlaps private site root", ErrSiteTransfer)
+			}
+		}
+	}
+	return nil
+}
+
+func validateSiteTransferRestoreSource(source string, site SiteConfig) error {
+	if source == "" || !filepath.IsAbs(source) || filepath.Clean(source) != source || source == string(filepath.Separator) {
+		return fmt.Errorf("%w: transfer source path", ErrSiteTransfer)
+	}
+	canonical, err := filepath.EvalSymlinks(source)
+	if err != nil || canonical != source {
+		return fmt.Errorf("%w: transfer source path", ErrSiteTransfer)
+	}
+	info, err := os.Stat(source)
+	if err != nil || !info.IsDir() || info.Mode().Perm() != 0o700 {
+		return fmt.Errorf("%w: transfer source directory", ErrSiteTransfer)
+	}
+	for _, target := range []string{site.MediaRoot, site.PublicRoot} {
+		if target != "" && pathsOverlap(source, target) {
+			return fmt.Errorf("%w: transfer source overlaps restore root", ErrSiteTransfer)
+		}
+	}
+	return nil
+}
+
+func validateNewSiteTransferDirectoryPath(path string) error {
 	if path == "" || !filepath.IsAbs(path) || filepath.Clean(path) != path || path == string(filepath.Separator) {
 		return fmt.Errorf("%w: transfer destination path", ErrSiteTransfer)
+	}
+	if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("%w: transfer destination already exists", ErrSiteTransfer)
+	}
+	parent := filepath.Dir(path)
+	canonical, err := filepath.EvalSymlinks(parent)
+	if err != nil || canonical != parent {
+		return fmt.Errorf("%w: transfer destination parent", ErrSiteTransfer)
+	}
+	info, err := os.Stat(parent)
+	if err != nil || !info.IsDir() || info.Mode().Perm() != 0o700 {
+		return fmt.Errorf("%w: transfer destination parent must be private", ErrSiteTransfer)
+	}
+	return nil
+}
+
+func createPrivateTransferDirectory(path string) error {
+	if err := validateNewSiteTransferDirectoryPath(path); err != nil {
+		return err
 	}
 	if err := os.Mkdir(path, 0o700); err != nil {
 		return fmt.Errorf("%w: create new transfer destination", ErrSiteTransfer)

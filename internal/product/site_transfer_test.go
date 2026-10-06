@@ -160,6 +160,60 @@ func TestSiteTransferPostgresEnvironmentIsLocalAndSecretSafe(t *testing.T) {
 	}
 }
 
+func TestSiteTransferDestinationPreflightRejectsPrivateRootOverlapWithoutMutation(t *testing.T) {
+	base := t.TempDir()
+	mediaRoot := filepath.Join(base, "media")
+	publicRoot := filepath.Join(base, "public")
+	bundleParent := filepath.Join(base, "bundles")
+	for _, root := range []string{mediaRoot, publicRoot, bundleParent} {
+		if err := os.Mkdir(root, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	config := Config{Sites: []SiteConfig{{
+		ID: "site-a", MediaRoot: mediaRoot, PublicRoot: publicRoot,
+	}}}
+
+	for name, destination := range map[string]string{
+		"inside media": filepath.Join(mediaRoot, "capture"),
+		"contains media": base,
+		"inside public": filepath.Join(publicRoot, "capture"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := validateSiteTransferCaptureDestination(config, destination); !errors.Is(err, ErrSiteTransfer) && !errors.Is(err, ErrConfiguration) {
+				t.Fatalf("overlapping destination accepted: %v", err)
+			}
+			if _, err := os.Lstat(destination); name != "contains media" && !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("rejected destination was created: %v", err)
+			}
+		})
+	}
+
+	valid := filepath.Join(bundleParent, "capture")
+	if err := validateSiteTransferCaptureDestination(config, valid); err != nil {
+		t.Fatalf("disjoint private destination rejected: %v", err)
+	}
+	if _, err := os.Lstat(valid); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("preflight mutated valid destination: %v", err)
+	}
+}
+
+func TestSiteTransferRestoreSourceRejectsTargetOverlap(t *testing.T) {
+	base := t.TempDir()
+	source := filepath.Join(base, "bundle")
+	if err := os.Mkdir(source, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	site := SiteConfig{
+		ID: "site-a",
+		MediaRoot: filepath.Join(source, "media-target"),
+		PublicRoot: filepath.Join(base, "public-target"),
+	}
+	if err := validateSiteTransferRestoreSource(source, site); !errors.Is(err, ErrSiteTransfer) {
+		t.Fatalf("overlapping restore source accepted: %v", err)
+	}
+}
+
 func TestSiteTransferArchivePathAdmission(t *testing.T) {
 	for _, value := range []string{"file", "dir/file", "a-b_c.1"} {
 		if !validSiteTransferArchivePath(value) {
