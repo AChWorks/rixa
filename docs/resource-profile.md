@@ -16,7 +16,7 @@ The top-level `resources` object passes typed limits into the released AChrix Id
 | AChrix Media | `max_operations` | 4 | 1 |
 | Rixa Editorial | `editorial_max_operations` | 4 | 1 |
 
-Positive operation values are additionally bounded by Rixa's 32-bit configuration representation limit. That limit is input safety, **not** a supported host capacity. AChrix Media's separate expensive-image budget remains Foundation-owned and is not widened by these settings.
+Positive operation values are additionally bounded by Rixa's 32-bit configuration representation limit. That limit is input safety, **not** a supported host capacity. Two other AChrix admission units stay separate from these knobs in the selected profile: Identity password hashing remains two concurrent hashes per Identity Module, and Media image/SVG expensive validation remains two concurrent operations per active site. They are Foundation-owned safety/resource lanes and are not widened when general Module admission is raised.
 
 Rixa does not override the selected AChrix pool lifecycle: `MinConns=0`, `MinIdleConns=0`, demand-created connections, one-minute idle/health behavior and bounded connect/ping behavior remain in force. Editorial does not keep a pool; each admitted operation opens one bounded direct PostgreSQL connection and closes it on release.
 
@@ -31,6 +31,8 @@ For one process replica with `S` enabled sites and `P` publication-enabled sites
 - runtime DB maximum = control maximum + `S * per-site maximum`;
 - runtime DB warm reserve = **0**;
 - AChrix operation-lease maximum = control Identity+Audit leases + `S * (Identity+Audit+Media leases)`;
+- Identity hash admission = `(1 + S) * 2` for the control plus active-site Identity Modules;
+- Media expensive-work admission = `S * 2`;
 - Editorial operation maximum = `S * editorial_max_operations`;
 - static public-read admission = `P * 32`;
 - publication-apply admission = `P * 1`.
@@ -45,15 +47,16 @@ Disabled sites are not constructed and contribute zero runtime DB/operation/publ
 
 The opt-in repository-owned `TestRuntimeResourceBoundProfile` uses real PostgreSQL 18.6 and a two-active-site plus one-disabled-site Rixa composition. Runtime CI executes it once in the dedicated **Measure resource profile** step rather than duplicating the same observation inside the broad race suite.
 
-The measurement profile deliberately raises each AChrix pool ceiling to 6 while keeping each Module operation admission at 2 and Rixa Editorial at 2. Its one-replica DB ceiling is 52 with warm reserve 0. The proof verifies:
+The measurement profile deliberately raises each AChrix pool ceiling to 6, keeps Identity/Audit general operation admission at 2, raises Media general operation admission to 6, and keeps Rixa Editorial at 2. Its one-replica DB ceiling is 52 with warm reserve 0. Media's separate expensive lane remains 2 per site despite the higher general Media limit. The proof verifies:
 
 1. migration/bootstrap have drained and construction alone leaves zero target-database sessions;
 2. startup demand is nonzero but remains below the configured maximum, proving that a higher maximum is not eagerly allocated;
-3. two site-A Identity reads are held behind a task-owned PostgreSQL table lock, while a third fails immediately with `identity.ErrLimited`;
-4. while those management reads remain blocked, eight concurrent GETs to a real empty site-B publication generation are served successfully from the native static path and the observed count of active PostgreSQL sessions does not increase;
-5. the equivalent site-B Identity read still succeeds under a bounded deadline, proving that site A cannot consume site B's independent pool/admission budget;
-6. after the lock is released, admitted work completes, active DB demand returns to zero and admission is reusable; idle pool connections may remain until native health reclamation and no immediate RSS/physical-connection drop is promised;
-7. graceful runtime shutdown returns all target-database session counts to zero.
+3. two site-A public-image preparation calls are held at their private output writers while a third fails with `media.ErrLimited`, proving that raising general Media admission does not widen the separate expensive-work lane;
+4. two site-A Identity reads are held behind a task-owned PostgreSQL table lock, while a third fails immediately with `identity.ErrLimited`;
+5. while those management reads remain blocked, eight concurrent GETs to a real empty site-B publication generation are served successfully from the native static path and the observed count of active PostgreSQL sessions does not increase;
+6. the equivalent site-B Identity read still succeeds under a bounded deadline, proving that site A cannot consume site B's independent pool/admission budget;
+7. after the lock is released, admitted work completes, active DB demand returns to zero and admission is reusable; idle pool connections may remain until native health reclamation and no immediate RSS/physical-connection drop is promised;
+8. graceful runtime shutdown returns all target-database session counts to zero.
 
 The exact constructor/start/saturation/mixed-load/post-burst counts are observation evidence tied to the current CI run and its disposable GitHub-hosted runner, not durable capacity numbers. The test logs `runner_goos`, `runner_goarch`, logical CPU count and Linux `MemTotal` together with the workload counts so the measured host profile is declared by evidence rather than assumed from a runner label. Record those values in the PR/CI evidence for the exact candidate. Do not turn them into a production SLO.
 

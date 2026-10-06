@@ -9,6 +9,8 @@ const (
 	defaultIdentityMaxOperations     int64 = 16
 	defaultAuditMaxOperations        int64 = 16
 	defaultMediaMaxOperations        int64 = 4
+	defaultIdentityHashConcurrency   int64 = 2
+	defaultMediaExpensiveConcurrency int64 = 2
 	defaultEditorialMaxOperations          = 4
 	maxConfiguredResourceOperations       = int(^uint32(0) >> 1)
 )
@@ -77,6 +79,10 @@ type ResourceBudget struct {
 	RuntimeDBWarmReserveAggregate      int64 `json:"runtime_db_warm_reserve_aggregate"`
 	AChrixMaxOperationsPerReplica      int64 `json:"achrix_max_operations_per_replica"`
 	AChrixMaxOperationsAggregate       int64 `json:"achrix_max_operations_aggregate"`
+	IdentityHashMaxPerReplica           int64 `json:"identity_hash_max_per_replica"`
+	IdentityHashMaxAggregate            int64 `json:"identity_hash_max_aggregate"`
+	MediaExpensiveMaxPerReplica         int64 `json:"media_expensive_max_per_replica"`
+	MediaExpensiveMaxAggregate          int64 `json:"media_expensive_max_aggregate"`
 	EditorialMaxOperationsPerReplica   int64 `json:"editorial_max_operations_per_replica"`
 	EditorialMaxOperationsAggregate    int64 `json:"editorial_max_operations_aggregate"`
 	PublicReadMaxPerReplica            int64 `json:"public_read_max_per_replica"`
@@ -170,6 +176,26 @@ func (c Config) ResourceBudget(replicas int) (ResourceBudget, error) {
 	if !ok {
 		return ResourceBudget{}, ErrConfiguration
 	}
+	identityModules, ok := checkedAdd(1, int64(activeSites))
+	if !ok {
+		return ResourceBudget{}, ErrConfiguration
+	}
+	identityHashPerReplica, ok := checkedMul(identityModules, defaultIdentityHashConcurrency)
+	if !ok {
+		return ResourceBudget{}, ErrConfiguration
+	}
+	identityHashAggregate, ok := checkedMul(identityHashPerReplica, int64(replicas))
+	if !ok {
+		return ResourceBudget{}, ErrConfiguration
+	}
+	mediaExpensivePerReplica, ok := checkedMul(int64(activeSites), defaultMediaExpensiveConcurrency)
+	if !ok {
+		return ResourceBudget{}, ErrConfiguration
+	}
+	mediaExpensiveAggregate, ok := checkedMul(mediaExpensivePerReplica, int64(replicas))
+	if !ok {
+		return ResourceBudget{}, ErrConfiguration
+	}
 	editorialOpsAggregate, ok := checkedMul(editorialTotal, int64(replicas))
 	if !ok {
 		return ResourceBudget{}, ErrConfiguration
@@ -194,6 +220,10 @@ func (c Config) ResourceBudget(replicas int) (ResourceBudget, error) {
 		RuntimeDBWarmReserveAggregate: 0,
 		AChrixMaxOperationsPerReplica: achrixOps,
 		AChrixMaxOperationsAggregate: achrixOpsAggregate,
+		IdentityHashMaxPerReplica: identityHashPerReplica,
+		IdentityHashMaxAggregate: identityHashAggregate,
+		MediaExpensiveMaxPerReplica: mediaExpensivePerReplica,
+		MediaExpensiveMaxAggregate: mediaExpensiveAggregate,
 		EditorialMaxOperationsPerReplica: editorialTotal,
 		EditorialMaxOperationsAggregate: editorialOpsAggregate,
 		PublicReadMaxPerReplica: publicReads,

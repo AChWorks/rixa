@@ -3,6 +3,7 @@
 package product
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"errors"
@@ -18,6 +19,7 @@ import (
 	"time"
 
 	"github.com/AChWorks/achrix/identity"
+	"github.com/AChWorks/achrix/media"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -58,7 +60,7 @@ func TestRuntimeResourceBoundProfile(t *testing.T) {
 		Resources: ResourceConfig{
 			Identity: ModuleResourceConfig{MaxConns: 6, MaxOperations: 2},
 			Audit: ModuleResourceConfig{MaxConns: 6, MaxOperations: 2},
-			Media: ModuleResourceConfig{MaxConns: 6, MaxOperations: 2},
+			Media: ModuleResourceConfig{MaxConns: 6, MaxOperations: 6},
 			EditorialMaxOperations: 2,
 		},
 		Control: ControlConfig{Origin: "https://control.resource.test:20443", DatabaseEnv: "RIXA_RESOURCE_CONTROL"},
@@ -77,7 +79,9 @@ func TestRuntimeResourceBoundProfile(t *testing.T) {
 	}
 	if budget.RuntimeDBMaxConnectionsPerReplica != 52 ||
 		budget.RuntimeDBWarmReservePerReplica != 0 ||
-		budget.AChrixMaxOperationsPerReplica != 16 ||
+		budget.AChrixMaxOperationsPerReplica != 24 ||
+		budget.IdentityHashMaxPerReplica != 6 ||
+		budget.MediaExpensiveMaxPerReplica != 4 ||
 		budget.PublicReadMaxPerReplica != 64 {
 		t.Fatalf("unexpected resource budget: %#v", budget)
 	}
@@ -145,6 +149,50 @@ func TestRuntimeResourceBoundProfile(t *testing.T) {
 	accountB, err := runtime.Sites["site-b"].Identity.CreateAccount(ctx, bAdmin, "resource-member-b", "Resource-Member-B-Password-2026!")
 	if err != nil {
 		t.Fatal(err)
+	}
+
+	asset, err := runtime.Sites["site-a"].Media.Create(ctx, aAdmin, "resource-profile.png", bytes.NewReader(testPNG(t)))
+	if err != nil {
+		t.Fatalf("create resource-profile image: %v", err)
+	}
+	releaseExpensive := make(chan struct{})
+	var releaseExpensiveOnce sync.Once
+	releaseExpensiveWork := func() { releaseExpensiveOnce.Do(func() { close(releaseExpensive) }) }
+	defer releaseExpensiveWork()
+	writers := []*blockingResourceWriter{
+		{entered: make(chan struct{}), release: releaseExpensive},
+		{entered: make(chan struct{}), release: releaseExpensive},
+	}
+	expensiveResults := make(chan error, len(writers))
+	for _, writer := range writers {
+		writer := writer
+		go func() {
+			_, prepareErr := runtime.Sites["site-a"].Media.PreparePublicImage(ctx, aAdmin, media.PreparePublicImageRequest{
+				AssetID: asset.ID, ExpectedRevision: asset.Revision,
+			}, writer)
+			expensiveResults <- prepareErr
+		}()
+	}
+	for _, writer := range writers {
+		select {
+		case <-writer.entered:
+		case <-time.After(2 * time.Second):
+			t.Fatal("media expensive operation did not reach output writer")
+		}
+	}
+	thirdPrepareCtx, thirdPrepareCancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	_, thirdPrepareErr := runtime.Sites["site-a"].Media.PreparePublicImage(thirdPrepareCtx, aAdmin, media.PreparePublicImageRequest{
+		AssetID: asset.ID, ExpectedRevision: asset.Revision,
+	}, &bytes.Buffer{})
+	thirdPrepareCancel()
+	if !errors.Is(thirdPrepareErr, media.ErrLimited) {
+		t.Fatalf("third media expensive operation was not bounded by the fixed decoder lane: %v", thirdPrepareErr)
+	}
+	releaseExpensiveWork()
+	for range writers {
+		if prepareErr := <-expensiveResults; prepareErr != nil {
+			t.Fatalf("admitted media expensive operation failed: %v", prepareErr)
+		}
 	}
 
 	locker, err := pgx.Connect(ctx, dsns["a"])
@@ -254,11 +302,12 @@ func TestRuntimeResourceBoundProfile(t *testing.T) {
 		t.Fatalf("released admission was not reusable: %v", reuseErr)
 	}
 
-	fmt.Printf("RIXA_RESOURCE_OBSERVATION runner_goos=%s runner_goarch=%s runner_cpus=%d runner_mem_total_kib=%s active_sites=%d publication_sites=%d db_ceiling=%d warm_reserve=%d constructor_total=%d startup_total=%d saturation_site_a_total=%d saturation_site_a_active=%d mixed_public_reads=%d mixed_active=%d post_burst_total=%d post_burst_active=%d\n",
+	fmt.Printf("RIXA_RESOURCE_OBSERVATION runner_goos=%s runner_goarch=%s runner_cpus=%d runner_mem_total_kib=%s active_sites=%d publication_sites=%d db_ceiling=%d warm_reserve=%d identity_hash_ceiling=%d media_expensive_ceiling=%d constructor_total=%d startup_total=%d saturation_site_a_total=%d saturation_site_a_active=%d mixed_public_reads=%d mixed_active=%d post_burst_total=%d post_burst_active=%d\n",
 		goruntime.GOOS, goruntime.GOARCH, goruntime.NumCPU(), runnerMemoryTotalKiB(),
 		budget.ActiveSites, budget.PublicationSites, budget.RuntimeDBMaxConnectionsPerReplica,
-		budget.RuntimeDBWarmReservePerReplica, before.Total, started.Total, blocked.Total, blocked.Active,
-		publicBurst, mixed.Active, reclaimed.Total, reclaimed.Active)
+		budget.RuntimeDBWarmReservePerReplica, budget.IdentityHashMaxPerReplica, budget.MediaExpensiveMaxPerReplica,
+		before.Total, started.Total, blocked.Total, blocked.Active, publicBurst, mixed.Active,
+		reclaimed.Total, reclaimed.Active)
 
 	stopCtx, stopCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	if err = runtime.Shutdown(stopCtx); err != nil {
@@ -355,4 +404,17 @@ func runnerMemoryTotalKiB() string {
 		}
 	}
 	return "unknown"
+}
+
+
+type blockingResourceWriter struct {
+	entered chan struct{}
+	release <-chan struct{}
+	once    sync.Once
+}
+
+func (w *blockingResourceWriter) Write(p []byte) (int, error) {
+	w.once.Do(func() { close(w.entered) })
+	<-w.release
+	return len(p), nil
 }

@@ -42,6 +42,10 @@ func TestResourceBudgetSeparatesCeilingWarmReserveAndComposition(t *testing.T) {
 	}
 	if budget.AChrixMaxOperationsPerReplica != 44 ||
 		budget.AChrixMaxOperationsAggregate != 88 ||
+		budget.IdentityHashMaxPerReplica != 6 ||
+		budget.IdentityHashMaxAggregate != 12 ||
+		budget.MediaExpensiveMaxPerReplica != 4 ||
+		budget.MediaExpensiveMaxAggregate != 8 ||
 		budget.EditorialMaxOperationsPerReplica != 4 ||
 		budget.EditorialMaxOperationsAggregate != 8 ||
 		budget.PublicReadMaxPerReplica != 64 ||
