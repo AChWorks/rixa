@@ -105,10 +105,14 @@ type editorialStore struct {
 }
 
 func newEditorialStore(dsn string) (*editorialStore, error) {
-	if dsn == "" {
+	return newEditorialStoreWithLimit(dsn, defaultEditorialMaxOperations)
+}
+
+func newEditorialStoreWithLimit(dsn string, maxOperations int) (*editorialStore, error) {
+	if dsn == "" || maxOperations < 1 || maxOperations > maxConfiguredResourceOperations {
 		return nil, ErrConfiguration
 	}
-	return &editorialStore{dsn: dsn, slots: make(chan struct{}, 4)}, nil
+	return &editorialStore{dsn: dsn, slots: make(chan struct{}, maxOperations)}, nil
 }
 
 func (s *editorialStore) connection(parent context.Context) (context.Context, *pgx.Conn, func(), error) {
@@ -168,10 +172,14 @@ type EditorialService struct {
 }
 
 func newEditorialService(app *achrix.Application, mediaService *media.Service, dsn string) (*EditorialService, error) {
+	return newEditorialServiceWithLimit(app, mediaService, dsn, defaultEditorialMaxOperations)
+}
+
+func newEditorialServiceWithLimit(app *achrix.Application, mediaService *media.Service, dsn string, maxOperations int) (*EditorialService, error) {
 	if app == nil || mediaService == nil {
 		return nil, ErrConfiguration
 	}
-	store, err := newEditorialStore(dsn)
+	store, err := newEditorialStoreWithLimit(dsn, maxOperations)
 	if err != nil {
 		return nil, err
 	}

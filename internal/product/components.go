@@ -135,11 +135,15 @@ func BuildRuntime(config RuntimeConfig, logger *slog.Logger) (*Runtime, error) {
 }
 
 func buildControl(config RuntimeConfig, adminPrincipal achrix.Principal, readable, manageable map[string]bool, logger *slog.Logger) (*ControlRuntime, error) {
-	auditModule, err := audit.NewPostgres(config.Control.DSN, audit.Config{}, logger)
+	auditModule, err := audit.NewPostgres(config.Control.DSN, audit.Config{
+		MaxConns: config.Resources.Audit.MaxConns, MaxOperations: config.Resources.Audit.MaxOperations,
+	}, logger)
 	if err != nil {
 		return nil, fmt.Errorf("control audit: %w", err)
 	}
-	identityModule, err := identity.NewPostgres(config.Control.DSN, identity.Config{}, logger)
+	identityModule, err := identity.NewPostgres(config.Control.DSN, identity.Config{
+		MaxConns: config.Resources.Identity.MaxConns, MaxOperations: config.Resources.Identity.MaxOperations,
+	}, logger)
 	if err != nil {
 		return nil, fmt.Errorf("control identity: %w", err)
 	}
@@ -180,15 +184,22 @@ func buildControl(config RuntimeConfig, adminPrincipal achrix.Principal, readabl
 }
 
 func buildSite(config Config, site ResolvedSite, adminPrincipal, operator achrix.Principal, logger *slog.Logger) (*SiteRuntime, error) {
-	auditModule, err := audit.NewPostgres(site.DSN, audit.Config{}, logger)
+	auditModule, err := audit.NewPostgres(site.DSN, audit.Config{
+		MaxConns: config.Resources.Audit.MaxConns, MaxOperations: config.Resources.Audit.MaxOperations,
+	}, logger)
 	if err != nil {
 		return nil, fmt.Errorf("audit: %w", err)
 	}
-	identityModule, err := identity.NewPostgres(site.DSN, identity.Config{}, logger)
+	identityModule, err := identity.NewPostgres(site.DSN, identity.Config{
+		MaxConns: config.Resources.Identity.MaxConns, MaxOperations: config.Resources.Identity.MaxOperations,
+	}, logger)
 	if err != nil {
 		return nil, fmt.Errorf("identity: %w", err)
 	}
-	mediaModule, err := media.NewPostgres(site.DSN, media.Config{StorageRoot: site.MediaRoot}, logger)
+	mediaModule, err := media.NewPostgres(site.DSN, media.Config{
+		StorageRoot: site.MediaRoot,
+		MaxConns: config.Resources.Media.MaxConns, MaxOperations: config.Resources.Media.MaxOperations,
+	}, logger)
 	if err != nil {
 		return nil, fmt.Errorf("media: %w", err)
 	}
@@ -216,7 +227,7 @@ func buildSite(config Config, site ResolvedSite, adminPrincipal, operator achrix
 	if err != nil {
 		return nil, fmt.Errorf("media service: %w", err)
 	}
-	editorialService, err := newEditorialService(app, mediaService, site.DSN)
+	editorialService, err := newEditorialServiceWithLimit(app, mediaService, site.DSN, config.Resources.editorialMaxOperations())
 	if err != nil {
 		return nil, fmt.Errorf("editorial service: %w", err)
 	}

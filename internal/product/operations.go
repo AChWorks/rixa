@@ -81,11 +81,15 @@ func BootstrapAdmin(parent context.Context, config Config, scope, login, passwor
 	if logger == nil {
 		logger = slog.Default()
 	}
-	auditModule, err := audit.NewPostgres(target.DSN, audit.Config{}, logger)
+	auditModule, err := audit.NewPostgres(target.DSN, audit.Config{
+		MaxConns: config.Resources.Audit.MaxConns, MaxOperations: config.Resources.Audit.MaxOperations,
+	}, logger)
 	if err != nil {
 		return BootstrapResult{}, err
 	}
-	identityModule, err := identity.NewPostgres(target.DSN, identity.Config{}, logger)
+	identityModule, err := identity.NewPostgres(target.DSN, identity.Config{
+		MaxConns: config.Resources.Identity.MaxConns, MaxOperations: config.Resources.Identity.MaxOperations,
+	}, logger)
 	if err != nil {
 		return BootstrapResult{}, err
 	}

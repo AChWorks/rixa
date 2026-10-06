@@ -7,6 +7,12 @@
   "language": "en",
   "startup_timeout": "10s",
   "shutdown_timeout": "10s",
+  "resources": {
+    "identity": {"max_conns": 4, "max_operations": 16},
+    "audit": {"max_conns": 4, "max_operations": 16},
+    "media": {"max_conns": 4, "max_operations": 4},
+    "editorial_max_operations": 4
+  },
   "control": {
     "origin": "https://control.rixa.test:8443",
     "database_env": "RIXA_CONTROL_DSN",
