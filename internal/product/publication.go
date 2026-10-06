@@ -275,6 +275,9 @@ func (s *PublicationService) Apply(ctx context.Context, actor achrix.Principal, 
 		return PublicationResult{}, err
 	}
 	now := time.Now().UTC().Truncate(time.Microsecond)
+	if previous != nil && !now.After(previous.CreatedAt) {
+		now = previous.CreatedAt.Add(time.Microsecond)
+	}
 	generation := randText()
 	if !validEditorialID(generation) {
 		return PublicationResult{}, ErrEditorialUnavailable
