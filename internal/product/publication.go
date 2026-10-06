@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -27,6 +28,37 @@ const (
 	maxPublicationBytes     int64  = 256 << 20
 	publicationHistoryLimit       = 16
 	publicReadConcurrency      = 32
+)
+
+var publicRouteSegmentSyntax = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._~-]{0,127}// SPDX-License-Identifier: MPL-2.0
+
+package product
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/AChWorks/achrix"
+	"github.com/AChWorks/achrix/media"
+)
+
+const (
+	PublicationTarget          = "publication"
+	publicationManifestVersion = 1
+	maxPublicationAssets          = 64
+	maxPublicationEntries         = 512
+	maxPublicationAliasesPerEntry = 16
+	maxPublicationBytes     int64  = 256 << 20
+	publicationHistoryLimit       = 16
 )
 
 type PublicationRequest struct {
@@ -127,6 +159,7 @@ type publishedGeneration struct {
 	manifest *publicationManifest
 	root     string
 	readers  atomic.Int64
+	retired  atomic.Bool
 }
 
 type publicationReadState struct {
@@ -601,7 +634,7 @@ func normalizePublicationRoute(raw string) (string, error) {
 	}
 	segments := strings.Split(strings.Trim(raw, "/"), "/")
 	for _, segment := range segments {
-		if segment == "" || segment == "." || segment == ".." {
+		if !publicRouteSegmentSyntax.MatchString(segment) || segment == "." || segment == ".." {
 			return "", ErrEditorialInvalid
 		}
 	}
@@ -792,10 +825,13 @@ func newPublicationReadState(generations []*publishedGeneration) *publicationRea
 
 func (s *PublicationService) cleanupRetired(retired []*publishedGeneration) {
 	for _, generation := range retired {
-		if generation == nil || generation.readers.Load() != 0 {
+		if generation == nil {
 			continue
 		}
-		_ = os.RemoveAll(generation.root)
+		generation.retired.Store(true)
+		if generation.readers.Load() == 0 {
+			_ = os.RemoveAll(generation.root)
+		}
 	}
 }
 
