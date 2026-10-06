@@ -190,12 +190,14 @@ func buildSite(config Config, site ResolvedSite, adminPrincipal, operator achrix
 	if err != nil {
 		return nil, fmt.Errorf("media: %w", err)
 	}
+	productModule := newSiteModule()
 	app, err := achrix.New(
 		achrix.Config{StartupTimeout: config.StartupTimeout, ShutdownTimeout: config.ShutdownTimeout, Logger: logger},
 		sitePolicy(adminPrincipal, operator),
 		auditModule,
 		identityModule,
 		mediaModule,
+		productModule,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("composition: %w", err)
