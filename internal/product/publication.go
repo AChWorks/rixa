@@ -21,9 +21,11 @@ import (
 const (
 	PublicationTarget          = "publication"
 	publicationManifestVersion = 1
-	maxPublicationAssets       = 64
-	maxPublicationBytes  int64 = 256 << 20
-	publicationHistoryLimit    = 16
+	maxPublicationAssets          = 64
+	maxPublicationEntries         = 512
+	maxPublicationAliasesPerEntry = 16
+	maxPublicationBytes     int64  = 256 << 20
+	publicationHistoryLimit       = 16
 	publicReadConcurrency      = 32
 )
 
@@ -143,8 +145,9 @@ type PublicationService struct {
 	media     *media.Service
 	slots     chan struct{}
 
-	mu    sync.Mutex
-	ready atomic.Bool
+	mu     sync.Mutex
+	readMu sync.Mutex
+	ready  atomic.Bool
 	state atomic.Pointer[publicationReadState]
 }
 
@@ -398,6 +401,10 @@ func buildPublicationLayout(snapshot publicationSnapshot, previous *publicationM
 		}
 	}
 
+	if len(entries) > maxPublicationEntries {
+		return nil, nil, ErrEditorialLimited
+	}
+
 	active := make(map[string]ContentRevision, len(snapshot.Contents))
 	for _, content := range snapshot.Contents {
 		active[content.ID] = content
@@ -417,6 +424,9 @@ func buildPublicationLayout(snapshot publicationSnapshot, previous *publicationM
 			entry.FirstPublishedAt = now
 		}
 		entries[content.ID] = entry
+		if len(entries) > maxPublicationEntries {
+			return nil, nil, ErrEditorialLimited
+		}
 	}
 
 	for id, entry := range entries {
@@ -472,6 +482,9 @@ func buildPublicationLayout(snapshot publicationSnapshot, previous *publicationM
 		}
 		entry.DesiredRoute = route
 		entry.Aliases = normalizeAliasSet(entry.Aliases, route)
+		if len(entry.Aliases) > maxPublicationAliasesPerEntry {
+			return nil, nil, ErrEditorialLimited
+		}
 		for _, owned := range append([]string{entry.DesiredRoute}, entry.Aliases...) {
 			if previousOwner, exists := owners[owned]; exists && previousOwner != id {
 				return nil, nil, ErrEditorialConflict
@@ -743,6 +756,9 @@ func (s *PublicationService) findOperation(operationID string) (PublicationOpera
 }
 
 func (s *PublicationService) installGeneration(generation *publishedGeneration) []*publishedGeneration {
+	s.readMu.Lock()
+	defer s.readMu.Unlock()
+
 	old := s.state.Load()
 	generations := []*publishedGeneration{generation}
 	var retired []*publishedGeneration
