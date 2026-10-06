@@ -203,6 +203,8 @@ func TestRuntimeIsolationLifecycleAndTLSIngress(t *testing.T) {
 		t.Fatal("control path returned wrong site bytes")
 	}
 
+	testEditorialRuntime(t, ctx, runtime, aAdmin, bAdmin, assetA.ID, assetA.Revision, dsns["a"], dsns["b"])
+
 	assertDatabaseIsolation(t, ctx, dsns["a"], dsns["b"], accountA.ID, accountB.ID)
 
 	disabledReq := httptest.NewRequest(http.MethodGet, "https://disabled.rixa.test:19443/admin", nil)

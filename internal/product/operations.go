@@ -36,6 +36,9 @@ func Migrate(parent context.Context, config Config, getenv func(string) (string,
 		if err == nil && target.Kind == DatabaseSite {
 			err = media.Migrate(ctx, target.DSN)
 		}
+		if err == nil && target.Kind == DatabaseSite {
+			err = migrateEditorial(ctx, target.DSN, target.ID)
+		}
 		cancel()
 		if err != nil {
 			return fmt.Errorf("migrate %s: %w", target.ID, err)
@@ -217,4 +220,44 @@ func (s *ControlService) ReadSiteMedia(ctx context.Context, actor achrix.Princip
 		return media.Asset{}, nil, err
 	}
 	return asset, output.Bytes(), nil
+}
+
+func (s *ControlService) ListSiteContent(ctx context.Context, actor achrix.Principal, siteID string) ([]ContentSummary, error) {
+	site, err := s.site(ctx, actor, siteID)
+	if err != nil {
+		return nil, err
+	}
+	return site.Editorial.List(ctx, site.operator)
+}
+
+func (s *ControlService) CreateSiteContent(ctx context.Context, actor achrix.Principal, siteID, operationID string, kind ContentKind, title, body string) (ContentRevision, error) {
+	site, err := s.site(ctx, actor, siteID)
+	if err != nil {
+		return ContentRevision{}, err
+	}
+	return site.Editorial.Create(ctx, site.operator, operationID, kind, title, body)
+}
+
+func (s *ControlService) SaveSiteContent(ctx context.Context, actor achrix.Principal, siteID, operationID, contentID string, expectedHead int64, title, body string) (ContentRevision, error) {
+	site, err := s.site(ctx, actor, siteID)
+	if err != nil {
+		return ContentRevision{}, err
+	}
+	return site.Editorial.Save(ctx, site.operator, operationID, contentID, expectedHead, title, body)
+}
+
+func (s *ControlService) SiteAppearance(ctx context.Context, actor achrix.Principal, siteID string) (Appearance, error) {
+	site, err := s.site(ctx, actor, siteID)
+	if err != nil {
+		return Appearance{}, err
+	}
+	return site.Editorial.Appearance(ctx, site.operator)
+}
+
+func (s *ControlService) SaveSiteAppearance(ctx context.Context, actor achrix.Principal, siteID, operationID string, expectedHead int64, input AppearanceInput) (Appearance, error) {
+	site, err := s.site(ctx, actor, siteID)
+	if err != nil {
+		return Appearance{}, err
+	}
+	return site.Editorial.SaveAppearance(ctx, site.operator, operationID, expectedHead, input)
 }

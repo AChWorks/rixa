@@ -15,6 +15,14 @@ import (
 const (
 	CapabilityControlInventoryRead = "rixa.control.inventory.read"
 	CapabilityControlSiteManage    = "rixa.control.site.manage"
+	CapabilityContentList          = "rixa.content.list"
+	CapabilityContentRead          = "rixa.content.read"
+	CapabilityContentEdit          = "rixa.content.edit"
+	CapabilityContentPreview       = "rixa.content.preview"
+	CapabilityContentPublishIntent = "rixa.content.publication-intent"
+	CapabilityAppearanceRead       = "rixa.appearance.read"
+	CapabilityAppearanceEdit       = "rixa.appearance.edit"
+	CapabilityOperationRead        = "rixa.editorial.operation.read"
 )
 
 const routerPrincipal achrix.Principal = "rixa.router"
@@ -52,8 +60,24 @@ func sitePolicy(siteAdmin, controlOperator achrix.Principal) achrix.Policy {
 			if resource == media.LibraryTarget {
 				return nil
 			}
-		case media.Read, media.Delete:
+		case media.Read:
 			return nil
+		case CapabilityContentList:
+			if resource == ContentCollectionTarget {
+				return nil
+			}
+		case CapabilityContentRead, CapabilityContentEdit, CapabilityContentPreview, CapabilityContentPublishIntent:
+			if resource == ContentCollectionTarget || validEditorialID(resource) {
+				return nil
+			}
+		case CapabilityAppearanceRead, CapabilityAppearanceEdit:
+			if resource == AppearanceTarget {
+				return nil
+			}
+		case CapabilityOperationRead:
+			if resource == OperationCollectionTarget {
+				return nil
+			}
 		}
 		return achrix.ErrDenied
 	})

@@ -21,12 +21,13 @@ import (
 )
 
 type SiteRuntime struct {
-	ID       string
-	Origin   string
-	App      *achrix.Application
-	Identity *identity.Service
-	Media    *media.Service
-	Handler  http.Handler
+	ID        string
+	Origin    string
+	App       *achrix.Application
+	Identity  *identity.Service
+	Media     *media.Service
+	Editorial *EditorialService
+	Handler   http.Handler
 
 	adminPrincipal achrix.Principal
 	operator       achrix.Principal
@@ -189,12 +190,14 @@ func buildSite(config Config, site ResolvedSite, adminPrincipal, operator achrix
 	if err != nil {
 		return nil, fmt.Errorf("media: %w", err)
 	}
+	productModule := newSiteModule()
 	app, err := achrix.New(
 		achrix.Config{StartupTimeout: config.StartupTimeout, ShutdownTimeout: config.ShutdownTimeout, Logger: logger},
 		sitePolicy(adminPrincipal, operator),
 		auditModule,
 		identityModule,
 		mediaModule,
+		productModule,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("composition: %w", err)
@@ -210,6 +213,10 @@ func buildSite(config Config, site ResolvedSite, adminPrincipal, operator achrix
 	mediaService, err := media.NewService(app, mediaModule)
 	if err != nil {
 		return nil, fmt.Errorf("media service: %w", err)
+	}
+	editorialService, err := newEditorialService(app, mediaService, site.DSN)
+	if err != nil {
+		return nil, fmt.Errorf("editorial service: %w", err)
 	}
 	web, err := identity.NewWeb(identityService, site.Origin)
 	if err != nil {
@@ -227,12 +234,22 @@ func buildSite(config Config, site ResolvedSite, adminPrincipal, operator achrix
 	if err != nil {
 		return nil, fmt.Errorf("media surface: %w", err)
 	}
+	contentSurface, err := newContentSurface(editorialService)
+	if err != nil {
+		return nil, fmt.Errorf("content surface: %w", err)
+	}
+	appearanceSurface, err := newAppearanceSurface(editorialService)
+	if err != nil {
+		return nil, fmt.Errorf("appearance surface: %w", err)
+	}
 	adminShell, err := shell.New(
 		shell.Config{Origin: site.Origin, AuthPath: "/auth", Language: config.Language},
 		authenticator,
 		app,
 		accounts,
 		library,
+		contentSurface,
+		appearanceSurface,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("admin: %w", err)
@@ -243,6 +260,7 @@ func buildSite(config Config, site ResolvedSite, adminPrincipal, operator achrix
 		App:            app,
 		Identity:       identityService,
 		Media:          mediaService,
+		Editorial:      editorialService,
 		Handler:        managementHandler(web, adminShell),
 		adminPrincipal: adminPrincipal,
 		operator:       operator,
@@ -322,6 +340,11 @@ func (r *Runtime) Start(parent context.Context) error {
 	for _, app := range started {
 		if err := app.Ready(ctx); err != nil {
 			return errors.Join(err, r.stopStarted(started))
+		}
+	}
+	for _, site := range r.Sites {
+		if err := site.Editorial.Ready(ctx); err != nil {
+			return errors.Join(fmt.Errorf("site %s editorial: %w", site.ID, err), r.stopStarted(started))
 		}
 	}
 	r.mu.Lock()
