@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/AChWorks/achrix"
 )
@@ -22,6 +23,25 @@ func testStaticPublicationRuntime(t *testing.T, ctx context.Context, runtime *Ru
 	}
 	if runtime.Sites["site-b"] == nil || runtime.Sites["site-b"].Publication == nil {
 		t.Fatal("site B publication service was not composed")
+	}
+
+	releaseSource, err := site.Editorial.acquirePublicationSource(ctx)
+	if err != nil {
+		t.Fatalf("acquire publication source gate: %v", err)
+	}
+	blockedApplyCtx, blockedApplyCancel := context.WithTimeout(ctx, 250*time.Millisecond)
+	_, blockedApplyErr := site.Publication.Apply(blockedApplyCtx, actor, PublicationRequest{OperationID: newOperationID()})
+	blockedApplyCancel()
+	if !errors.Is(blockedApplyErr, context.DeadlineExceeded) {
+		releaseSource()
+		t.Fatalf("publication apply bypassed source gate: %v", blockedApplyErr)
+	}
+	blockedIntentCtx, blockedIntentCancel := context.WithTimeout(ctx, 250*time.Millisecond)
+	_, blockedIntentErr := site.Editorial.SetPublicationIntent(blockedIntentCtx, actor, newOperationID(), fixture.PostID, 2, 4, 1)
+	blockedIntentCancel()
+	releaseSource()
+	if !errors.Is(blockedIntentErr, context.DeadlineExceeded) {
+		t.Fatalf("publication intent bypassed source gate: %v", blockedIntentErr)
 	}
 
 	request := func(host, path string) *httptest.ResponseRecorder {
