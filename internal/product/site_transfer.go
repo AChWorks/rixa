@@ -615,8 +615,8 @@ func validateNewSiteTransferDirectoryPath(path string) error {
 		return fmt.Errorf("%w: transfer destination parent", ErrSiteTransfer)
 	}
 	info, err := os.Stat(parent)
-	if err != nil || !info.IsDir() || info.Mode().Perm() != 0o700 {
-		return fmt.Errorf("%w: transfer destination parent must be private", ErrSiteTransfer)
+	if err != nil || !info.IsDir() {
+		return fmt.Errorf("%w: transfer destination parent", ErrSiteTransfer)
 	}
 	return nil
 }
