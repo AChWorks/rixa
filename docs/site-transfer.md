@@ -25,7 +25,7 @@ Capture is intentionally quiesced:
 2. while the source Application is still available, reconcile Media unfinished work until no processed/busy work remains, then stop it;
 3. run `rixa capture-site`.
 
-The tool independently fails closed when it sees another PostgreSQL session on the site database, pending/deleting Media state, a busy/invalid private Media root, or a changing database/private tree. It takes an exclusive Linux `flock` on the Media root for the capture; the public root gets a transfer lock too, but the publication runtime does not consume that lock, so process quiescence remains an explicit requirement rather than a false live-snapshot guarantee.
+The tool independently fails closed when it sees another PostgreSQL session on the site database, pending/deleting Media state, a busy/invalid private Media root, or a changing database/private tree. Media/public trees are re-inspected again after the final database snapshot check so a late tree mutation is not silently omitted from the completed bundle. It takes an exclusive Linux `flock` on the Media root for the capture; the public root gets a transfer lock too, but the publication runtime does not consume that lock, so process quiescence remains an explicit requirement rather than a false live-snapshot guarantee.
 
 `pg_dump` uses a custom archive with `--no-owner --no-privileges --exclude-table-data=identity.sessions`. Media/public trees use standard uncompressed tar plus a per-entry SHA-256 manifest. No custom database/archive format is invented.
 
@@ -42,7 +42,7 @@ Restore accepts only:
 
 Archive extraction is staged into newly created private directories. Absolute/traversal/duplicate paths, symlinks, hardlinks, special files, unexpected entries, wrong permissions, size/hash mismatch and extra/missing files are rejected. Media files must exactly match restored ready metadata and Rixa content-to-Media references.
 
-Native `pg_restore` uses one transaction with `--exit-on-error --no-owner --no-privileges`. After restore the tool verifies exact migration ledgers, site data counts, appearance/theme, ready Media metadata, zero restored Identity session rows and coherent content/Media references before activating private roots.
+Native `pg_restore` uses one transaction with `--exit-on-error --no-owner --no-privileges`. After restore the tool verifies exact captured migration ledgers, site data counts, appearance/theme, ready Media metadata, zero restored Identity session rows and coherent content/Media references. Before activating private roots it additionally starts/readiness-checks the current AChrix Audit/Identity/Media Module contracts against the restored database/staged Media root and checks the current Rixa editorial ledger/readiness contract. A self-consistent but incompatible dump/manifest therefore cannot activate roots merely by agreeing with itself.
 
 The target is still **not ingress-ready merely because restore returned**. Recreate/bootstrap the target control administrator, set the preserved site administrator principal in target configuration, run normal `rixa check`, and only then open ingress. The integration proof reconstructs the normal pinned runtime and verifies account/grant behavior, old-session rejection, fresh login, exact Media bytes, content/appearance/public output and target control-operator remapping.
 

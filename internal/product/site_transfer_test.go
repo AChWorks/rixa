@@ -103,6 +103,41 @@ func TestSiteTransferArchiveRejectsUnsafeEntries(t *testing.T) {
 	}
 }
 
+func TestSiteTransferArchiveRejectsIncompleteManifest(t *testing.T) {
+	base := t.TempDir()
+	archive := filepath.Join(base, "incomplete.tar")
+	f, err := os.OpenFile(archive, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tw := tar.NewWriter(f)
+	body := []byte("a")
+	if err = tw.WriteHeader(&tar.Header{Name: "a", Typeflag: tar.TypeReg, Mode: 0o600, Size: int64(len(body))}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = tw.Write(body); err != nil {
+		t.Fatal(err)
+	}
+	if err = tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err = f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	stage := filepath.Join(base, "stage")
+	if err = os.Mkdir(stage, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	sumA := "ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb"
+	expected := []SiteTransferArchiveEntry{
+		{Path: "a", Type: "file", Mode: 0o600, Size: 1, SHA256: sumA},
+		{Path: "b", Type: "file", Mode: 0o600, Size: 1, SHA256: strings.Repeat("0", 64)},
+	}
+	if err = extractSiteTransferArchive(archive, stage, expected); !errors.Is(err, ErrSiteTransfer) {
+		t.Fatalf("incomplete archive accepted: %v", err)
+	}
+}
+
 func TestSiteTransferPostgresEnvironmentIsLocalAndSecretSafe(t *testing.T) {
 	env, database, err := siteTransferPostgresEnvironment("postgres://user:secret@127.0.0.1:5432/site?sslmode=disable")
 	if err != nil {

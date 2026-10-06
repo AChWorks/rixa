@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"os"
 	"os/exec"
@@ -22,6 +23,9 @@ import (
 	"time"
 
 	"github.com/AChWorks/achrix"
+	"github.com/AChWorks/achrix/audit"
+	"github.com/AChWorks/achrix/identity"
+	"github.com/AChWorks/achrix/media"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -239,6 +243,16 @@ func CaptureSite(parent context.Context, config Config, siteID, destination stri
 	if !equalSourceTransferSnapshots(before, after) {
 		return SiteTransferManifest{}, fmt.Errorf("%w: source state changed during capture", ErrSiteTransfer)
 	}
+	finalMediaEntries, err := inspectSiteTransferRoot(site.MediaRoot)
+	if err != nil || !reflect.DeepEqual(finalMediaEntries, mediaEntries) {
+		return SiteTransferManifest{}, fmt.Errorf("%w: Media root changed after archive capture", ErrSiteTransfer)
+	}
+	if site.PublicRoot != "" {
+		finalPublicEntries, publicErr := inspectSiteTransferRoot(site.PublicRoot)
+		if publicErr != nil || !reflect.DeepEqual(finalPublicEntries, publicEntries) {
+			return SiteTransferManifest{}, fmt.Errorf("%w: public root changed after archive capture", ErrSiteTransfer)
+		}
+	}
 
 	manifest := SiteTransferManifest{
 		Schema:        siteTransferSchema,
@@ -394,6 +408,9 @@ func RestoreSite(parent context.Context, config Config, siteID, source string, g
 			return SiteTransferManifest{}, fmt.Errorf("%w: staged public tree verification", ErrSiteTransfer)
 		}
 	}
+	if err = verifyRestoredSiteTransferContracts(parent, target.DSN, mediaStage); err != nil {
+		return SiteTransferManifest{}, err
+	}
 
 	if err = activateSiteTransferRoots(mediaStage, site.MediaRoot, publicStage, site.PublicRoot); err != nil {
 		return SiteTransferManifest{}, err
@@ -412,6 +429,54 @@ func RestoreSite(parent context.Context, config Config, siteID, source string, g
 		}
 	}
 	return manifest, nil
+}
+
+type siteTransferReadyModule interface {
+	Start(context.Context) error
+	Ready(context.Context) error
+	Stop(context.Context) error
+}
+
+func verifyRestoredSiteTransferContracts(parent context.Context, dsn, mediaRoot string) error {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	auditModule, err := audit.NewPostgres(dsn, audit.Config{}, logger)
+	if err != nil {
+		return fmt.Errorf("%w: restored Audit configuration", ErrSiteTransfer)
+	}
+	identityModule, err := identity.NewPostgres(dsn, identity.Config{}, logger)
+	if err != nil {
+		return fmt.Errorf("%w: restored Identity configuration", ErrSiteTransfer)
+	}
+	mediaModule, err := media.NewPostgres(dsn, media.Config{StorageRoot: mediaRoot}, logger)
+	if err != nil {
+		return fmt.Errorf("%w: restored Media configuration", ErrSiteTransfer)
+	}
+	for name, module := range map[string]siteTransferReadyModule{
+		"audit": auditModule, "identity": identityModule, "media": mediaModule,
+	} {
+		ctx, cancel := context.WithTimeout(parent, 5*time.Second)
+		startErr := module.Start(ctx)
+		if startErr == nil {
+			startErr = module.Ready(ctx)
+		}
+		cancel()
+		stopCtx, stopCancel := context.WithTimeout(context.WithoutCancel(parent), 5*time.Second)
+		stopErr := module.Stop(stopCtx)
+		stopCancel()
+		if startErr != nil || stopErr != nil {
+			return fmt.Errorf("%w: restored %s runtime contract", ErrSiteTransfer, name)
+		}
+	}
+	store, err := newEditorialStore(dsn)
+	if err != nil {
+		return fmt.Errorf("%w: restored Rixa editorial configuration", ErrSiteTransfer)
+	}
+	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
+	defer cancel()
+	if err = store.ready(ctx); err != nil {
+		return fmt.Errorf("%w: restored Rixa editorial ledger/readiness", ErrSiteTransfer)
+	}
+	return nil
 }
 
 func transferSiteConfig(config Config, siteID string) (SiteConfig, error) {
