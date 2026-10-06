@@ -38,6 +38,27 @@ func testStaticPublicationRuntime(t *testing.T, ctx context.Context, runtime *Ru
 		t.Fatalf("unpublished site B root status=%d want=404", response.Code)
 	}
 
+	controlPublicationOp := newOperationID()
+	controlPublication, err := runtime.ControlService().ApplySitePublication(ctx, runtime.Control.AdminPrincipal, "site-b", PublicationRequest{
+		OperationID: controlPublicationOp,
+	})
+	if err != nil || !validEditorialID(controlPublication.Generation) {
+		t.Fatalf("control-origin publication for empty site B=%#v err=%v", controlPublication, err)
+	}
+	if response := request("b.rixa.test:19443", "/"); response.Code != http.StatusOK ||
+		!strings.Contains(response.Body.String(), "No published posts.") {
+		t.Fatalf("control-origin empty-site generation not served: status=%d body=%s", response.Code, response.Body.String())
+	}
+	controlOutcome, err := runtime.ControlService().SitePublicationOperation(ctx, runtime.Control.AdminPrincipal, "site-b", controlPublicationOp)
+	if err != nil || controlOutcome.Generation != controlPublication.Generation {
+		t.Fatalf("control-origin publication reconciliation=%#v err=%v", controlOutcome, err)
+	}
+	if _, err = runtime.ControlService().ApplySitePublication(ctx, runtime.Control.AdminPrincipal, "unknown", PublicationRequest{
+		OperationID: newOperationID(), ExpectedGeneration: controlPublication.Generation,
+	}); !errors.Is(err, achrix.ErrDenied) {
+		t.Fatalf("control-origin publication reached unknown site: %v", err)
+	}
+
 	operation := newOperationID()
 	firstRequest := PublicationRequest{OperationID: operation, ContentID: fixture.PostID, Route: "/news/launch/"}
 	first, err := site.Publication.Apply(ctx, actor, firstRequest)
