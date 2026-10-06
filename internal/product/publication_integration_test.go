@@ -253,6 +253,9 @@ func testStaticPublicationRuntime(t *testing.T, ctx context.Context, runtime *Ru
 	if strings.Contains(withdrawnSitemap.Body.String(), "/updates/") || strings.Contains(withdrawnSitemap.Body.String(), "/news/launch/") {
 		t.Fatal("withdrawn post remained in sitemap")
 	}
+	if withdrawnAsset := request("a.rixa.test:19443", assetPath); withdrawnAsset.Code != http.StatusNotFound {
+		t.Fatalf("withdrawn image representation remained public: status=%d", withdrawnAsset.Code)
+	}
 
 	badBody := "<figure data-media-id=\"" + sourceAssetID + "\"><figcaption></figcaption></figure>"
 	bad, err := site.Editorial.Create(ctx, actor, newOperationID(), ContentPost, "unsafe image description", badBody)
