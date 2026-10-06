@@ -72,16 +72,7 @@ jobs:
       - name: Prove site transfer round trip
         env:
           RIXA_SITE_TRANSFER_OBSERVATION: "1"
-        run: go test -race ./internal/product -run '^TestSiteTransferRoundTrip
-        run: go test ./internal/product -run '^$' -bench '^BenchmarkStaticPublicationHTTPSRead$' -benchtime=250ms -count=1 -benchmem
-
-      - name: Build product
-        shell: bash
-        run: |
-          set -euo pipefail
-          go build -trimpath -o "$RUNNER_TEMP/rixa" ./cmd/rixa
-          "$RUNNER_TEMP/rixa" version
- -count=1 -v
+        run: go test -race ./internal/product -run '^TestSiteTransferRoundTrip$' -count=1 -v
 
       - name: Measure static HTTPS path
         run: go test ./internal/product -run '^$' -bench '^BenchmarkStaticPublicationHTTPSRead$' -benchtime=250ms -count=1 -benchmem
