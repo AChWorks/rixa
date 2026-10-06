@@ -51,7 +51,7 @@ A failed/unknown final root activation leaves the target isolated and reports fa
 
 ## Tooling
 
-The first profile is deliberately local PostgreSQL only and requires an explicit single loopback/Unix endpoint with `sslmode=disable`. Database credentials are supplied to maintained PostgreSQL tools through `PG*` process environment variables, not command-line DSNs or bundle metadata.
+The first profile is deliberately local PostgreSQL only and requires an explicit single loopback/Unix endpoint with `sslmode=disable`. Database credentials are supplied to maintained PostgreSQL tools through a minimal child-process allowlist containing only the required `PGHOST/PGPORT/PGUSER/PGPASSWORD/PGDATABASE/PGSSLMODE/PGCONNECT_TIMEOUT` values plus fixed C locale; unrelated parent environment variables and Rixa secrets are not inherited. Credentials are not placed in command-line DSNs or bundle metadata.
 
 Examples:
 

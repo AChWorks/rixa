@@ -139,6 +139,8 @@ func TestSiteTransferArchiveRejectsIncompleteManifest(t *testing.T) {
 }
 
 func TestSiteTransferPostgresEnvironmentIsLocalAndSecretSafe(t *testing.T) {
+	t.Setenv("RIXA_UNRELATED_SECRET", "must-not-reach-transfer-tool")
+	t.Setenv("PGOPTIONS", "-c statement_timeout=1")
 	env, database, err := siteTransferPostgresEnvironment("postgres://user:secret@127.0.0.1:5432/site?sslmode=disable")
 	if err != nil {
 		t.Fatal(err)
@@ -154,6 +156,14 @@ func TestSiteTransferPostgresEnvironmentIsLocalAndSecretSafe(t *testing.T) {
 	}
 	if strings.Contains(joined, "postgres://user:secret") {
 		t.Fatal("full DSN leaked into subprocess environment")
+	}
+	for _, forbidden := range []string{"RIXA_UNRELATED_SECRET=", "PGOPTIONS="} {
+		if strings.Contains(joined, forbidden) {
+			t.Fatalf("unrelated parent environment leaked to transfer tool: %q", forbidden)
+		}
+	}
+	if len(env) != 9 || !strings.Contains(joined, "LANG=C") || !strings.Contains(joined, "LC_ALL=C") {
+		t.Fatalf("transfer tool environment is not the expected minimal allowlist: %q", joined)
 	}
 	if _, _, err = siteTransferPostgresEnvironment("postgres://user:secret@db.example.com:5432/site?sslmode=require"); !errors.Is(err, ErrSiteTransfer) {
 		t.Fatalf("remote transfer profile accepted: %v", err)

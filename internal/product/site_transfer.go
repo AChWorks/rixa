@@ -656,26 +656,17 @@ func siteTransferPostgresEnvironment(dsn string) ([]string, string, error) {
 		len(cfg.Fallbacks) != 0 || cfg.TLSConfig != nil || !siteTransferLocalHost(cfg.Host) {
 		return nil, "", fmt.Errorf("%w: transfer supports only one explicit local PostgreSQL endpoint with sslmode=disable", ErrSiteTransfer)
 	}
-	blocked := map[string]bool{
-		"PGHOST": true, "PGPORT": true, "PGUSER": true, "PGPASSWORD": true,
-		"PGDATABASE": true, "PGSSLMODE": true, "PGCONNECT_TIMEOUT": true,
-	}
-	env := make([]string, 0, len(os.Environ())+7)
-	for _, entry := range os.Environ() {
-		key, _, _ := strings.Cut(entry, "=")
-		if !blocked[key] {
-			env = append(env, entry)
-		}
-	}
-	env = append(env,
-		"PGHOST="+cfg.Host,
-		"PGPORT="+strconv.Itoa(int(cfg.Port)),
-		"PGUSER="+cfg.User,
-		"PGPASSWORD="+cfg.Password,
-		"PGDATABASE="+cfg.Database,
+	env := []string{
+		"PGHOST=" + cfg.Host,
+		"PGPORT=" + strconv.Itoa(int(cfg.Port)),
+		"PGUSER=" + cfg.User,
+		"PGPASSWORD=" + cfg.Password,
+		"PGDATABASE=" + cfg.Database,
 		"PGSSLMODE=disable",
 		"PGCONNECT_TIMEOUT=3",
-	)
+		"LANG=C",
+		"LC_ALL=C",
+	}
 	return env, cfg.Database, nil
 }
 
