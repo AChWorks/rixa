@@ -22,6 +22,7 @@ import (
 	"github.com/AChWorks/achrix"
 	"github.com/AChWorks/achrix/identity"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 const (
@@ -184,6 +185,35 @@ func TestSiteTransferRoundTrip(t *testing.T) {
 		t.Fatalf("source shutdown: %v", err)
 	}
 	stopCancel()
+
+	fence, _, err := beginSiteTransferDatabaseFence(ctx, dsns["source-a"], source.Sites[0].AdminPrincipal)
+	if err != nil {
+		t.Fatalf("begin source database capture fence: %v", err)
+	}
+	writerCtx, writerCancel := context.WithTimeout(context.Background(), time.Second)
+	writer, err := pgx.Connect(writerCtx, dsns["source-a"])
+	if err != nil {
+		writerCancel()
+		_ = fence.Close(context.Background())
+		t.Fatal(err)
+	}
+	if _, err = writer.Exec(writerCtx, "SET lock_timeout='200ms'"); err != nil {
+		_ = writer.Close(context.Background())
+		writerCancel()
+		_ = fence.Close(context.Background())
+		t.Fatal(err)
+	}
+	_, writerErr := writer.Exec(writerCtx, "UPDATE rixa.appearance_revisions SET footer_text=footer_text WHERE revision=2")
+	_ = writer.Close(context.Background())
+	writerCancel()
+	var pgErr *pgconn.PgError
+	if !errors.As(writerErr, &pgErr) || pgErr.Code != "55P03" {
+		_ = fence.Close(context.Background())
+		t.Fatalf("capture fence did not block concurrent writer: %v", writerErr)
+	}
+	if err = fence.Close(context.Background()); err != nil {
+		t.Fatalf("release source database capture fence: %v", err)
+	}
 
 	captureRoot := filepath.Join(base, "site-a-transfer")
 	manifest, err := CaptureSite(ctx, source, "site-a", captureRoot, sourceEnv, tooling)
