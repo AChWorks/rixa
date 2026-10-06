@@ -444,6 +444,10 @@ func buildPublicationLayout(snapshot publicationSnapshot, previous *publicationM
 	}
 
 	if request.ContentID != "" {
+		previouslyOwned := false
+		if previous != nil {
+			_, previouslyOwned = previous.Entries[request.ContentID]
+		}
 		entry, exists := entries[request.ContentID]
 		if !exists {
 			return nil, nil, ErrEditorialInvalid
@@ -461,7 +465,7 @@ func buildPublicationLayout(snapshot publicationSnapshot, previous *publicationM
 				oldRoute := entry.DesiredRoute
 				entry.DesiredRoute = normalized
 				entry.Aliases = removeRoute(entry.Aliases, normalized)
-				if oldRoute != "" && oldRoute != normalized {
+				if previouslyOwned && oldRoute != "" && oldRoute != normalized {
 					entry.Aliases = appendUniqueRoute(entry.Aliases, oldRoute)
 				}
 			}
