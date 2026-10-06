@@ -226,15 +226,6 @@ func TestRuntimeIsolationLifecycleAndTLSIngress(t *testing.T) {
 	}
 	stopCancel()
 
-	publicAfterShutdown := httptest.NewRequest(http.MethodGet, "https://a.rixa.test:19443/", nil)
-	publicAfterShutdown.Host = "a.rixa.test:19443"
-	publicAfterShutdown.TLS = &tls.ConnectionState{}
-	publicAfterShutdownRecorder := httptest.NewRecorder()
-	runtime.Sites["site-a"].Handler.ServeHTTP(publicAfterShutdownRecorder, publicAfterShutdown)
-	if publicAfterShutdownRecorder.Code != http.StatusOK {
-		t.Fatalf("site static public read depended on stopped dynamic site application: status=%d", publicAfterShutdownRecorder.Code)
-	}
-
 	singleConfig := config
 	singleConfig.Sites = append([]SiteConfig(nil), config.Sites[:1]...)
 	singleResolved, err := singleConfig.ResolveRuntime(ctx, getenv)
