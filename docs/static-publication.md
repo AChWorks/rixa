@@ -26,11 +26,13 @@ Publication apply is serialized per site and uses an optimistic expected-generat
 
 At startup Rixa validates the current pointer, private manifest, routes, and generated file inventory before public serving becomes ready. Orphaned staging/uncommitted generations are not served.
 
+During shutdown, ingress closes first; Rixa then cancels new/in-flight publication work and drains the publication apply gate before shutting down the site's AChrix Applications. If publication cannot drain within the configured shutdown budget, shutdown returns an explicit error instead of racing dependency teardown against activation.
+
 ## Public read path
 
 Normal public reads use only the in-memory active manifest plus immutable files. They do not call content SQL, Identity, authentication, or Media.
 
-The native Go HTTPS ingress is the initial serving choice because Rixa already owns exact-host TLS routing and can serve the immutable generation without adding another trust/proxy layer. Public transfer admission is bounded, GET/HEAD only, paths are exact and fail closed, image URLs are content-addressed and immutable, and responses set explicit content types, cache policy, CSP, `nosniff`, referrer policy, and crawler directives.
+The native Go HTTPS ingress is the initial serving choice because Rixa already owns exact-host TLS routing and can serve the immutable generation without adding another trust/proxy layer. Public transfer admission is bounded, GET/HEAD only, paths are exact and fail closed, and image URLs are content-addressed. The first withdrawal-sensitive profile intentionally uses a short revalidating cache for pages and images rather than a year-long immutable cache. Responses set explicit content types, cache policy, CSP, `nosniff`, referrer policy, and crawler directives.
 
 A maintained lightweight front server can remain an optional deployment optimization if later operational measurements show a material benefit. It is not required for correctness.
 
