@@ -154,9 +154,10 @@ func testStaticPublicationRuntime(t *testing.T, ctx context.Context, runtime *Ru
 	if asset.Code != http.StatusOK || asset.Header().Get("Content-Type") != "image/png" {
 		t.Fatalf("public image status=%d type=%q", asset.Code, asset.Header().Get("Content-Type"))
 	}
-	if !strings.Contains(asset.Header().Get("Cache-Control"), "immutable") ||
+	if asset.Header().Get("Cache-Control") != generatedFileCache ||
+		strings.Contains(asset.Header().Get("Cache-Control"), "immutable") ||
 		asset.Header().Get("X-Content-Type-Options") != "nosniff" || asset.Body.Len() == 0 {
-		t.Fatal("public image did not use immutable hardened serving")
+		t.Fatal("public image did not use withdrawal-sensitive hardened serving")
 	}
 	if response := request("b.rixa.test:19443", assetPath); response.Code != http.StatusNotFound {
 		t.Fatalf("site A public representation crossed into site B: status=%d", response.Code)
