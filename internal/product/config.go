@@ -42,6 +42,18 @@ type ControlConfig struct {
 	AdminPrincipal string `json:"admin_principal,omitempty"`
 }
 
+type ModuleResourceConfig struct {
+	MaxConns      int32 `json:"max_conns,omitempty"`
+	MaxOperations int   `json:"max_operations,omitempty"`
+}
+
+type ResourceConfig struct {
+	Identity               ModuleResourceConfig `json:"identity,omitempty"`
+	Audit                  ModuleResourceConfig `json:"audit,omitempty"`
+	Media                  ModuleResourceConfig `json:"media,omitempty"`
+	EditorialMaxOperations int                  `json:"editorial_max_operations,omitempty"`
+}
+
 type PublicCrawlerPolicy struct {
 	UserAgent string `json:"user_agent"`
 	Access    string `json:"access"`
@@ -114,6 +126,7 @@ type Config struct {
 	Language        string        `json:"language,omitempty"`
 	StartupTimeout  time.Duration `json:"-"`
 	ShutdownTimeout time.Duration `json:"-"`
+	Resources       ResourceConfig `json:"resources,omitempty"`
 	Control         ControlConfig `json:"control"`
 	Sites           []SiteConfig  `json:"sites"`
 }
@@ -123,9 +136,10 @@ type fileConfig struct {
 	TLS             TLSConfig     `json:"tls"`
 	Language        string        `json:"language,omitempty"`
 	StartupTimeout  string        `json:"startup_timeout,omitempty"`
-	ShutdownTimeout string        `json:"shutdown_timeout,omitempty"`
-	Control         ControlConfig `json:"control"`
-	Sites           []SiteConfig  `json:"sites"`
+	ShutdownTimeout string         `json:"shutdown_timeout,omitempty"`
+	Resources       ResourceConfig `json:"resources,omitempty"`
+	Control         ControlConfig  `json:"control"`
+	Sites           []SiteConfig   `json:"sites"`
 }
 
 type ResolvedControl struct {
@@ -182,6 +196,7 @@ func LoadConfig(path string) (Config, error) {
 		Language:        raw.Language,
 		StartupTimeout:  startup,
 		ShutdownTimeout: shutdown,
+		Resources:       raw.Resources,
 		Control:         raw.Control,
 		Sites:           append([]SiteConfig(nil), raw.Sites...),
 	}
@@ -212,6 +227,9 @@ func boundedDuration(value string, fallback time.Duration) (time.Duration, error
 }
 
 func (c Config) validateStructure() error {
+	if err := c.Resources.validate(); err != nil {
+		return fmt.Errorf("%w: resources", ErrConfiguration)
+	}
 	if c.Language != "en" && c.Language != "fa" {
 		return fmt.Errorf("%w: language", ErrConfiguration)
 	}

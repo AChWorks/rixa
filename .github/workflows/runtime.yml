@@ -69,6 +69,11 @@ jobs:
       - name: Runtime proof
         run: go test -race ./...
 
+      - name: Measure resource profile
+        env:
+          RIXA_RESOURCE_OBSERVATION: "1"
+        run: go test -race ./internal/product -run '^TestRuntimeResourceBoundProfile$' -count=1 -v
+
       - name: Prove site transfer round trip
         env:
           RIXA_SITE_TRANSFER_OBSERVATION: "1"
