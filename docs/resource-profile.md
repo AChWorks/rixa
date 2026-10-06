@@ -35,7 +35,7 @@ For one process replica with `S` enabled sites and `P` publication-enabled sites
 - static public-read admission = `P * 32`;
 - publication-apply admission = `P * 1`.
 
-`Config.ResourceBudget(replicas)` calculates the same finite plan and multiplies only the compatible DB ceiling by an explicit deployment replica count. Rixa itself does not create or coordinate replicas. Migration, preflight, bootstrap and operator/measurement connections are transient processes/connections outside the steady-state runtime maximum and must be budgeted separately when operators overlap them intentionally.
+`Config.ResourceBudget(replicas)` calculates the same finite plan and multiplies each resource unit separately by an explicit deployment replica count; DB connections, Module leases, Editorial admission and public-read/publication admission remain separate fields and are never added into one meaningless total. Rixa itself does not create or coordinate replicas. Migration, preflight, bootstrap and operator/measurement connections are transient processes/connections outside the steady-state runtime maximum and must be budgeted separately when operators overlap them intentionally.
 
 With all module values left at their selected v0.3.0 defaults, two active publication-enabled sites have a one-replica steady-state DB ceiling of **40**: 32 AChrix pool connections plus 8 Editorial direct-operation connections. The corresponding AChrix operation-lease ceiling is 104; Editorial admission is 8, public reads 64 and publication mutation 2. These are ceilings, not expected demand.
 

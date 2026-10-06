@@ -76,9 +76,13 @@ type ResourceBudget struct {
 	RuntimeDBMaxConnectionsAggregate   int64 `json:"runtime_db_max_connections_aggregate"`
 	RuntimeDBWarmReserveAggregate      int64 `json:"runtime_db_warm_reserve_aggregate"`
 	AChrixMaxOperationsPerReplica      int64 `json:"achrix_max_operations_per_replica"`
+	AChrixMaxOperationsAggregate       int64 `json:"achrix_max_operations_aggregate"`
 	EditorialMaxOperationsPerReplica   int64 `json:"editorial_max_operations_per_replica"`
+	EditorialMaxOperationsAggregate    int64 `json:"editorial_max_operations_aggregate"`
 	PublicReadMaxPerReplica            int64 `json:"public_read_max_per_replica"`
+	PublicReadMaxAggregate             int64 `json:"public_read_max_aggregate"`
 	PublicationApplyMaxPerReplica      int64 `json:"publication_apply_max_per_replica"`
+	PublicationApplyMaxAggregate       int64 `json:"publication_apply_max_aggregate"`
 }
 
 // ResourceBudget returns the finite configured ceiling for the declared
@@ -117,7 +121,15 @@ func (c Config) ResourceBudget(replicas int) (ResourceBudget, error) {
 	if !ok {
 		return ResourceBudget{}, ErrConfiguration
 	}
-	achrixPools, ok := checkedAdd(controlDB, int64(activeSites)*(identityConns+auditConns+mediaConns))
+	siteAChrixPools, ok := checkedAdd(identityConns, auditConns, mediaConns)
+	if !ok {
+		return ResourceBudget{}, ErrConfiguration
+	}
+	siteAChrixPoolsTotal, ok := checkedMul(int64(activeSites), siteAChrixPools)
+	if !ok {
+		return ResourceBudget{}, ErrConfiguration
+	}
+	achrixPools, ok := checkedAdd(controlDB, siteAChrixPoolsTotal)
 	if !ok {
 		return ResourceBudget{}, ErrConfiguration
 	}
@@ -133,7 +145,15 @@ func (c Config) ResourceBudget(replicas int) (ResourceBudget, error) {
 	identityOps := configuredOperations(c.Resources.Identity.MaxOperations, defaultIdentityMaxOperations)
 	auditOps := configuredOperations(c.Resources.Audit.MaxOperations, defaultAuditMaxOperations)
 	mediaOps := configuredOperations(c.Resources.Media.MaxOperations, defaultMediaMaxOperations)
-	achrixOps, ok := checkedAdd(identityOps, auditOps, int64(activeSites)*(identityOps+auditOps+mediaOps))
+	siteAChrixOps, ok := checkedAdd(identityOps, auditOps, mediaOps)
+	if !ok {
+		return ResourceBudget{}, ErrConfiguration
+	}
+	siteAChrixOpsTotal, ok := checkedMul(int64(activeSites), siteAChrixOps)
+	if !ok {
+		return ResourceBudget{}, ErrConfiguration
+	}
+	achrixOps, ok := checkedAdd(identityOps, auditOps, siteAChrixOpsTotal)
 	if !ok {
 		return ResourceBudget{}, ErrConfiguration
 	}
@@ -143,6 +163,22 @@ func (c Config) ResourceBudget(replicas int) (ResourceBudget, error) {
 	}
 	publicationApplies := int64(publicationSites)
 	aggregateMax, ok := checkedMul(runtimeMax, int64(replicas))
+	if !ok {
+		return ResourceBudget{}, ErrConfiguration
+	}
+	achrixOpsAggregate, ok := checkedMul(achrixOps, int64(replicas))
+	if !ok {
+		return ResourceBudget{}, ErrConfiguration
+	}
+	editorialOpsAggregate, ok := checkedMul(editorialTotal, int64(replicas))
+	if !ok {
+		return ResourceBudget{}, ErrConfiguration
+	}
+	publicReadsAggregate, ok := checkedMul(publicReads, int64(replicas))
+	if !ok {
+		return ResourceBudget{}, ErrConfiguration
+	}
+	publicationAppliesAggregate, ok := checkedMul(publicationApplies, int64(replicas))
 	if !ok {
 		return ResourceBudget{}, ErrConfiguration
 	}
@@ -157,9 +193,13 @@ func (c Config) ResourceBudget(replicas int) (ResourceBudget, error) {
 		RuntimeDBMaxConnectionsAggregate: aggregateMax,
 		RuntimeDBWarmReserveAggregate: 0,
 		AChrixMaxOperationsPerReplica: achrixOps,
+		AChrixMaxOperationsAggregate: achrixOpsAggregate,
 		EditorialMaxOperationsPerReplica: editorialTotal,
+		EditorialMaxOperationsAggregate: editorialOpsAggregate,
 		PublicReadMaxPerReplica: publicReads,
+		PublicReadMaxAggregate: publicReadsAggregate,
 		PublicationApplyMaxPerReplica: publicationApplies,
+		PublicationApplyMaxAggregate: publicationAppliesAggregate,
 	}, nil
 }
 

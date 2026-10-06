@@ -41,9 +41,13 @@ func TestResourceBudgetSeparatesCeilingWarmReserveAndComposition(t *testing.T) {
 		t.Fatalf("warm reserve must stay distinct from maxima: %#v", budget)
 	}
 	if budget.AChrixMaxOperationsPerReplica != 44 ||
+		budget.AChrixMaxOperationsAggregate != 88 ||
 		budget.EditorialMaxOperationsPerReplica != 4 ||
+		budget.EditorialMaxOperationsAggregate != 8 ||
 		budget.PublicReadMaxPerReplica != 64 ||
-		budget.PublicationApplyMaxPerReplica != 2 {
+		budget.PublicReadMaxAggregate != 128 ||
+		budget.PublicationApplyMaxPerReplica != 2 ||
+		budget.PublicationApplyMaxAggregate != 4 {
 		t.Fatalf("operation/admission budget=%#v", budget)
 	}
 }
