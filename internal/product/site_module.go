@@ -32,6 +32,7 @@ func (m *siteModule) Descriptor() achrix.Descriptor {
 			{ID: CapabilityContentEdit, Version: 1},
 			{ID: CapabilityContentPreview, Version: 1},
 			{ID: CapabilityContentPublishIntent, Version: 1},
+			{ID: CapabilityPublicationApply, Version: 1},
 			{ID: CapabilityAppearanceRead, Version: 1},
 			{ID: CapabilityAppearanceEdit, Version: 1},
 			{ID: CapabilityOperationRead, Version: 1},
