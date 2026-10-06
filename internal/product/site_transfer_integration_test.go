@@ -202,6 +202,33 @@ func TestSiteTransferRoundTrip(t *testing.T) {
 		t.Fatalf("rejected aliased capture created bundle: %v", err)
 	}
 
+	statefulCaptureValues := map[string]string{
+		"TRANSFER_SOURCE_CONTROL": dsns["source-control"],
+		"TRANSFER_SOURCE_A":       dsns["source-a"],
+		"TRANSFER_SOURCE_B":       dsns["source-b"],
+	}
+	statefulCaptureSiteReads := 0
+	statefulCaptureEnv := func(key string) (string, bool) {
+		if key == "TRANSFER_SOURCE_A" {
+			statefulCaptureSiteReads++
+			if statefulCaptureSiteReads > 1 {
+				return dsns["source-control"], true
+			}
+		}
+		value, ok := statefulCaptureValues[key]
+		return value, ok
+	}
+	statefulCaptureRoot := filepath.Join(base, "capture-stateful-resolver")
+	if _, err = CaptureSite(ctx, source, "site-a", statefulCaptureRoot, statefulCaptureEnv, tooling); err != nil {
+		t.Fatalf("capture with changing resolver: %v", err)
+	}
+	if statefulCaptureSiteReads != 1 {
+		t.Fatalf("capture re-read selected database environment %d times", statefulCaptureSiteReads)
+	}
+	if _, err = os.Stat(filepath.Join(statefulCaptureRoot, siteTransferCompleteFile)); err != nil {
+		t.Fatalf("stateful-resolver capture did not complete: %v", err)
+	}
+
 	fence, _, err := beginSiteTransferDatabaseFence(ctx, dsns["source-a"], source.Sites[0].AdminPrincipal)
 	if err != nil {
 		t.Fatalf("begin source database capture fence: %v", err)
@@ -326,6 +353,44 @@ func TestSiteTransferRoundTrip(t *testing.T) {
 	}
 	if _, statErr := os.Lstat(aliasRestoreConfig.Sites[0].MediaRoot); !errors.Is(statErr, os.ErrNotExist) {
 		t.Fatalf("aliased restore created Media root: %v", statErr)
+	}
+
+	statefulRestoreParent := filepath.Join(base, "stateful-target")
+	if err = os.Mkdir(statefulRestoreParent, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	statefulRestoreConfig := target
+	statefulRestoreConfig.Control.DatabaseEnv = "TRANSFER_STATEFUL_CONTROL"
+	statefulRestoreConfig.Sites = append([]SiteConfig(nil), target.Sites...)
+	statefulRestoreConfig.Sites[0].DatabaseEnv = "TRANSFER_STATEFUL_A"
+	statefulRestoreConfig.Sites[0].MediaRoot = filepath.Join(statefulRestoreParent, "media")
+	statefulRestoreConfig.Sites[0].PublicRoot = filepath.Join(statefulRestoreParent, "public")
+	statefulRestoreValues := map[string]string{
+		"TRANSFER_STATEFUL_CONTROL": dsns["stateful-control"],
+		"TRANSFER_STATEFUL_A":       dsns["stateful-a"],
+	}
+	statefulRestoreSiteReads := 0
+	statefulRestoreEnv := func(key string) (string, bool) {
+		if key == "TRANSFER_STATEFUL_A" {
+			statefulRestoreSiteReads++
+			if statefulRestoreSiteReads > 1 {
+				return dsns["stateful-control"], true
+			}
+		}
+		value, ok := statefulRestoreValues[key]
+		return value, ok
+	}
+	if _, err = RestoreSite(ctx, statefulRestoreConfig, "site-a", captureRoot, statefulRestoreEnv, tooling); err != nil {
+		t.Fatalf("restore with changing resolver: %v", err)
+	}
+	if statefulRestoreSiteReads != 1 {
+		t.Fatalf("restore re-read selected database environment %d times", statefulRestoreSiteReads)
+	}
+	if got := queryTransferCount(t, ctx, dsns["stateful-control"], "SELECT count(*) FROM pg_namespace WHERE nspname IN ('identity','audit','media','rixa')"); got != 0 {
+		t.Fatalf("stateful resolver mutated unvalidated control target: %d", got)
+	}
+	if got := queryTransferCount(t, ctx, dsns["stateful-a"], "SELECT count(*) FROM pg_namespace WHERE nspname IN ('identity','audit','media','rixa')"); got != 4 {
+		t.Fatalf("stateful resolver did not restore the validated site target: %d", got)
 	}
 
 	restoredManifest, err := RestoreSite(ctx, target, "site-a", captureRoot, targetEnv, tooling)
@@ -523,9 +588,11 @@ func createSiteTransferDatabases(t *testing.T, ctx context.Context, adminDSN str
 		"source-control": "rixa_transfer_source_control_" + suffix,
 		"source-a": "rixa_transfer_source_a_" + suffix,
 		"source-b": "rixa_transfer_source_b_" + suffix,
-		"target-control": "rixa_transfer_target_control_" + suffix,
-		"target-a": "rixa_transfer_target_a_" + suffix,
-		"dirty": "rixa_transfer_dirty_" + suffix,
+		"target-control":   "rixa_transfer_target_control_" + suffix,
+		"target-a":         "rixa_transfer_target_a_" + suffix,
+		"stateful-control": "rixa_transfer_stateful_control_" + suffix,
+		"stateful-a":       "rixa_transfer_stateful_a_" + suffix,
+		"dirty":            "rixa_transfer_dirty_" + suffix,
 		"tampered": "rixa_transfer_tampered_" + suffix,
 	}
 	for _, name := range names {

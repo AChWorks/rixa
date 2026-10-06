@@ -162,14 +162,11 @@ func CaptureSite(parent context.Context, config Config, siteID, destination stri
 	if site.AdminPrincipal == "" || !accountIDSyntax.MatchString(site.AdminPrincipal) {
 		return SiteTransferManifest{}, fmt.Errorf("%w: source site administrator", ErrSiteTransfer)
 	}
-	if _, err = config.DatabaseTargets(parent, getenv); err != nil {
+	target, err := validatedSiteTransferDatabaseTarget(parent, config, siteID, getenv)
+	if err != nil {
 		return SiteTransferManifest{}, err
 	}
 	if err = createPrivateTransferDirectory(destination); err != nil {
-		return SiteTransferManifest{}, err
-	}
-	target, err := config.BootstrapDatabase("site:"+siteID, getenv)
-	if err != nil {
 		return SiteTransferManifest{}, err
 	}
 	pgEnv, _, err := siteTransferPostgresEnvironment(target.DSN)
@@ -318,10 +315,7 @@ func RestoreSite(parent context.Context, config Config, siteID, source string, g
 	if err = validateSiteTransferCompatibility(site, manifest); err != nil {
 		return SiteTransferManifest{}, err
 	}
-	if _, err = config.DatabaseTargets(parent, getenv); err != nil {
-		return SiteTransferManifest{}, err
-	}
-	target, err := config.BootstrapDatabase("site:"+siteID, getenv)
+	target, err := validatedSiteTransferDatabaseTarget(parent, config, siteID, getenv)
 	if err != nil {
 		return SiteTransferManifest{}, err
 	}
@@ -485,6 +479,19 @@ func verifyRestoredSiteTransferContracts(parent context.Context, config Config, 
 		}
 	}
 	return nil
+}
+
+func validatedSiteTransferDatabaseTarget(parent context.Context, config Config, siteID string, getenv func(string) (string, bool)) (ResolvedDatabase, error) {
+	targets, err := config.DatabaseTargets(parent, getenv)
+	if err != nil {
+		return ResolvedDatabase{}, err
+	}
+	for _, target := range targets {
+		if target.Kind == DatabaseSite && target.ID == siteID {
+			return target, nil
+		}
+	}
+	return ResolvedDatabase{}, fmt.Errorf("%w: validated site database target not found", ErrConfiguration)
 }
 
 func transferSiteConfig(config Config, siteID string) (SiteConfig, error) {

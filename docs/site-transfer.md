@@ -19,7 +19,7 @@ The first profile requires the same site ID, public origin, site administrator p
 
 ## Consistency boundary
 
-Capture first re-establishes the configured control/site PostgreSQL physical-target uniqueness boundary, then is intentionally quiesced:
+Capture first resolves and validates the configured control/site PostgreSQL physical-target set, retains the selected site's validated target for execution without re-reading its database environment, then is intentionally quiesced:
 
 1. stop public/admin ingress and drain the Rixa runtime;
 2. while the source Application is still available, reconcile Media unfinished work until no processed/busy work remains, then stop it;
@@ -38,7 +38,7 @@ Restore accepts only:
 - a canonical private completed bundle directory that is disjoint from every enabled site's private Media/Public storage as well as the selected target roots;
 - selected target Media/Public roots that remain exclusive from every other enabled site's canonical/physical private-root boundary before any staging or database mutation;
 - a completed hash-valid bundle for the current transfer schema, Rixa build-version string and exact AChrix identity;
-- a separate empty local PostgreSQL target database whose physical PostgreSQL identity is distinct from the configured control and every other enabled site target;
+- a separate empty local PostgreSQL target database whose physical PostgreSQL identity is distinct from the configured control and every other enabled site target; the selected validated target is retained for restore execution without a second environment lookup;
 - nonexistent target Media/public roots under canonical existing parents;
 - the same site identity/origin/admin/public policy.
 
