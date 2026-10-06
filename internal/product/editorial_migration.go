@@ -12,11 +12,59 @@ import (
 )
 
 const (
-	editorialMigrationIdentity  = "rixa-editorial-v1-20261006"
-	editorialMigration2Identity = "rixa-editorial-v2-20261006"
+	editorialMigrationIdentity        = "rixa-editorial-v1-20261006"
+	editorialMigration2Identity       = "rixa-editorial-v2-20261006"
+	editorialMigrationLock      int64 = 74199742106
 )
 
 const editorialMigration2SQL = `ALTER TABLE rixa.content_items ADD COLUMN publication_intent_version bigint NOT NULL DEFAULT 1 CHECK (publication_intent_version >= 1);`
+
+type editorialMigration struct {
+	sql      string
+	identity string
+}
+
+func editorialMigrationPlan() []editorialMigration {
+	return []editorialMigration{
+		{sql: editorialMigrationSQL, identity: editorialMigrationIdentity},
+		{sql: editorialMigration2SQL, identity: editorialMigration2Identity},
+	}
+}
+
+type editorialSchemaQuery interface {
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+}
+
+// Existing editorial state must have an exact nonempty ordered prefix of the
+// immutable migration plan. Unknown, missing, reordered or changed entries
+// fail closed so an older Rixa source never writes a newer schema.
+func editorialLedgerVersion(ctx context.Context, q editorialSchemaQuery, plan []editorialMigration) (int, error) {
+	rows, err := q.Query(ctx, "SELECT version,identity FROM rixa.schema_migrations ORDER BY version")
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+
+	count := 0
+	for rows.Next() {
+		var version int
+		var identity string
+		if err := rows.Scan(&version, &identity); err != nil {
+			return 0, err
+		}
+		if count >= len(plan) || version != count+1 || identity != plan[count].identity {
+			return 0, ErrConfiguration
+		}
+		count++
+	}
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	if count == 0 {
+		return 0, ErrConfiguration
+	}
+	return count, nil
+}
 
 const editorialMigrationSQL = `
 CREATE TABLE rixa.content_items (
@@ -100,49 +148,59 @@ func migrateEditorial(parent context.Context, dsn, siteID string) error {
 	}
 	defer func() { _ = tx.Rollback(context.Background()) }()
 
-	if _, err = tx.Exec(ctx, `
-		CREATE SCHEMA IF NOT EXISTS rixa;
-		CREATE TABLE IF NOT EXISTS rixa.schema_migrations (
-			version integer PRIMARY KEY,
-			identity text NOT NULL
-		)
-	`); err != nil {
-		return fmt.Errorf("editorial migration metadata: %w", err)
+	if _, err = tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", editorialMigrationLock); err != nil {
+		return fmt.Errorf("editorial migration lock: %w", err)
 	}
 
-	var identity string
-	err = tx.QueryRow(ctx, "SELECT identity FROM rixa.schema_migrations WHERE version=1").Scan(&identity)
-	switch {
-	case err == nil && identity != editorialMigrationIdentity:
-		return fmt.Errorf("%w: editorial migration identity mismatch", ErrConfiguration)
-	case err == nil:
-		// Already applied and identity-checked.
-	case errors.Is(err, pgx.ErrNoRows):
-		if _, err = tx.Exec(ctx, editorialMigrationSQL); err != nil {
-			return fmt.Errorf("editorial migration 1: %w", err)
-		}
-		if _, err = tx.Exec(ctx, "INSERT INTO rixa.schema_migrations(version,identity) VALUES(1,$1)", editorialMigrationIdentity); err != nil {
-			return fmt.Errorf("editorial migration record: %w", err)
-		}
-	default:
-		return fmt.Errorf("editorial migration lookup: %w", err)
+	var schemaExists bool
+	if err = tx.QueryRow(ctx, "SELECT to_regnamespace('rixa') IS NOT NULL").Scan(&schemaExists); err != nil {
+		return fmt.Errorf("editorial migration schema lookup: %w", err)
 	}
 
-	err = tx.QueryRow(ctx, "SELECT identity FROM rixa.schema_migrations WHERE version=2").Scan(&identity)
-	switch {
-	case err == nil && identity != editorialMigration2Identity:
-		return fmt.Errorf("%w: editorial migration 2 identity mismatch", ErrConfiguration)
-	case err == nil:
-		// Already applied and identity-checked.
-	case errors.Is(err, pgx.ErrNoRows):
-		if _, err = tx.Exec(ctx, editorialMigration2SQL); err != nil {
-			return fmt.Errorf("editorial migration 2: %w", err)
+	plan := editorialMigrationPlan()
+	version := 0
+	if schemaExists {
+		var ledgerExists bool
+		if err = tx.QueryRow(ctx, "SELECT to_regclass('rixa.schema_migrations') IS NOT NULL").Scan(&ledgerExists); err != nil {
+			return fmt.Errorf("editorial migration ledger lookup: %w", err)
 		}
-		if _, err = tx.Exec(ctx, "INSERT INTO rixa.schema_migrations(version,identity) VALUES(2,$1)", editorialMigration2Identity); err != nil {
-			return fmt.Errorf("editorial migration 2 record: %w", err)
+		if !ledgerExists {
+			return fmt.Errorf("%w: editorial migration ledger missing", ErrConfiguration)
 		}
-	default:
-		return fmt.Errorf("editorial migration 2 lookup: %w", err)
+		version, err = editorialLedgerVersion(ctx, tx, plan)
+		if err != nil {
+			if errors.Is(err, ErrConfiguration) {
+				return fmt.Errorf("%w: editorial migration ledger is not a supported exact prefix", ErrConfiguration)
+			}
+			return fmt.Errorf("editorial migration ledger: %w", err)
+		}
+	} else {
+		if _, err = tx.Exec(ctx, `
+			CREATE SCHEMA rixa;
+			CREATE TABLE rixa.schema_migrations (
+				version integer PRIMARY KEY,
+				identity text NOT NULL
+			)
+		`); err != nil {
+			return fmt.Errorf("editorial migration metadata: %w", err)
+		}
+	}
+
+	for i := version; i < len(plan); i++ {
+		if _, err = tx.Exec(ctx, plan[i].sql); err != nil {
+			return fmt.Errorf("editorial migration %d: %w", i+1, err)
+		}
+		if _, err = tx.Exec(ctx, "INSERT INTO rixa.schema_migrations(version,identity) VALUES($1,$2)", i+1, plan[i].identity); err != nil {
+			return fmt.Errorf("editorial migration %d record: %w", i+1, err)
+		}
+	}
+
+	version, err = editorialLedgerVersion(ctx, tx, plan)
+	if err != nil {
+		return fmt.Errorf("editorial migration ledger verification: %w", err)
+	}
+	if version != len(plan) {
+		return fmt.Errorf("%w: editorial migration ledger is incomplete", ErrConfiguration)
 	}
 
 	var head int64

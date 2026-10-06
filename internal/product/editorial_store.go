@@ -145,17 +145,9 @@ func (s *editorialStore) ready(parent context.Context) error {
 		return err
 	}
 	defer release()
-	var identity string
-	if err = conn.QueryRow(ctx, "SELECT identity FROM rixa.schema_migrations WHERE version=1").Scan(&identity); err != nil {
-		return editorialReadError(err)
-	}
-	if identity != editorialMigrationIdentity {
-		return ErrEditorialUnavailable
-	}
-	if err = conn.QueryRow(ctx, "SELECT identity FROM rixa.schema_migrations WHERE version=2").Scan(&identity); err != nil {
-		return editorialReadError(err)
-	}
-	if identity != editorialMigration2Identity {
+	plan := editorialMigrationPlan()
+	version, err := editorialLedgerVersion(ctx, conn, plan)
+	if err != nil || version != len(plan) {
 		return ErrEditorialUnavailable
 	}
 	var head int64
