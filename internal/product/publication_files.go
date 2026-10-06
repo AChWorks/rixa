@@ -40,13 +40,20 @@ func (s *PublicationService) Ready() error {
 	}
 
 	currentPath := filepath.Join(s.root, "current")
-	pointer, err := os.ReadFile(currentPath)
-	if errors.Is(err, os.ErrNotExist) {
+	currentInfo, statErr := os.Lstat(currentPath)
+	if errors.Is(statErr, os.ErrNotExist) {
 		s.state.Store(newPublicationReadState(nil))
 		s.cleanupStartup(nil)
 		s.ready.Store(true)
 		return nil
 	}
+	if statErr != nil || !currentInfo.Mode().IsRegular() || currentInfo.Mode().Perm() != 0o600 || currentInfo.Size() < 1 || currentInfo.Size() > 64 {
+		return ErrEditorialUnavailable
+	}
+	if resolved, e := filepath.EvalSymlinks(currentPath); e != nil || resolved != currentPath {
+		return ErrEditorialUnavailable
+	}
+	pointer, err := os.ReadFile(currentPath)
 	if err != nil || len(pointer) == 0 || len(pointer) > 64 {
 		return ErrEditorialUnavailable
 	}
@@ -122,7 +129,16 @@ func (s *PublicationService) loadGeneration(id string) (*publishedGeneration, er
 	if err != nil || resolved != root {
 		return nil, ErrEditorialUnavailable
 	}
-	file, err := os.Open(filepath.Join(root, "manifest.json"))
+	manifestPath := filepath.Join(root, "manifest.json")
+	manifestInfo, err := os.Lstat(manifestPath)
+	if err != nil || !manifestInfo.Mode().IsRegular() || manifestInfo.Mode().Perm() != 0o600 ||
+		manifestInfo.Size() < 1 || manifestInfo.Size() > maxPublicationManifestBytes {
+		return nil, ErrEditorialUnavailable
+	}
+	if resolved, e := filepath.EvalSymlinks(manifestPath); e != nil || resolved != manifestPath {
+		return nil, ErrEditorialUnavailable
+	}
+	file, err := os.Open(manifestPath)
 	if err != nil {
 		return nil, ErrEditorialUnavailable
 	}
@@ -192,11 +208,14 @@ func (s *PublicationService) validateManifest(root string, manifest *publication
 		}
 		path := filepath.Join(publicDir, filepath.FromSlash(key))
 		info, err = os.Lstat(path)
-		if err != nil || !info.Mode().IsRegular() || info.Size() != meta.Size {
+		if err != nil || !info.Mode().IsRegular() || info.Mode().Perm() != 0o600 || info.Size() != meta.Size {
 			return ErrEditorialUnavailable
 		}
 		resolved, e := filepath.EvalSymlinks(path)
 		if e != nil || resolved != path {
+			return ErrEditorialUnavailable
+		}
+		if err = verifyFileSHA256(path, meta.SHA256); err != nil {
 			return ErrEditorialUnavailable
 		}
 	}
@@ -490,7 +509,11 @@ func (s *PublicationService) servePublishedFile(w http.ResponseWriter, r *http.R
 		publicHTTPError(w, http.StatusServiceUnavailable)
 		return
 	}
-	defer generation.readers.Add(-1)
+	defer func() {
+		if generation.readers.Add(-1) == 0 && generation.retired.Load() {
+			_ = os.RemoveAll(generation.root)
+		}
+	}()
 
 	path := filepath.Join(generation.root, "public", filepath.FromSlash(relative))
 	file, err := os.Open(path)
@@ -500,7 +523,7 @@ func (s *PublicationService) servePublishedFile(w http.ResponseWriter, r *http.R
 	}
 	defer file.Close()
 	info, err := file.Stat()
-	if err != nil || !info.Mode().IsRegular() || info.Size() != meta.Size {
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm() != 0o600 || info.Size() != meta.Size {
 		publicHTTPError(w, http.StatusServiceUnavailable)
 		return
 	}
