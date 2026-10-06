@@ -48,7 +48,10 @@ func BenchmarkStaticPublicationHTTPSRead(b *testing.B) {
 	service.state.Store(newPublicationReadState([]*publishedGeneration{generation}))
 	service.ready.Store(true)
 
-	server := httptest.NewUnstartedServer(service)
+	var ingress http.Handler
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ingress.ServeHTTP(w, r)
+	}))
 	server.StartTLS()
 	defer server.Close()
 	parsed, err := url.Parse(server.URL)
@@ -56,6 +59,22 @@ func BenchmarkStaticPublicationHTTPSRead(b *testing.B) {
 		b.Fatal(err)
 	}
 	service.authority = parsed.Host
+	siteOrigin := "https://" + parsed.Host
+	runtime := &Runtime{
+		Config: RuntimeConfig{
+			Config: Config{
+				Control: ControlConfig{Origin: "https://control.invalid"},
+				Sites:   []SiteConfig{{ID: "site", Origin: siteOrigin}},
+			},
+			Sites: []ResolvedSite{{SiteConfig: SiteConfig{ID: "site", Origin: siteOrigin}}},
+		},
+		Control: &ControlRuntime{Handler: http.NotFoundHandler()},
+		Sites: map[string]*SiteRuntime{
+			"site": {ID: "site", Origin: siteOrigin, Handler: siteRequestHandler(http.NotFoundHandler(), service)},
+		},
+	}
+	ingress = newIngressHandler(runtime)
+
 	client := server.Client()
 	client.Timeout = 5 * time.Second
 
