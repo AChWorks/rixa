@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 
 	"github.com/AChWorks/achrix"
@@ -26,8 +27,9 @@ type SiteRuntime struct {
 	App       *achrix.Application
 	Identity  *identity.Service
 	Media     *media.Service
-	Editorial *EditorialService
-	Handler   http.Handler
+	Editorial   *EditorialService
+	Publication *PublicationService
+	Handler     http.Handler
 
 	adminPrincipal achrix.Principal
 	operator       achrix.Principal
@@ -218,6 +220,10 @@ func buildSite(config Config, site ResolvedSite, adminPrincipal, operator achrix
 	if err != nil {
 		return nil, fmt.Errorf("editorial service: %w", err)
 	}
+	publicationService, err := newPublicationService(site, app, editorialService, mediaService)
+	if err != nil {
+		return nil, fmt.Errorf("publication service: %w", err)
+	}
 	web, err := identity.NewWeb(identityService, site.Origin)
 	if err != nil {
 		return nil, fmt.Errorf("identity web: %w", err)
@@ -234,7 +240,7 @@ func buildSite(config Config, site ResolvedSite, adminPrincipal, operator achrix
 	if err != nil {
 		return nil, fmt.Errorf("media surface: %w", err)
 	}
-	contentSurface, err := newContentSurface(editorialService)
+	contentSurface, err := newContentSurface(editorialService, publicationService)
 	if err != nil {
 		return nil, fmt.Errorf("content surface: %w", err)
 	}
@@ -254,6 +260,7 @@ func buildSite(config Config, site ResolvedSite, adminPrincipal, operator achrix
 	if err != nil {
 		return nil, fmt.Errorf("admin: %w", err)
 	}
+	management := managementHandler(web, adminShell)
 	return &SiteRuntime{
 		ID:             site.ID,
 		Origin:         site.Origin,
@@ -261,7 +268,8 @@ func buildSite(config Config, site ResolvedSite, adminPrincipal, operator achrix
 		Identity:       identityService,
 		Media:          mediaService,
 		Editorial:      editorialService,
-		Handler:        managementHandler(web, adminShell),
+		Publication:    publicationService,
+		Handler:        siteRequestHandler(management, publicationService),
 		adminPrincipal: adminPrincipal,
 		operator:       operator,
 	}, nil
@@ -309,6 +317,20 @@ func managementHandler(web *identity.Web, adminShell *shell.Shell) http.Handler 
 	return mux
 }
 
+func siteRequestHandler(management http.Handler, publication *PublicationService) http.Handler {
+	if publication == nil {
+		return management
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/admin" || strings.HasPrefix(r.URL.Path, "/admin/") ||
+			r.URL.Path == "/auth" || strings.HasPrefix(r.URL.Path, "/auth/") {
+			management.ServeHTTP(w, r)
+			return
+		}
+		publication.ServeHTTP(w, r)
+	})
+}
+
 func operatorPrincipal(control achrix.Principal, siteID string) achrix.Principal {
 	return achrix.Principal(fmt.Sprintf("rixa.operator:%s:%s", control, siteID))
 }
@@ -345,6 +367,11 @@ func (r *Runtime) Start(parent context.Context) error {
 	for _, site := range r.Sites {
 		if err := site.Editorial.Ready(ctx); err != nil {
 			return errors.Join(fmt.Errorf("site %s editorial: %w", site.ID, err), r.stopStarted(started))
+		}
+		if site.Publication != nil {
+			if err := site.Publication.Ready(); err != nil {
+				return errors.Join(fmt.Errorf("site %s publication: %w", site.ID, err), r.stopStarted(started))
+			}
 		}
 	}
 	r.mu.Lock()
