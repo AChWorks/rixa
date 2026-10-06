@@ -39,6 +39,28 @@ func TestNormalizePublicationRouteUsesBoundedURLSafeSegments(t *testing.T) {
 	}
 }
 
+func TestSafePublicRequestRejectsEveryEncodedPath(t *testing.T) {
+	canonical := httptest.NewRequest(http.MethodGet, "https://site.example/news/launch/", nil)
+	if canonical.URL.RawPath != "" || !safePublicRequest(canonical) {
+		t.Fatal("canonical unencoded public path was rejected")
+	}
+	for _, raw := range []string{
+		"/%6Eews/launch/",
+		"/news%2Flaunch/",
+		"/%2E%2E/news/",
+		"/%5Cnews/",
+		"/%00news/",
+	} {
+		req := httptest.NewRequest(http.MethodGet, "https://site.example"+raw, nil)
+		if req.URL.RawPath == "" {
+			t.Fatalf("test path %q did not preserve RawPath", raw)
+		}
+		if safePublicRequest(req) {
+			t.Fatalf("encoded public path %q was accepted", raw)
+		}
+	}
+}
+
 func TestPublicationReadyRejectsSameSizeTamperedArtifact(t *testing.T) {
 	root := t.TempDir()
 	if err := os.Chmod(root, 0o700); err != nil {
@@ -135,7 +157,8 @@ func TestStaticPublicationReadNeedsNoDynamicServices(t *testing.T) {
 		Generation: "CCCCCCCCCCCCCCCCCCCCCCCCCC",
 		CreatedAt:  time.Unix(20, 0).UTC(),
 		Routes: map[string]publicationRoute{
-			"/": {Kind: "file", File: "home.html"},
+			"/":             {Kind: "file", File: "home.html"},
+			"/news/launch/": {Kind: "file", File: "home.html"},
 		},
 		Files: map[string]publicationFile{
 			"home.html": {
@@ -160,5 +183,26 @@ func TestStaticPublicationReadNeedsNoDynamicServices(t *testing.T) {
 	service.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "static-only") {
 		t.Fatalf("static read unexpectedly needed dynamic services: status=%d body=%q", rec.Code, rec.Body.String())
+	}
+
+	canonicalRoute := httptest.NewRequest(http.MethodGet, "https://site.example/news/launch/", nil)
+	canonicalRoute.Host = "site.example"
+	canonicalRoute.TLS = &tls.ConnectionState{}
+	canonicalRecorder := httptest.NewRecorder()
+	service.ServeHTTP(canonicalRecorder, canonicalRoute)
+	if canonicalRecorder.Code != http.StatusOK {
+		t.Fatalf("canonical ASCII route status=%d", canonicalRecorder.Code)
+	}
+
+	encodedRoute := httptest.NewRequest(http.MethodGet, "https://site.example/%6Eews/launch/", nil)
+	encodedRoute.Host = "site.example"
+	encodedRoute.TLS = &tls.ConnectionState{}
+	if encodedRoute.URL.RawPath == "" || encodedRoute.URL.Path != "/news/launch/" {
+		t.Fatalf("encoded route fixture path=%q raw=%q", encodedRoute.URL.Path, encodedRoute.URL.RawPath)
+	}
+	encodedRecorder := httptest.NewRecorder()
+	service.ServeHTTP(encodedRecorder, encodedRoute)
+	if encodedRecorder.Code != http.StatusNotFound {
+		t.Fatalf("encoded spelling reached canonical route: status=%d", encodedRecorder.Code)
 	}
 }

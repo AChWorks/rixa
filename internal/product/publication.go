@@ -139,6 +139,10 @@ type publicationReadState struct {
 	assets      map[string]*publishedGeneration
 }
 
+type pendingPublicationDurability struct {
+	generation *publishedGeneration
+}
+
 type PublicationService struct {
 	siteID    string
 	origin    string
@@ -150,13 +154,15 @@ type PublicationService struct {
 	media     *media.Service
 	slots     chan struct{}
 	applyGate chan struct{}
+	rootSync  func(string) error
 
-	mu     sync.Mutex
-	readMu sync.Mutex
-	ready           atomic.Bool
-	state           atomic.Pointer[publicationReadState]
-	lifecycleCtx    context.Context
-	lifecycleCancel context.CancelFunc
+	mu                sync.Mutex
+	readMu            sync.Mutex
+	ready             atomic.Bool
+	state             atomic.Pointer[publicationReadState]
+	pendingDurability *pendingPublicationDurability
+	lifecycleCtx      context.Context
+	lifecycleCancel   context.CancelFunc
 }
 
 func newPublicationService(site ResolvedSite, app *achrix.Application, editorial *EditorialService, mediaService *media.Service) (*PublicationService, error) {
@@ -180,6 +186,7 @@ func newPublicationService(site ResolvedSite, app *achrix.Application, editorial
 		app: app, editorial: editorial, media: mediaService,
 		slots: make(chan struct{}, publicReadConcurrency),
 		applyGate: make(chan struct{}, 1),
+		rootSync: syncDir,
 		lifecycleCtx: lifecycleCtx, lifecycleCancel: lifecycleCancel,
 	}, nil
 }
@@ -239,6 +246,18 @@ func (s *PublicationService) Operation(ctx context.Context, actor achrix.Princip
 	if err := s.editorial.authorize(ctx, actor, CapabilityOperationRead, OperationCollectionTarget); err != nil {
 		return PublicationOperation{}, err
 	}
+	if s.applyGate == nil {
+		return PublicationOperation{}, ErrEditorialUnavailable
+	}
+	select {
+	case s.applyGate <- struct{}{}:
+		defer func() { <-s.applyGate }()
+	case <-ctx.Done():
+		return PublicationOperation{}, ctx.Err()
+	}
+	if err := s.reconcilePendingDurability(); err != nil {
+		return PublicationOperation{}, err
+	}
 	if operation, ok := s.findOperation(operationID); ok {
 		return operation, nil
 	}
@@ -278,20 +297,20 @@ func (s *PublicationService) Apply(ctx context.Context, actor achrix.Principal, 
 		"publication.apply", string(actor), request.ExpectedGeneration, request.ContentID, request.Route,
 	)
 
+	if s.applyGate == nil {
+		return PublicationResult{}, ErrEditorialUnavailable
+	}
 	select {
 	case s.applyGate <- struct{}{}:
 		defer func() { <-s.applyGate }()
 	case <-ctx.Done():
 		return PublicationResult{}, ctx.Err()
 	}
-	releaseSource, err := s.editorial.acquirePublicationSource(ctx)
-	if err != nil {
-		return PublicationResult{}, err
-	}
-	defer releaseSource()
-
 	if !s.ready.Load() {
 		return PublicationResult{}, ErrEditorialUnavailable
+	}
+	if err := s.reconcilePendingDurability(); err != nil {
+		return PublicationResult{}, err
 	}
 	if operation, ok := s.findOperation(request.OperationID); ok {
 		if operation.RequestHash != requestHash {
@@ -302,6 +321,12 @@ func (s *PublicationService) Apply(ctx context.Context, actor achrix.Principal, 
 			Route: operation.Route, CreatedAt: operation.CreatedAt,
 		}, nil
 	}
+
+	releaseSource, err := s.editorial.acquirePublicationSource(ctx)
+	if err != nil {
+		return PublicationResult{}, err
+	}
+	defer releaseSource()
 
 	current := s.state.Load()
 	currentGeneration := ""
@@ -418,19 +443,17 @@ func (s *PublicationService) Apply(ctx context.Context, actor achrix.Principal, 
 	}
 
 	gen := &publishedGeneration{manifest: manifest, root: finalDir}
-	pointerCommitted, pointerErr := s.activateGeneration(generation)
-	var retired []*publishedGeneration
-	if pointerCommitted {
-		retired = s.installGeneration(gen)
-	}
+	pointerRenamed, pointerErr := s.activateGeneration(generation)
 	if pointerErr != nil {
-		if pointerCommitted {
+		if pointerRenamed {
+			s.pendingDurability = &pendingPublicationDurability{generation: gen}
 			return PublicationResult{}, ErrEditorialUnknownOutcome
 		}
 		_ = os.RemoveAll(finalDir)
 		return PublicationResult{}, ErrEditorialUnavailable
 	}
 
+	retired := s.installGeneration(gen)
 	s.cleanupRetired(retired)
 	return PublicationResult{
 		Generation: generation, ContentID: request.ContentID,

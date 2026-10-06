@@ -79,6 +79,45 @@ func testStaticPublicationRuntime(t *testing.T, ctx context.Context, runtime *Ru
 		t.Fatalf("control-origin publication reached unknown site: %v", err)
 	}
 
+	siteB := runtime.Sites["site-b"]
+	originalRootSync := siteB.Publication.rootSync
+	rootSyncAttempts := 0
+	siteB.Publication.rootSync = func(path string) error {
+		rootSyncAttempts++
+		if rootSyncAttempts <= 2 {
+			return errors.New("injected publication root sync failure")
+		}
+		return originalRootSync(path)
+	}
+	ambiguousOperationID := newOperationID()
+	if _, err = runtime.ControlService().ApplySitePublication(ctx, runtime.Control.AdminPrincipal, "site-b", PublicationRequest{
+		OperationID: ambiguousOperationID, ExpectedGeneration: controlPublication.Generation,
+	}); !errors.Is(err, ErrEditorialUnknownOutcome) {
+		t.Fatalf("post-rename sync failure did not return unknown outcome: %v", err)
+	}
+	if siteB.Publication.pendingDurability == nil || siteB.Publication.pendingDurability.generation == nil {
+		t.Fatal("post-rename sync failure did not retain unresolved durability state")
+	}
+	ambiguousGeneration := siteB.Publication.pendingDurability.generation.manifest.Generation
+	activeB := siteB.Publication.state.Load()
+	if activeB == nil || len(activeB.generations) == 0 ||
+		activeB.generations[0].manifest.Generation != controlPublication.Generation {
+		t.Fatal("unresolved generation became active before durability confirmation")
+	}
+	if _, err = runtime.ControlService().SitePublicationOperation(ctx, runtime.Control.AdminPrincipal, "site-b", ambiguousOperationID); !errors.Is(err, ErrEditorialUnknownOutcome) {
+		t.Fatalf("immediate reconciliation falsely reported commit: %v", err)
+	}
+	resolvedOutcome, err := runtime.ControlService().SitePublicationOperation(ctx, runtime.Control.AdminPrincipal, "site-b", ambiguousOperationID)
+	if err != nil || resolvedOutcome.Generation != ambiguousGeneration {
+		t.Fatalf("durability reconciliation=%#v err=%v want generation=%s", resolvedOutcome, err, ambiguousGeneration)
+	}
+	activeB = siteB.Publication.state.Load()
+	if activeB == nil || len(activeB.generations) == 0 ||
+		activeB.generations[0].manifest.Generation != ambiguousGeneration {
+		t.Fatal("durably reconciled generation did not become active")
+	}
+	siteB.Publication.rootSync = originalRootSync
+
 	operation := newOperationID()
 	firstRequest := PublicationRequest{OperationID: operation, ContentID: fixture.PostID, Route: "/news/launch/"}
 	first, err := site.Publication.Apply(ctx, actor, firstRequest)

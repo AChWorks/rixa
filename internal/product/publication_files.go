@@ -39,27 +39,15 @@ func (s *PublicationService) Ready() error {
 		return ErrEditorialUnavailable
 	}
 
-	currentPath := filepath.Join(s.root, "current")
-	currentInfo, statErr := os.Lstat(currentPath)
-	if errors.Is(statErr, os.ErrNotExist) {
+	currentID, err := readPublicationPointer(s.root)
+	if errors.Is(err, os.ErrNotExist) {
 		s.state.Store(newPublicationReadState(nil))
 		s.cleanupStartup(nil)
 		s.ready.Store(true)
 		return nil
 	}
-	if statErr != nil || !currentInfo.Mode().IsRegular() || currentInfo.Mode().Perm() != 0o600 || currentInfo.Size() < 1 || currentInfo.Size() > 64 {
-		return ErrEditorialUnavailable
-	}
-	if resolved, e := filepath.EvalSymlinks(currentPath); e != nil || resolved != currentPath {
-		return ErrEditorialUnavailable
-	}
-	pointer, err := os.ReadFile(currentPath)
-	if err != nil || len(pointer) == 0 || len(pointer) > 64 {
-		return ErrEditorialUnavailable
-	}
-	currentID := strings.TrimSuffix(string(pointer), "\n")
-	if currentID == "" || string(pointer) != currentID+"\n" || !validEditorialID(currentID) {
-		return ErrEditorialUnavailable
+	if err != nil {
+		return err
 	}
 
 	generations := make([]*publishedGeneration, 0, publicationHistoryLimit)
@@ -344,10 +332,60 @@ func (s *PublicationService) activateGeneration(generation string) (bool, error)
 		_ = os.Remove(temp)
 		return false, err
 	}
-	if err = syncDir(s.root); err != nil {
+	if err = s.syncPublicationRoot(); err != nil {
 		return true, err
 	}
 	return true, nil
+}
+
+func (s *PublicationService) syncPublicationRoot() error {
+	if s.rootSync != nil {
+		return s.rootSync(s.root)
+	}
+	return syncDir(s.root)
+}
+
+func (s *PublicationService) reconcilePendingDurability() error {
+	if s.pendingDurability == nil || s.pendingDurability.generation == nil ||
+		s.pendingDurability.generation.manifest == nil {
+		return nil
+	}
+	if err := s.syncPublicationRoot(); err != nil {
+		return ErrEditorialUnknownOutcome
+	}
+	currentID, err := readPublicationPointer(s.root)
+	if err != nil || currentID != s.pendingDurability.generation.manifest.Generation {
+		return ErrEditorialUnknownOutcome
+	}
+	generation := s.pendingDurability.generation
+	s.pendingDurability = nil
+	retired := s.installGeneration(generation)
+	s.cleanupRetired(retired)
+	return nil
+}
+
+func readPublicationPointer(root string) (string, error) {
+	currentPath := filepath.Join(root, "current")
+	currentInfo, err := os.Lstat(currentPath)
+	if err != nil {
+		return "", err
+	}
+	if !currentInfo.Mode().IsRegular() || currentInfo.Mode().Perm() != 0o600 ||
+		currentInfo.Size() < 1 || currentInfo.Size() > 64 {
+		return "", ErrEditorialUnavailable
+	}
+	if resolved, err := filepath.EvalSymlinks(currentPath); err != nil || resolved != currentPath {
+		return "", ErrEditorialUnavailable
+	}
+	pointer, err := os.ReadFile(currentPath)
+	if err != nil || len(pointer) == 0 || len(pointer) > 64 {
+		return "", ErrEditorialUnavailable
+	}
+	currentID := strings.TrimSuffix(string(pointer), "\n")
+	if currentID == "" || string(pointer) != currentID+"\n" || !validEditorialID(currentID) {
+		return "", ErrEditorialUnavailable
+	}
+	return currentID, nil
 }
 
 func syncDir(path string) error {
@@ -481,7 +519,8 @@ func (s *PublicationService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func safePublicRequest(r *http.Request) bool {
 	if r == nil || r.URL == nil || r.URL.Path == "" || r.URL.Path[0] != '/' ||
-		strings.Contains(r.URL.Path, "\\") || strings.Contains(r.URL.Path, "//") {
+		r.URL.RawPath != "" || strings.Contains(r.URL.Path, "\\") ||
+		strings.Contains(r.URL.Path, "//") {
 		return false
 	}
 	for _, part := range strings.Split(r.URL.Path, "/") {
@@ -491,12 +530,6 @@ func safePublicRequest(r *http.Request) bool {
 	}
 	for _, char := range r.URL.Path {
 		if char < 0x20 || char == 0x7f || forbiddenEditorialDirectionControl(char) {
-			return false
-		}
-	}
-	raw := strings.ToLower(r.URL.RawPath)
-	for _, forbidden := range []string{"%2f", "%5c", "%00", "%2e"} {
-		if strings.Contains(raw, forbidden) {
 			return false
 		}
 	}
