@@ -1,0 +1,62 @@
+# Independent site transfer
+
+This is the bounded **development-profile** transfer owned by Rixa Issue #6. It is not a generic Backup & Recovery engine, live migration, production RPO/RTO promise, or activation of AChrix #19/#49.
+
+## Captured site boundary
+
+A completed capture contains one enabled site's:
+
+- complete site PostgreSQL database through native `pg_dump`, including Identity/Audit/Media/Rixa schemas and immutable migration ledgers;
+- site accounts/credentials and retained audit history;
+- Rixa content/revisions/media references/appearance/theme/operation state;
+- exact private Media originals;
+- the private Rixa public artifact tree when publication is enabled, preserving active generation, route/withdrawal history and source relationships;
+- the exact site ID, public origin, site administrator principal, public policy, Rixa/AChrix identity and bounded data/ledger summary.
+
+The bundle deliberately excludes deployment DSNs/credentials, TLS material, the control database/control administrator, deployment-specific root paths and **all Identity session rows**. Restored browser/API sessions therefore do not remain valid. A new compatible target control administrator is separately bootstrapped and its site operator identity is derived again; historical audit actors remain historical evidence, not active grants.
+
+The first profile requires the same site ID, public origin, site administrator principal and public policy on the compatible target. Root paths and PostgreSQL database identity may change. Keeping the origin stable avoids pretending already-rendered canonical URLs can be silently rewritten during a storage transfer.
+
+## Consistency boundary
+
+Capture is intentionally quiesced:
+
+1. stop public/admin ingress and drain the Rixa runtime;
+2. while the source Application is still available, reconcile Media unfinished work until no processed/busy work remains, then stop it;
+3. run `rixa capture-site`.
+
+The tool independently fails closed when it sees another PostgreSQL session on the site database, pending/deleting Media state, a busy/invalid private Media root, or a changing database/private tree. It takes an exclusive Linux `flock` on the Media root for the capture; the public root gets a transfer lock too, but the publication runtime does not consume that lock, so process quiescence remains an explicit requirement rather than a false live-snapshot guarantee.
+
+`pg_dump` uses a custom archive with `--no-owner --no-privileges --exclude-table-data=identity.sessions`. Media/public trees use standard uncompressed tar plus a per-entry SHA-256 manifest. No custom database/archive format is invented.
+
+A bundle is restorable only after `manifest.json` is written and hashed by `complete.json`. Missing/tampered completion state is rejected. The development profile bounds the database dump to 2 GiB, each private archive to 8 GiB, each archive to 100,000 entries and each relative path to 512 bytes. These are safety limits for this proof, not product/fleet capacity claims.
+
+## Restore boundary
+
+Restore accepts only:
+
+- a completed hash-valid bundle for the exact current Rixa/AChrix identities;
+- a separate empty local PostgreSQL target database;
+- nonexistent target Media/public roots under canonical existing parents;
+- the same site identity/origin/admin/public policy.
+
+Archive extraction is staged into newly created private directories. Absolute/traversal/duplicate paths, symlinks, hardlinks, special files, unexpected entries, wrong permissions, size/hash mismatch and extra/missing files are rejected. Media files must exactly match restored ready metadata and Rixa content-to-Media references.
+
+Native `pg_restore` uses one transaction with `--exit-on-error --no-owner --no-privileges`. After restore the tool verifies exact migration ledgers, site data counts, appearance/theme, ready Media metadata, zero restored Identity session rows and coherent content/Media references before activating private roots.
+
+The target is still **not ingress-ready merely because restore returned**. Recreate/bootstrap the target control administrator, set the preserved site administrator principal in target configuration, run normal `rixa check`, and only then open ingress. The integration proof reconstructs the normal pinned runtime and verifies account/grant behavior, old-session rejection, fresh login, exact Media bytes, content/appearance/public output and target control-operator remapping.
+
+A failed/unknown final root activation leaves the target isolated and reports failure/unknown outcome; do not infer rollback or replay into the now-nonempty database. Use a new empty target for another restore attempt.
+
+## Tooling
+
+The first profile is deliberately local PostgreSQL only and requires an explicit single loopback/Unix endpoint with `sslmode=disable`. Database credentials are supplied to maintained PostgreSQL tools through `PG*` process environment variables, not command-line DSNs or bundle metadata.
+
+Examples:
+
+```bash
+rixa capture-site --config /etc/rixa/rixa.json --site site-a --output /private/new-site-a-transfer
+rixa restore-site --config /etc/rixa/target.json --site site-a --input /private/new-site-a-transfer
+```
+
+`RIXA_PG_DUMP` / `RIXA_PG_RESTORE` or the corresponding flags may select compatible maintained PostgreSQL binaries. CI uses PostgreSQL 18.6 tooling against the same disposable PostgreSQL 18.6 profile; this does not establish remote/production transfer support.

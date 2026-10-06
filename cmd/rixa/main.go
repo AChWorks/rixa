@@ -27,7 +27,7 @@ func main() {
 
 func run(args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: rixa <migrate|bootstrap-admin|check|run|version>")
+		return errors.New("usage: rixa <migrate|bootstrap-admin|capture-site|restore-site|check|run|version>")
 	}
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	switch args[0] {
@@ -73,6 +73,53 @@ func run(args []string) error {
 			"principal":  result.Account.ID,
 			"created":    result.Created,
 			"reconciled": result.Reconciled,
+		})
+	case "capture-site":
+		fs, configPath := commandFlags("capture-site", args[1:])
+		siteID := fs.String("site", "", "enabled site ID to capture")
+		output := fs.String("output", "", "absolute new private transfer directory")
+		pgDump := fs.String("pg-dump", os.Getenv("RIXA_PG_DUMP"), "pg_dump executable; defaults to RIXA_PG_DUMP or pg_dump")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if *siteID == "" || *output == "" {
+			return errors.New("--site and --output are required")
+		}
+		config, err := product.LoadConfig(*configPath)
+		if err != nil {
+			return err
+		}
+		manifest, err := product.CaptureSite(context.Background(), config, *siteID, *output, os.LookupEnv, product.SiteTransferTooling{PGDump: *pgDump})
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(os.Stdout).Encode(map[string]any{
+			"status": "captured", "site": manifest.Site.ID, "captured_at": manifest.CapturedAt,
+			"schema": manifest.Schema, "output": *output,
+		})
+	case "restore-site":
+		fs, configPath := commandFlags("restore-site", args[1:])
+		siteID := fs.String("site", "", "enabled target site ID")
+		input := fs.String("input", "", "absolute completed private transfer directory")
+		pgRestore := fs.String("pg-restore", os.Getenv("RIXA_PG_RESTORE"), "pg_restore executable; defaults to RIXA_PG_RESTORE or pg_restore")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if *siteID == "" || *input == "" {
+			return errors.New("--site and --input are required")
+		}
+		config, err := product.LoadConfig(*configPath)
+		if err != nil {
+			return err
+		}
+		manifest, err := product.RestoreSite(context.Background(), config, *siteID, *input, os.LookupEnv, product.SiteTransferTooling{PGRestore: *pgRestore})
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(os.Stdout).Encode(map[string]any{
+			"status": "restored", "site": manifest.Site.ID, "captured_at": manifest.CapturedAt,
+			"schema": manifest.Schema, "input": *input,
+			"next": "recreate/remap control administrator, then run rixa check before ingress",
 		})
 	case "check", "run":
 		fs, configPath := commandFlags(args[0], args[1:])
