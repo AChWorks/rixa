@@ -40,7 +40,7 @@ A maintained lightweight front server can remain an optional deployment optimiza
 
 Primary content is present in HTML without client JavaScript. Page title, canonical URL, language, publication/modification times, visible content, sitemap entries, and JSON-LD are generated from the same selected content/Appearance generation.
 
-Rixa emits only facts it owns. It does not invent an author, publisher, review, rating, or commerce claim. Posts use `BlogPosting`; pages use `WebPage`; applicable pages also emit `BreadcrumbList`.
+Rixa emits only facts it owns. It does not invent an author, publisher, review, rating, or commerce claim. Posts use `BlogPosting`; pages use `WebPage`; applicable pages also emit `BreadcrumbList`. Content `dateModified` advances only when the published content/media identity or canonical route changes; a theme-only Appearance publication does not falsely claim that the article itself was modified.
 
 `public_policy` requires an explicit wildcard crawler rule and supports additional provider-specific user agents. Each rule records an operator purpose such as `search`, `ai-search`, or `ai-training`, plus allow/disallow intent. Page-level indexing/snippet policy is emitted separately.
 
