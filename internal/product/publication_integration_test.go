@@ -205,7 +205,7 @@ func testStaticPublicationRuntime(t *testing.T, ctx context.Context, runtime *Ru
 	if afterTheme.CanonicalRoute != beforeTheme.CanonicalRoute ||
 		afterTheme.ActiveRevision != beforeTheme.ActiveRevision ||
 		!afterTheme.FirstPublishedAt.Equal(beforeTheme.FirstPublishedAt) ||
-		!afterTheme.ModifiedAt.After(beforeTheme.ModifiedAt) {
+		!afterTheme.ModifiedAt.Equal(beforeTheme.ModifiedAt) {
 		t.Fatalf("theme publication changed stable page identity/source revision: before=%#v after=%#v", beforeTheme, afterTheme)
 	}
 	themePage := request("a.rixa.test:19443", "/news/launch/")
