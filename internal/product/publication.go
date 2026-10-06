@@ -794,12 +794,12 @@ func (s *PublicationService) installGeneration(generation *publishedGeneration) 
 
 func newPublicationReadState(generations []*publishedGeneration) *publicationReadState {
 	state := &publicationReadState{generations: generations, assets: make(map[string]*publishedGeneration)}
-	for _, generation := range generations {
-		for _, asset := range generation.manifest.Assets {
-			if _, exists := state.assets[asset.PublicPath]; !exists {
-				state.assets[asset.PublicPath] = generation
-			}
-		}
+	if len(generations) == 0 {
+		return state
+	}
+	active := generations[0]
+	for _, asset := range active.manifest.Assets {
+		state.assets[asset.PublicPath] = active
 	}
 	return state
 }
