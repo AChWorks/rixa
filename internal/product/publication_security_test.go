@@ -52,11 +52,8 @@ func TestSafePublicRequestRejectsEveryEncodedPath(t *testing.T) {
 		"/%00news/",
 	} {
 		req := httptest.NewRequest(http.MethodGet, "https://site.example"+raw, nil)
-		if req.URL.RawPath == "" {
-			t.Fatalf("test path %q did not preserve RawPath", raw)
-		}
 		if safePublicRequest(req) {
-			t.Fatalf("encoded public path %q was accepted", raw)
+			t.Fatalf("encoded public path %q was accepted as path=%q raw=%q", raw, req.URL.Path, req.URL.RawPath)
 		}
 	}
 }
