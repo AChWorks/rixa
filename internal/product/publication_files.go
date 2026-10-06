@@ -401,8 +401,10 @@ func (s *PublicationService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.readMu.Lock()
 	state := s.state.Load()
 	if state == nil || len(state.generations) == 0 {
+		s.readMu.Unlock()
 		publicHTTPError(w, http.StatusNotFound)
 		return
 	}
@@ -411,27 +413,38 @@ func (s *PublicationService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if strings.HasPrefix(path, "/assets/") {
 		generation := state.assets[path]
 		if generation == nil {
+			s.readMu.Unlock()
 			publicHTTPError(w, http.StatusNotFound)
 			return
 		}
 		for _, asset := range generation.manifest.Assets {
 			if asset.PublicPath == path {
+				generation.readers.Add(1)
+				s.readMu.Unlock()
 				s.servePublishedFile(w, r, generation, asset.File)
 				return
 			}
 		}
+		s.readMu.Unlock()
 		publicHTTPError(w, http.StatusNotFound)
 		return
 	}
 
 	route, ok := active.manifest.Routes[path]
 	if !ok {
+		s.readMu.Unlock()
 		publicHTTPError(w, http.StatusNotFound)
 		return
 	}
-	switch route.Kind {
-	case "file":
+	if route.Kind == "file" {
+		active.readers.Add(1)
+		s.readMu.Unlock()
 		s.servePublishedFile(w, r, active, route.File)
+		return
+	}
+	s.readMu.Unlock()
+
+	switch route.Kind {
 	case "redirect":
 		setPublicSecurityHeaders(w)
 		w.Header().Set("Cache-Control", generatedFileCache)
@@ -477,7 +490,6 @@ func (s *PublicationService) servePublishedFile(w http.ResponseWriter, r *http.R
 		publicHTTPError(w, http.StatusServiceUnavailable)
 		return
 	}
-	generation.readers.Add(1)
 	defer generation.readers.Add(-1)
 
 	path := filepath.Join(generation.root, "public", filepath.FromSlash(relative))
