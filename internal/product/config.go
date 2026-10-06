@@ -27,66 +27,8 @@ var (
 
 	siteIDSyntax    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
 	envNameSyntax   = regexp.MustCompile(`^[A-Z][A-Z0-9_]{1,127}$`)
-	accountIDSyntax = regexp.MustCompile(`^[A-Z2-7]{26}// SPDX-License-Identifier: MPL-2.0
-
-package product
-
-import (
-	"bytes"
-	"context"
-	"crypto/tls"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"io"
-	"net"
-	"net/url"
-	"os"
-	"path/filepath"
-	"regexp"
-	"strings"
-	"time"
-
-	"github.com/AChWorks/achrix"
-)
-
-var (
-	ErrConfiguration = errors.New("invalid rixa configuration")
-	ErrUnavailable   = errors.New("rixa unavailable")
-
-	siteIDSyntax    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
-	envNameSyntax   = regexp.MustCompile(`^[A-Z][A-Z0-9_]{1,127}$`)
-	)
-	publicCrawlerSyntax = regexp.MustCompile(`^[A-Za-z0-9*][A-Za-z0-9._*:/-]{0,127}// SPDX-License-Identifier: MPL-2.0
-
-package product
-
-import (
-	"bytes"
-	"context"
-	"crypto/tls"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"io"
-	"net"
-	"net/url"
-	"os"
-	"path/filepath"
-	"regexp"
-	"strings"
-	"time"
-
-	"github.com/AChWorks/achrix"
-)
-
-var (
-	ErrConfiguration = errors.New("invalid rixa configuration")
-	ErrUnavailable   = errors.New("rixa unavailable")
-
-	siteIDSyntax    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
-	envNameSyntax   = regexp.MustCompile(`^[A-Z][A-Z0-9_]{1,127}$`)
-	)
+	accountIDSyntax = regexp.MustCompile(`^[A-Z2-7]{26}$`)
+	publicCrawlerSyntax = regexp.MustCompile(`^[A-Za-z0-9*][A-Za-z0-9._*:/-]{0,127}$`)
 )
 
 type TLSConfig struct {
