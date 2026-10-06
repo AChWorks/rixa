@@ -313,7 +313,7 @@ func TestSiteTransferRoundTrip(t *testing.T) {
 
 	targetControlActor := targetRuntime.Control.AdminPrincipal
 	if targetRuntime.Sites["site-a"].operator != operatorPrincipal(targetControlActor, "site-a") ||
-		targetRuntime.Sites["site-a"].operator == operatorPrincipal(sourceControl.Account.ID, "site-a") {
+		targetRuntime.Sites["site-a"].operator == operatorPrincipal(achrix.Principal(sourceControl.Account.ID), "site-a") {
 		t.Fatal("target site operator was not remapped from the recreated control authority")
 	}
 	if _, err = targetRuntime.ControlService().CreateSiteAccount(ctx, targetControlActor, "site-a", "target-control-created", "Target-Control-Created-2026!"); err != nil {
