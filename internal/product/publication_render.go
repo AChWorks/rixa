@@ -129,7 +129,7 @@ func renderPublication(publicDir string, manifest *publicationManifest, snapshot
 		if err != nil {
 			return 0, err
 		}
-		sourceKey := publicationEntrySourceKey(entry, content, snapshot.Appearance, assets)
+		sourceKey := publicationEntrySourceKey(entry, content, assets)
 		if entry.SourceKey != sourceKey || entry.ModifiedAt.IsZero() {
 			entry.ModifiedAt = manifest.CreatedAt
 		}
@@ -250,12 +250,11 @@ func renderPublication(publicDir string, manifest *publicationManifest, snapshot
 	return total, nil
 }
 
-func publicationEntrySourceKey(entry publicationEntry, content ContentRevision, appearance Appearance, assets map[string]publicationAsset) string {
+func publicationEntrySourceKey(entry publicationEntry, content ContentRevision, assets map[string]publicationAsset) string {
 	parts := []string{
 		"rixa.publication.page.v1",
 		content.ID, string(content.Kind), strconv.FormatInt(content.Revision, 10),
 		content.Title, content.BodyHTML,
-		strconv.FormatInt(appearance.Revision, 10),
 		entry.DesiredRoute, entry.CanonicalRoute,
 	}
 	for _, ref := range content.Media {
