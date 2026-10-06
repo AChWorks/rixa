@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 
@@ -375,20 +376,51 @@ func (r *Runtime) Start(parent context.Context) error {
 			return errors.Join(err, r.stopStarted(started))
 		}
 	}
-	for _, site := range r.Sites {
+	siteIDs := make([]string, 0, len(r.Sites))
+	for id := range r.Sites {
+		siteIDs = append(siteIDs, id)
+	}
+	sort.Strings(siteIDs)
+
+	readyPublications := make([]*PublicationService, 0, len(siteIDs))
+	for _, id := range siteIDs {
+		site := r.Sites[id]
 		if err := site.Editorial.Ready(ctx); err != nil {
-			return errors.Join(fmt.Errorf("site %s editorial: %w", site.ID, err), r.stopStarted(started))
+			return r.rollbackSiteReadiness(
+				fmt.Errorf("site %s editorial: %w", site.ID, err),
+				started,
+				readyPublications,
+			)
 		}
 		if site.Publication != nil {
 			if err := site.Publication.Ready(); err != nil {
-				return errors.Join(fmt.Errorf("site %s publication: %w", site.ID, err), r.stopStarted(started))
+				return r.rollbackSiteReadiness(
+					fmt.Errorf("site %s publication: %w", site.ID, err),
+					started,
+					readyPublications,
+				)
 			}
+			readyPublications = append(readyPublications, site.Publication)
 		}
 	}
 	r.mu.Lock()
 	r.started = true
 	r.mu.Unlock()
 	return nil
+}
+
+func (r *Runtime) rollbackSiteReadiness(cause error, apps []*achrix.Application, publications []*PublicationService) error {
+	ctx, cancel := context.WithTimeout(context.Background(), r.Config.ShutdownTimeout)
+	defer cancel()
+
+	var drainErr error
+	for i := len(publications) - 1; i >= 0; i-- {
+		drainErr = errors.Join(drainErr, publications[i].rollbackReady(ctx))
+	}
+	if drainErr != nil {
+		return errors.Join(cause, drainErr)
+	}
+	return errors.Join(cause, r.stopStarted(apps))
 }
 
 func (r *Runtime) stopStarted(apps []*achrix.Application) error {
