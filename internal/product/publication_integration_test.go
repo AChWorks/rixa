@@ -151,6 +151,38 @@ func testStaticPublicationRuntime(t *testing.T, ctx context.Context, runtime *Ru
 		t.Fatalf("spoofed host reached public site: %d", spoofed.Code)
 	}
 
+	beforeTheme := site.Publication.State(fixture.PostID, ContentPost)
+	appearance, err := site.Editorial.Appearance(ctx, actor)
+	if err != nil {
+		t.Fatalf("appearance before theme publication: %v", err)
+	}
+	themeInput := appearance.input()
+	themeInput.Theme = "light"
+	updatedTheme, err := site.Editorial.SaveAppearance(ctx, actor, newOperationID(), appearance.Revision, themeInput)
+	if err != nil || updatedTheme.Revision != appearance.Revision+1 {
+		t.Fatalf("theme-only appearance update=%#v err=%v", updatedTheme, err)
+	}
+	themePublication, err := site.Publication.Apply(ctx, actor, PublicationRequest{
+		OperationID: newOperationID(), ExpectedGeneration: first.Generation,
+	})
+	if err != nil || themePublication.Generation == first.Generation {
+		t.Fatalf("theme-only publication=%#v err=%v", themePublication, err)
+	}
+	afterTheme := site.Publication.State(fixture.PostID, ContentPost)
+	if afterTheme.CanonicalRoute != beforeTheme.CanonicalRoute ||
+		afterTheme.ActiveRevision != beforeTheme.ActiveRevision ||
+		!afterTheme.FirstPublishedAt.Equal(beforeTheme.FirstPublishedAt) ||
+		!afterTheme.ModifiedAt.After(beforeTheme.ModifiedAt) {
+		t.Fatalf("theme publication changed stable page identity/source revision: before=%#v after=%#v", beforeTheme, afterTheme)
+	}
+	themePage := request("a.rixa.test:19443", "/news/launch/")
+	if themePage.Code != http.StatusOK ||
+		!strings.Contains(themePage.Body.String(), "alt=\"تصویر اصلی\"") ||
+		!strings.Contains(themePage.Body.String(), "<link rel=\"canonical\" href=\"https://a.rixa.test:19443/news/launch/\">") ||
+		!strings.Contains(themePage.Body.String(), "data-theme=\"light\"") {
+		t.Fatalf("theme-only publication lost stable meaning: status=%d body=%s", themePage.Code, themePage.Body.String())
+	}
+
 	correctedBody := "<p>corrected public body</p><figure data-media-id=\"" + sourceAssetID + "\"><figcaption>شرح اصلاح‌شده</figcaption></figure>"
 	corrected, err := site.Editorial.Save(ctx, actor, newOperationID(), fixture.PostID, 2, "نسخه اصلاح‌شده", correctedBody)
 	if err != nil || corrected.Revision != 3 {
@@ -163,8 +195,9 @@ func testStaticPublicationRuntime(t *testing.T, ctx context.Context, runtime *Ru
 	second, err := site.Publication.Apply(ctx, actor, PublicationRequest{
 		OperationID: newOperationID(), ExpectedGeneration: first.Generation,
 		ContentID: fixture.PostID, Route: "/news/launch/",
+		ExpectedGeneration: themePublication.Generation,
 	})
-	if err != nil || second.Generation == first.Generation {
+	if err != nil || second.Generation == themePublication.Generation {
 		t.Fatalf("corrected publication=%#v err=%v", second, err)
 	}
 	correctedPage := request("a.rixa.test:19443", "/news/launch/")
