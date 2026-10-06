@@ -149,6 +149,7 @@ type PublicationService struct {
 	editorial *EditorialService
 	media     *media.Service
 	slots     chan struct{}
+	applyGate chan struct{}
 
 	mu     sync.Mutex
 	readMu sync.Mutex
@@ -175,6 +176,7 @@ func newPublicationService(site ResolvedSite, app *achrix.Application, editorial
 		root: site.PublicRoot, policy: site.PublicPolicy,
 		app: app, editorial: editorial, media: mediaService,
 		slots: make(chan struct{}, publicReadConcurrency),
+		applyGate: make(chan struct{}, 1),
 	}, nil
 }
 
@@ -247,8 +249,18 @@ func (s *PublicationService) Apply(ctx context.Context, actor achrix.Principal, 
 		"publication.apply", string(actor), request.ExpectedGeneration, request.ContentID, request.Route,
 	)
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	select {
+	case s.applyGate <- struct{}{}:
+		defer func() { <-s.applyGate }()
+	case <-ctx.Done():
+		return PublicationResult{}, ctx.Err()
+	}
+	releaseSource, err := s.editorial.acquirePublicationSource(ctx)
+	if err != nil {
+		return PublicationResult{}, err
+	}
+	defer releaseSource()
+
 	if !s.ready.Load() {
 		return PublicationResult{}, ErrEditorialUnavailable
 	}
@@ -679,9 +691,16 @@ func (s *PublicationService) prepareAssets(ctx context.Context, actor achrix.Pri
 		}
 		if prepared.SourceAssetID != id || prepared.SourceRevision != revision ||
 			prepared.Profile != media.PublicImageProfile || prepared.Size < 1 ||
-			prepared.SHA256 == "" || prepared.SourceSHA256 == "" {
+			prepared.Size > maxPublicationBytes || prepared.Width < 1 || prepared.Height < 1 ||
+			!validSHA256(prepared.SHA256) || !validSHA256(prepared.SourceSHA256) {
 			_ = os.Remove(temp)
 			return nil, 0, ErrEditorialConflict
+		}
+		info, statErr := os.Lstat(temp)
+		if statErr != nil || !info.Mode().IsRegular() || info.Mode().Perm() != 0o600 ||
+			info.Size() != prepared.Size || verifyFileSHA256(temp, prepared.SHA256) != nil {
+			_ = os.Remove(temp)
+			return nil, 0, ErrEditorialUnavailable
 		}
 		ext := ""
 		switch prepared.MIME {
