@@ -21,7 +21,6 @@ import (
 
 	"github.com/AChWorks/achrix"
 	"github.com/AChWorks/achrix/identity"
-	"github.com/AChWorks/achrix/media"
 	"github.com/jackc/pgx/v5"
 )
 

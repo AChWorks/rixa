@@ -103,6 +103,8 @@ type SiteTransferManifest struct {
 	CapturedAt          time.Time                            `json:"captured_at"`
 	RixaVersion         string                               `json:"rixa_version"`
 	AChrixVersion       string                               `json:"achrix_version"`
+	PostgreSQLVersionNum int                                  `json:"postgresql_server_version_num"`
+	PGDumpVersion       string                               `json:"pg_dump_version"`
 	Site                SiteTransferSite                     `json:"site"`
 	SessionPolicy       string                               `json:"session_policy"`
 	GlobalControlPolicy string                               `json:"global_control_policy"`
@@ -122,6 +124,7 @@ type siteTransferComplete struct {
 }
 
 type siteTransferSnapshot struct {
+	PostgreSQLVersionNum int
 	OtherSessions int64
 	Unfinished    int64
 	Ledgers       map[string][]SiteTransferLedgerEntry
@@ -199,6 +202,10 @@ func CaptureSite(parent context.Context, config Config, siteID, destination stri
 		return SiteTransferManifest{}, fmt.Errorf("%w: source Media has unfinished state; reconcile before capture", ErrSiteTransfer)
 	}
 
+	pgDumpVersion, err := siteTransferToolVersion(parent, tooling.PGDump, pgEnv)
+	if err != nil || !siteTransferPostgres18Tool(pgDumpVersion) {
+		return SiteTransferManifest{}, fmt.Errorf("%w: pg_dump must be compatible PostgreSQL 18 tooling", ErrSiteTransfer)
+	}
 	dbArtifact, err := runSiteTransferDump(parent, tooling.PGDump, pgEnv, filepath.Join(destination, siteTransferDBFile))
 	if err != nil {
 		return SiteTransferManifest{}, err
@@ -236,8 +243,10 @@ func CaptureSite(parent context.Context, config Config, siteID, destination stri
 	manifest := SiteTransferManifest{
 		Schema:        siteTransferSchema,
 		CapturedAt:    time.Now().UTC().Truncate(time.Microsecond),
-		RixaVersion:   Version,
-		AChrixVersion: achrix.Version(),
+		RixaVersion:          Version,
+		AChrixVersion:        achrix.Version(),
+		PostgreSQLVersionNum: before.PostgreSQLVersionNum,
+		PGDumpVersion:        pgDumpVersion,
 		Site: SiteTransferSite{
 			ID: site.ID, Origin: site.Origin, AdminPrincipal: site.AdminPrincipal,
 			PublicEnabled: site.PublicRoot != "", PublicPolicy: site.PublicPolicy,
@@ -302,8 +311,12 @@ func RestoreSite(parent context.Context, config Config, siteID, source string, g
 	if tooling.PGRestore == "" {
 		return SiteTransferManifest{}, fmt.Errorf("%w: pg_restore unavailable", ErrSiteTransfer)
 	}
+	pgRestoreVersion, versionErr := siteTransferToolVersion(parent, tooling.PGRestore, pgEnv)
+	if versionErr != nil || !siteTransferPostgres18Tool(pgRestoreVersion) {
+		return SiteTransferManifest{}, fmt.Errorf("%w: pg_restore must be compatible PostgreSQL 18 tooling", ErrSiteTransfer)
+	}
 
-	if err = ensureEmptySiteTransferDatabase(parent, target.DSN); err != nil {
+	if err = ensureEmptySiteTransferDatabase(parent, target.DSN, manifest.PostgreSQLVersionNum); err != nil {
 		return SiteTransferManifest{}, err
 	}
 	if err = ensureNewTransferRootTarget(site.MediaRoot); err != nil {
@@ -432,6 +445,7 @@ func validateSiteTransferCompatibility(site SiteConfig, manifest SiteTransferMan
 func validateSiteTransferManifest(manifest SiteTransferManifest) error {
 	if manifest.Schema != siteTransferSchema || manifest.CapturedAt.IsZero() ||
 		manifest.RixaVersion == "" || manifest.AChrixVersion == "" ||
+		manifest.PostgreSQLVersionNum/10000 != 18 || !siteTransferPostgres18Tool(manifest.PGDumpVersion) ||
 		!siteIDSyntax.MatchString(manifest.Site.ID) ||
 		!accountIDSyntax.MatchString(manifest.Site.AdminPrincipal) ||
 		manifest.Site.AuthorizationProfile != "rixa.fixed-site-admin-v1" ||
@@ -562,6 +576,14 @@ func inspectSiteTransferDatabase(parent context.Context, dsn, adminPrincipal str
 	defer conn.Close(context.Background())
 
 	var result siteTransferSnapshot
+	var versionText string
+	if err = conn.QueryRow(ctx, "SHOW server_version_num").Scan(&versionText); err != nil {
+		return siteTransferSnapshot{}, fmt.Errorf("%w: inspect PostgreSQL version", ErrSiteTransfer)
+	}
+	result.PostgreSQLVersionNum, err = strconv.Atoi(versionText)
+	if err != nil || result.PostgreSQLVersionNum/10000 != 18 {
+		return siteTransferSnapshot{}, fmt.Errorf("%w: PostgreSQL 18 is required by this transfer profile", ErrSiteTransfer)
+	}
 	if err = conn.QueryRow(ctx, "SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid()").Scan(&result.OtherSessions); err != nil {
 		return siteTransferSnapshot{}, fmt.Errorf("%w: inspect database sessions", ErrSiteTransfer)
 	}
@@ -657,7 +679,8 @@ func equalSourceTransferSnapshots(a, b siteTransferSnapshot) bool {
 }
 
 func equalRestoredSiteTransferSnapshot(manifest SiteTransferManifest, got siteTransferSnapshot) bool {
-	if !reflect.DeepEqual(manifest.Ledgers, got.Ledgers) ||
+	if got.PostgreSQLVersionNum/10000 != manifest.PostgreSQLVersionNum/10000 ||
+		!reflect.DeepEqual(manifest.Ledgers, got.Ledgers) ||
 		!reflect.DeepEqual(manifest.ReadyMedia, got.ReadyMedia) {
 		return false
 	}
@@ -696,6 +719,30 @@ func runSiteTransferDump(parent context.Context, tool string, env []string, outp
 	return SiteTransferArtifact{
 		File: filepath.Base(output), Size: writer.count, SHA256: hex.EncodeToString(writer.hash.Sum(nil)),
 	}, nil
+}
+
+func siteTransferToolVersion(parent context.Context, tool string, env []string) (string, error) {
+	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, tool, "--version")
+	cmd.Env = env
+	var output bytes.Buffer
+	cmd.Stdout = &output
+	cmd.Stderr = io.Discard
+	if err := cmd.Run(); err != nil || output.Len() == 0 || output.Len() > 4096 {
+		return "", fmt.Errorf("%w: PostgreSQL tool version", ErrSiteTransfer)
+	}
+	return strings.TrimSpace(output.String()), nil
+}
+
+func siteTransferPostgres18Tool(version string) bool {
+	fields := strings.Fields(version)
+	for _, field := range fields {
+		if strings.HasPrefix(field, "18.") || field == "18" {
+			return true
+		}
+	}
+	return false
 }
 
 func runSiteTransferRestore(parent context.Context, tool string, env []string, databaseName, input string) error {
@@ -755,7 +802,7 @@ func (w *boundedTransferWriter) Write(p []byte) (int, error) {
 	return n, err
 }
 
-func ensureEmptySiteTransferDatabase(parent context.Context, dsn string) error {
+func ensureEmptySiteTransferDatabase(parent context.Context, dsn string, sourceVersionNum int) error {
 	cfg, err := pgx.ParseConfig(dsn)
 	if err != nil || cfg == nil || !siteTransferLocalHost(cfg.Host) || len(cfg.Fallbacks) != 0 || cfg.TLSConfig != nil {
 		return fmt.Errorf("%w: target database profile", ErrSiteTransfer)
@@ -767,9 +814,25 @@ func ensureEmptySiteTransferDatabase(parent context.Context, dsn string) error {
 		return fmt.Errorf("%w: inspect target database", ErrSiteTransfer)
 	}
 	defer conn.Close(context.Background())
+	var versionText string
+	if err = conn.QueryRow(ctx, "SHOW server_version_num").Scan(&versionText); err != nil {
+		return fmt.Errorf("%w: target PostgreSQL version", ErrSiteTransfer)
+	}
+	targetVersion, versionErr := strconv.Atoi(versionText)
+	if versionErr != nil || targetVersion/10000 != 18 || targetVersion/10000 != sourceVersionNum/10000 {
+		return fmt.Errorf("%w: incompatible target PostgreSQL major", ErrSiteTransfer)
+	}
 	var others int64
 	if err = conn.QueryRow(ctx, "SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid()").Scan(&others); err != nil || others != 0 {
 		return fmt.Errorf("%w: target database has other sessions", ErrSiteTransfer)
+	}
+	var userRelations int64
+	if err = conn.QueryRow(ctx, "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname NOT LIKE 'pg_toast%' AND n.nspname NOT LIKE 'pg_temp_%'").Scan(&userRelations); err != nil || userRelations != 0 {
+		return fmt.Errorf("%w: target database contains user relations", ErrSiteTransfer)
+	}
+	var customSchemas int64
+	if err = conn.QueryRow(ctx, "SELECT count(*) FROM pg_namespace WHERE nspname NOT IN ('pg_catalog','information_schema','public') AND nspname NOT LIKE 'pg_toast%' AND nspname NOT LIKE 'pg_temp_%'").Scan(&customSchemas); err != nil || customSchemas != 0 {
+		return fmt.Errorf("%w: target database contains custom schemas", ErrSiteTransfer)
 	}
 	for _, schema := range []string{"identity", "audit", "media", "rixa"} {
 		var exists bool
