@@ -32,6 +32,7 @@ type ContentSummary struct {
 	HeadRevision              int64
 	Title                     string
 	PublicationIntentRevision int64
+	PublicationIntentVersion  int64
 	UpdatedAt                 time.Time
 }
 
@@ -56,6 +57,7 @@ type ContentRevision struct {
 	Actor                     string
 	CreatedAt                 time.Time
 	PublicationIntentRevision int64
+	PublicationIntentVersion  int64
 	Media                     []ContentMediaRef
 }
 
@@ -148,6 +150,12 @@ func (s *editorialStore) ready(parent context.Context) error {
 		return editorialReadError(err)
 	}
 	if identity != editorialMigrationIdentity {
+		return ErrEditorialUnavailable
+	}
+	if err = conn.QueryRow(ctx, "SELECT identity FROM rixa.schema_migrations WHERE version=2").Scan(&identity); err != nil {
+		return editorialReadError(err)
+	}
+	if identity != editorialMigration2Identity {
 		return ErrEditorialUnavailable
 	}
 	var head int64
@@ -267,30 +275,24 @@ func (s *EditorialService) Save(ctx context.Context, actor achrix.Principal, ope
 	return s.store.save(ctx, string(actor), operationID, id, expectedHead, title, canonical, refs)
 }
 
-func (s *EditorialService) SetPublicationIntent(ctx context.Context, actor achrix.Principal, operationID, id string, expectedHead, revision int64) (ContentRevision, error) {
-	if !validOperationID(operationID) || !validEditorialID(id) || expectedHead < 1 || revision < 1 {
+func (s *EditorialService) SetPublicationIntent(ctx context.Context, actor achrix.Principal, operationID, id string, expectedHead, expectedPublicationVersion, revision int64) (ContentRevision, error) {
+	if !validOperationID(operationID) || !validEditorialID(id) || expectedHead < 1 || expectedPublicationVersion < 1 || revision < 1 {
 		return ContentRevision{}, ErrEditorialInvalid
 	}
 	if err := s.authorize(ctx, actor, CapabilityContentPublishIntent, id); err != nil {
 		return ContentRevision{}, err
 	}
-	if err := s.store.publicationIntent(ctx, string(actor), operationID, id, expectedHead, revision, false); err != nil {
-		return ContentRevision{}, err
-	}
-	return s.store.head(ctx, id)
+	return s.store.publicationIntent(ctx, string(actor), operationID, id, expectedHead, expectedPublicationVersion, revision, false)
 }
 
-func (s *EditorialService) ClearPublicationIntent(ctx context.Context, actor achrix.Principal, operationID, id string, expectedHead int64) (ContentRevision, error) {
-	if !validOperationID(operationID) || !validEditorialID(id) || expectedHead < 1 {
+func (s *EditorialService) ClearPublicationIntent(ctx context.Context, actor achrix.Principal, operationID, id string, expectedHead, expectedPublicationVersion int64) (ContentRevision, error) {
+	if !validOperationID(operationID) || !validEditorialID(id) || expectedHead < 1 || expectedPublicationVersion < 1 {
 		return ContentRevision{}, ErrEditorialInvalid
 	}
 	if err := s.authorize(ctx, actor, CapabilityContentPublishIntent, id); err != nil {
 		return ContentRevision{}, err
 	}
-	if err := s.store.publicationIntent(ctx, string(actor), operationID, id, expectedHead, 0, true); err != nil {
-		return ContentRevision{}, err
-	}
-	return s.store.head(ctx, id)
+	return s.store.publicationIntent(ctx, string(actor), operationID, id, expectedHead, expectedPublicationVersion, 0, true)
 }
 
 func (s *EditorialService) Operation(ctx context.Context, actor achrix.Principal, operationID string) (EditorialOperation, error) {
@@ -320,10 +322,7 @@ func (s *EditorialService) SaveAppearance(ctx context.Context, actor achrix.Prin
 	if err := s.authorize(ctx, actor, CapabilityAppearanceEdit, AppearanceTarget); err != nil {
 		return Appearance{}, err
 	}
-	if err := s.store.saveAppearance(ctx, string(actor), operationID, expectedHead, input); err != nil {
-		return Appearance{}, err
-	}
-	return s.store.appearance(ctx)
+	return s.store.saveAppearance(ctx, string(actor), operationID, expectedHead, input)
 }
 
 func (s *EditorialService) authorize(ctx context.Context, actor achrix.Principal, capability, resource string) error {
@@ -360,7 +359,7 @@ func (s *editorialStore) list(parent context.Context) ([]ContentSummary, error) 
 	}
 	defer release()
 	rows, err := conn.Query(ctx, `
-		SELECT i.id,i.kind,i.head_revision,r.title,COALESCE(i.publication_intent_revision,0),r.created_at
+		SELECT i.id,i.kind,i.head_revision,r.title,COALESCE(i.publication_intent_revision,0),i.publication_intent_version,r.created_at
 		FROM rixa.content_items i
 		JOIN rixa.content_revisions r ON r.item_id=i.id AND r.revision=i.head_revision
 		ORDER BY r.created_at DESC,i.id
@@ -374,7 +373,7 @@ func (s *editorialStore) list(parent context.Context) ([]ContentSummary, error) 
 	for rows.Next() {
 		var item ContentSummary
 		var kind string
-		if err = rows.Scan(&item.ID, &kind, &item.HeadRevision, &item.Title, &item.PublicationIntentRevision, &item.UpdatedAt); err != nil {
+		if err = rows.Scan(&item.ID, &kind, &item.HeadRevision, &item.Title, &item.PublicationIntentRevision, &item.PublicationIntentVersion, &item.UpdatedAt); err != nil {
 			return nil, editorialReadError(err)
 		}
 		item.Kind = ContentKind(kind)
@@ -417,13 +416,13 @@ func loadContentRevision(ctx context.Context, q interface {
 	var kind string
 	if err := q.QueryRow(ctx, `
 		SELECT i.id,i.kind,r.revision,r.title,r.body_html,r.actor,r.created_at,
-		       COALESCE(i.publication_intent_revision,0)
+		       COALESCE(i.publication_intent_revision,0),i.publication_intent_version
 		FROM rixa.content_items i
 		JOIN rixa.content_revisions r ON r.item_id=i.id
 		WHERE i.id=$1 AND r.revision=$2
 	`, id, revision).Scan(
 		&value.ID, &kind, &value.Revision, &value.Title, &value.BodyHTML,
-		&value.Actor, &value.CreatedAt, &value.PublicationIntentRevision,
+		&value.Actor, &value.CreatedAt, &value.PublicationIntentRevision, &value.PublicationIntentVersion,
 	); err != nil {
 		return ContentRevision{}, editorialReadError(err)
 	}
@@ -499,7 +498,7 @@ func (s *editorialStore) create(parent context.Context, actor, operationID strin
 	}
 	defer func() { _ = tx.Rollback(context.Background()) }()
 
-	requestHash := contentRequestHash("content.create", actor, "", 0, title, body, refs)
+	requestHash := contentCreateRequestHash(actor, kind, title, body, refs)
 	if err = lockOperation(ctx, tx, operationID); err != nil {
 		return ContentRevision{}, editorialMutationKnownError(err)
 	}
@@ -534,10 +533,14 @@ func (s *editorialStore) create(parent context.Context, actor, operationID strin
 	}); err != nil {
 		return ContentRevision{}, err
 	}
+	result, err := loadContentRevision(ctx, tx, id, 1)
+	if err != nil {
+		return ContentRevision{}, err
+	}
 	if err = tx.Commit(ctx); err != nil {
 		return ContentRevision{}, editorialCommitError(err)
 	}
-	return s.revision(parent, id, 1)
+	return result, nil
 }
 
 func (s *editorialStore) save(parent context.Context, actor, operationID, id string, expectedHead int64, title, body string, refs []ContentMediaRef) (ContentRevision, error) {
@@ -599,73 +602,100 @@ func (s *editorialStore) save(parent context.Context, actor, operationID, id str
 	}); err != nil {
 		return ContentRevision{}, err
 	}
+	result, err := loadContentRevision(ctx, tx, id, next)
+	if err != nil {
+		return ContentRevision{}, err
+	}
 	if err = tx.Commit(ctx); err != nil {
 		return ContentRevision{}, editorialCommitError(err)
 	}
-	return s.revision(parent, id, next)
+	return result, nil
 }
 
-func (s *editorialStore) publicationIntent(parent context.Context, actor, operationID, id string, expectedHead, revision int64, clear bool) error {
+func (s *editorialStore) publicationIntent(parent context.Context, actor, operationID, id string, expectedHead, expectedPublicationVersion, revision int64, clear bool) (ContentRevision, error) {
 	ctx, conn, release, err := s.connection(parent)
 	if err != nil {
-		return err
+		return ContentRevision{}, err
 	}
 	defer release()
 	tx, err := conn.Begin(ctx)
 	if err != nil {
-		return editorialMutationKnownError(err)
+		return ContentRevision{}, editorialMutationKnownError(err)
 	}
 	defer func() { _ = tx.Rollback(context.Background()) }()
 
 	if err = lockOperation(ctx, tx, operationID); err != nil {
-		return editorialMutationKnownError(err)
+		return ContentRevision{}, editorialMutationKnownError(err)
 	}
 	kind := "content.publication-intent.set"
 	if clear {
 		kind = "content.publication-intent.clear"
 	}
-	requestHash := operationRequestHash(kind, actor, id, strconv.FormatInt(expectedHead, 10), strconv.FormatInt(revision, 10))
+	requestHash := operationRequestHash(
+		kind,
+		actor,
+		id,
+		strconv.FormatInt(expectedHead, 10),
+		strconv.FormatInt(expectedPublicationVersion, 10),
+		strconv.FormatInt(revision, 10),
+	)
 	if op, found, e := operationIn(ctx, tx, operationID); e != nil {
-		return e
+		return ContentRevision{}, e
 	} else if found {
 		if op.Kind != kind || op.ResourceID != id || op.RequestHash != requestHash {
-			return ErrEditorialConflict
+			return ContentRevision{}, ErrEditorialConflict
 		}
-		return nil
+		return loadContentRevision(ctx, tx, id, expectedHead)
 	}
 
-	var current int64
-	if err = tx.QueryRow(ctx, "SELECT head_revision FROM rixa.content_items WHERE id=$1 FOR UPDATE", id).Scan(&current); err != nil {
-		return editorialMutationKnownError(err)
+	var currentHead, currentPublicationVersion int64
+	if err = tx.QueryRow(ctx, "SELECT head_revision,publication_intent_version FROM rixa.content_items WHERE id=$1 FOR UPDATE", id).Scan(&currentHead, &currentPublicationVersion); err != nil {
+		return ContentRevision{}, editorialMutationKnownError(err)
 	}
-	if current != expectedHead {
-		return ErrEditorialConflict
+	if currentHead != expectedHead || currentPublicationVersion != expectedPublicationVersion {
+		return ContentRevision{}, ErrEditorialConflict
 	}
+
 	resultRevision := int64(0)
+	var tag pgconn.CommandTag
 	if !clear {
 		var exists int
 		if err = tx.QueryRow(ctx, "SELECT 1 FROM rixa.content_revisions WHERE item_id=$1 AND revision=$2", id, revision).Scan(&exists); err != nil {
-			return editorialMutationKnownError(err)
+			return ContentRevision{}, editorialMutationKnownError(err)
 		}
-		if _, err = tx.Exec(ctx, "UPDATE rixa.content_items SET publication_intent_revision=$2 WHERE id=$1", id, revision); err != nil {
-			return editorialMutationKnownError(err)
-		}
+		tag, err = tx.Exec(ctx, `UPDATE rixa.content_items
+			SET publication_intent_revision=$2,publication_intent_version=publication_intent_version+1
+			WHERE id=$1 AND head_revision=$3 AND publication_intent_version=$4`, id, revision, expectedHead, expectedPublicationVersion)
 		resultRevision = revision
 	} else {
-		if _, err = tx.Exec(ctx, "UPDATE rixa.content_items SET publication_intent_revision=NULL WHERE id=$1", id); err != nil {
-			return editorialMutationKnownError(err)
-		}
+		tag, err = tx.Exec(ctx, `UPDATE rixa.content_items
+			SET publication_intent_revision=NULL,publication_intent_version=publication_intent_version+1
+			WHERE id=$1 AND head_revision=$2 AND publication_intent_version=$3`, id, expectedHead, expectedPublicationVersion)
 	}
+	if err != nil {
+		return ContentRevision{}, editorialMutationKnownError(err)
+	}
+	if tag.RowsAffected() != 1 {
+		return ContentRevision{}, ErrEditorialConflict
+	}
+
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	if err = insertOperation(ctx, tx, EditorialOperation{
 		ID: operationID, Kind: kind, ResourceID: id, RequestHash: requestHash, ResultRevision: resultRevision, CreatedAt: now,
 	}); err != nil {
-		return err
+		return ContentRevision{}, err
+	}
+	result, err := loadContentRevision(ctx, tx, id, currentHead)
+	if err != nil {
+		return ContentRevision{}, err
+	}
+	if result.PublicationIntentVersion != expectedPublicationVersion+1 {
+		return ContentRevision{}, ErrEditorialConflict
 	}
 	if err = tx.Commit(ctx); err != nil {
-		return editorialCommitError(err)
+		return ContentRevision{}, editorialCommitError(err)
 	}
-	return nil
+	return result, nil
 }
 
 func (s *editorialStore) operation(parent context.Context, operationID string) (EditorialOperation, error) {
@@ -715,46 +745,67 @@ func loadAppearance(ctx context.Context, q interface {
 	return value, nil
 }
 
-func (s *editorialStore) saveAppearance(parent context.Context, actor, operationID string, expectedHead int64, input AppearanceInput) error {
+func loadAppearanceRevision(ctx context.Context, q interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}, revision int64) (Appearance, error) {
+	var value Appearance
+	if err := q.QueryRow(ctx, `
+		SELECT revision,site_title,site_description,site_language,home_mode,
+		       COALESCE(home_page_id,''),header_show_title,header_tagline,footer_text,
+		       theme,actor,created_at
+		FROM rixa.appearance_revisions
+		WHERE revision=$1
+	`, revision).Scan(
+		&value.Revision, &value.SiteTitle, &value.SiteDescription, &value.SiteLanguage,
+		&value.HomeMode, &value.HomePageID, &value.HeaderShowTitle, &value.HeaderTagline,
+		&value.FooterText, &value.Theme, &value.Actor, &value.CreatedAt,
+	); err != nil {
+		return Appearance{}, editorialReadError(err)
+	}
+	value.CreatedAt = value.CreatedAt.UTC()
+	return value, nil
+}
+
+func (s *editorialStore) saveAppearance(parent context.Context, actor, operationID string, expectedHead int64, input AppearanceInput) (Appearance, error) {
 	ctx, conn, release, err := s.connection(parent)
 	if err != nil {
-		return err
+		return Appearance{}, err
 	}
 	defer release()
 	tx, err := conn.Begin(ctx)
 	if err != nil {
-		return editorialMutationKnownError(err)
+		return Appearance{}, editorialMutationKnownError(err)
 	}
 	defer func() { _ = tx.Rollback(context.Background()) }()
 
 	requestHash := appearanceRequestHash(actor, expectedHead, input)
 
 	if err = lockOperation(ctx, tx, operationID); err != nil {
-		return editorialMutationKnownError(err)
+		return Appearance{}, editorialMutationKnownError(err)
 	}
 	if op, found, e := operationIn(ctx, tx, operationID); e != nil {
-		return e
+		return Appearance{}, e
 	} else if found {
 		if op.Kind != "appearance.save" || op.ResourceID != AppearanceTarget || op.RequestHash != requestHash {
-			return ErrEditorialConflict
+			return Appearance{}, ErrEditorialConflict
 		}
-		return nil
+		return loadAppearanceRevision(ctx, tx, op.ResultRevision)
 	}
 
 	var current int64
 	if err = tx.QueryRow(ctx, "SELECT head_revision FROM rixa.appearance_head WHERE singleton=true FOR UPDATE").Scan(&current); err != nil {
-		return editorialMutationKnownError(err)
+		return Appearance{}, editorialMutationKnownError(err)
 	}
 	if current != expectedHead {
-		return ErrEditorialConflict
+		return Appearance{}, ErrEditorialConflict
 	}
 	if input.HomeMode == "page" {
 		var kind string
 		if err = tx.QueryRow(ctx, "SELECT kind FROM rixa.content_items WHERE id=$1", input.HomePageID).Scan(&kind); err != nil {
-			return editorialMutationKnownError(err)
+			return Appearance{}, editorialMutationKnownError(err)
 		}
 		if kind != string(ContentPage) {
-			return ErrEditorialInvalid
+			return Appearance{}, ErrEditorialInvalid
 		}
 	}
 	next := current + 1
@@ -770,24 +821,28 @@ func (s *editorialStore) saveAppearance(parent context.Context, actor, operation
 		) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
 	`, next, input.SiteTitle, input.SiteDescription, input.SiteLanguage, input.HomeMode, home,
 		input.HeaderShowTitle, input.HeaderTagline, input.FooterText, input.Theme, actor, now, operationID); err != nil {
-		return editorialMutationKnownError(err)
+		return Appearance{}, editorialMutationKnownError(err)
 	}
 	tag, err := tx.Exec(ctx, "UPDATE rixa.appearance_head SET head_revision=$1 WHERE singleton=true AND head_revision=$2", next, current)
 	if err != nil {
-		return editorialMutationKnownError(err)
+		return Appearance{}, editorialMutationKnownError(err)
 	}
 	if tag.RowsAffected() != 1 {
-		return ErrEditorialConflict
+		return Appearance{}, ErrEditorialConflict
 	}
 	if err = insertOperation(ctx, tx, EditorialOperation{
 		ID: operationID, Kind: "appearance.save", ResourceID: AppearanceTarget, RequestHash: requestHash, ResultRevision: next, CreatedAt: now,
 	}); err != nil {
-		return err
+		return Appearance{}, err
+	}
+	result, err := loadAppearanceRevision(ctx, tx, next)
+	if err != nil {
+		return Appearance{}, err
 	}
 	if err = tx.Commit(ctx); err != nil {
-		return editorialCommitError(err)
+		return Appearance{}, editorialCommitError(err)
 	}
-	return nil
+	return result, nil
 }
 
 func lockOperation(ctx context.Context, tx pgx.Tx, operationID string) error {
@@ -845,6 +900,14 @@ func operationRequestHash(parts ...string) string {
 		_, _ = h.Write([]byte(part))
 	}
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+func contentCreateRequestHash(actor string, contentKind ContentKind, title, body string, refs []ContentMediaRef) string {
+	parts := []string{"content.create", actor, string(contentKind), title, body}
+	for _, ref := range refs {
+		parts = append(parts, ref.AssetID, strconv.FormatInt(ref.AssetRevision, 10))
+	}
+	return operationRequestHash(parts...)
 }
 
 func contentRequestHash(kind, actor, resource string, expected int64, title, body string, refs []ContentMediaRef) string {

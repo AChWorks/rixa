@@ -52,6 +52,9 @@ func testEditorialRuntime(t *testing.T, ctx context.Context, runtime *Runtime, a
 	if err != nil || replayed.ID != post.ID || replayed.Revision != post.Revision {
 		t.Fatalf("exact create replay = %#v err=%v", replayed, err)
 	}
+	if _, err = a.Create(ctx, aAdmin, createOp, ContentPage, "نوشته English", body); !errors.Is(err, ErrEditorialConflict) {
+		t.Fatalf("create operation ID reused with different ContentKind: %v", err)
+	}
 	if _, err = a.Create(ctx, aAdmin, createOp, ContentPost, "different intent", body); !errors.Is(err, ErrEditorialConflict) {
 		t.Fatalf("create operation ID reused with different payload: %v", err)
 	}
@@ -102,17 +105,7 @@ func testEditorialRuntime(t *testing.T, ctx context.Context, runtime *Runtime, a
 		t.Fatalf("save operation outcome = %#v err=%v", saveOutcome, err)
 	}
 
-	publicationOp := newOperationID()
-	withIntent, err := a.SetPublicationIntent(ctx, aAdmin, publicationOp, post.ID, 2, 1)
-	if err != nil {
-		t.Fatalf("set publication intent: %v", err)
-	}
-	if withIntent.Revision != 2 || withIntent.PublicationIntentRevision != 1 {
-		t.Fatalf("publication intent mutated source unexpectedly: %#v", withIntent)
-	}
-	if _, err = a.SetPublicationIntent(ctx, aAdmin, publicationOp, post.ID, 2, 2); !errors.Is(err, ErrEditorialConflict) {
-		t.Fatalf("publication operation ID reused with different revision: %v", err)
-	}
+	testPublicationIntentConcurrency(t, ctx, a, aAdmin, post.ID)
 
 	if err = runtime.Sites["site-a"].Media.Delete(ctx, aAdmin, assetID, assetRevision); !errors.Is(err, achrix.ErrDenied) {
 		t.Fatalf("site admin could directly delete retained Media: %v", err)
@@ -172,12 +165,134 @@ func testEditorialRuntime(t *testing.T, ctx context.Context, runtime *Runtime, a
 	if _, err = a.Head(ctx, aAdmin, bPost.ID); !errors.Is(err, ErrEditorialNotFound) {
 		t.Fatalf("site A observed site B content: %v", err)
 	}
+	assertCommittedMutationsUseSingleStoreSlot(t, ctx, a, aAdmin)
+
 	appearanceBAfter, err := b.Appearance(ctx, bAdmin)
 	if err != nil || appearanceBAfter.Revision != 1 || appearanceBAfter.SiteTitle != "site-b" || appearanceBAfter.Theme != "light" {
 		t.Fatalf("site B appearance changed with site A: %#v err=%v", appearanceBAfter, err)
 	}
 
 	assertEditorialDatabaseIsolation(t, ctx, dsnA, dsnB, post.ID, bPost.ID, assetID)
+}
+
+func testPublicationIntentConcurrency(t *testing.T, ctx context.Context, service *EditorialService, actor achrix.Principal, id string) {
+	t.Helper()
+	head, err := service.Head(ctx, actor, id)
+	if err != nil {
+		t.Fatalf("publication concurrency starting head: %v", err)
+	}
+	if head.Revision != 2 || head.PublicationIntentVersion != 1 || head.PublicationIntentRevision != 0 {
+		t.Fatalf("publication concurrency starting state = %#v", head)
+	}
+
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	for _, target := range []int64{1, 2} {
+		target := target
+		go func() {
+			<-start
+			_, mutationErr := service.SetPublicationIntent(ctx, actor, newOperationID(), id, 2, 1, target)
+			results <- mutationErr
+		}()
+	}
+	close(start)
+	assertOnePublicationWinner(t, results)
+
+	head, err = service.Head(ctx, actor, id)
+	if err != nil {
+		t.Fatalf("publication set/set head: %v", err)
+	}
+	if head.PublicationIntentVersion != 2 || (head.PublicationIntentRevision != 1 && head.PublicationIntentRevision != 2) {
+		t.Fatalf("publication set/set state = %#v", head)
+	}
+
+	start = make(chan struct{})
+	results = make(chan error, 2)
+	go func() {
+		<-start
+		_, mutationErr := service.SetPublicationIntent(ctx, actor, newOperationID(), id, 2, 2, 1)
+		results <- mutationErr
+	}()
+	go func() {
+		<-start
+		_, mutationErr := service.ClearPublicationIntent(ctx, actor, newOperationID(), id, 2, 2)
+		results <- mutationErr
+	}()
+	close(start)
+	assertOnePublicationWinner(t, results)
+
+	head, err = service.Head(ctx, actor, id)
+	if err != nil {
+		t.Fatalf("publication set/clear head: %v", err)
+	}
+	if head.PublicationIntentVersion != 3 {
+		t.Fatalf("publication set/clear version = %d want 3", head.PublicationIntentVersion)
+	}
+
+	publicationOp := newOperationID()
+	withIntent, err := service.SetPublicationIntent(ctx, actor, publicationOp, id, 2, 3, 1)
+	if err != nil {
+		t.Fatalf("set publication intent after concurrency: %v", err)
+	}
+	if withIntent.Revision != 2 || withIntent.PublicationIntentRevision != 1 || withIntent.PublicationIntentVersion != 4 {
+		t.Fatalf("publication intent mutated source unexpectedly: %#v", withIntent)
+	}
+	replayed, err := service.SetPublicationIntent(ctx, actor, publicationOp, id, 2, 3, 1)
+	if err != nil || replayed.PublicationIntentVersion != 4 || replayed.PublicationIntentRevision != 1 {
+		t.Fatalf("exact publication replay = %#v err=%v", replayed, err)
+	}
+	if _, err = service.SetPublicationIntent(ctx, actor, publicationOp, id, 2, 3, 2); !errors.Is(err, ErrEditorialConflict) {
+		t.Fatalf("publication operation ID reused with different revision: %v", err)
+	}
+}
+
+func assertOnePublicationWinner(t *testing.T, results <-chan error) {
+	t.Helper()
+	successes, conflicts := 0, 0
+	for range 2 {
+		err := <-results
+		switch {
+		case err == nil:
+			successes++
+		case errors.Is(err, ErrEditorialConflict):
+			conflicts++
+		default:
+			t.Fatalf("publication concurrency unexpected result: %v", err)
+		}
+	}
+	if successes != 1 || conflicts != 1 {
+		t.Fatalf("publication concurrency successes=%d conflicts=%d", successes, conflicts)
+	}
+}
+
+func assertCommittedMutationsUseSingleStoreSlot(t *testing.T, ctx context.Context, service *EditorialService, actor achrix.Principal) {
+	t.Helper()
+	originalSlots := service.store.slots
+	service.store.slots = make(chan struct{}, 1)
+	defer func() { service.store.slots = originalSlots }()
+
+	created, err := service.Create(ctx, actor, newOperationID(), ContentPost, "single-slot create", "<p>single slot</p>")
+	if err != nil {
+		t.Fatalf("single-slot create: %v", err)
+	}
+	saved, err := service.Save(ctx, actor, newOperationID(), created.ID, 1, "single-slot save", "<p>single slot saved</p>")
+	if err != nil || saved.Revision != 2 {
+		t.Fatalf("single-slot save = %#v err=%v", saved, err)
+	}
+	intent, err := service.SetPublicationIntent(ctx, actor, newOperationID(), created.ID, 2, 1, 1)
+	if err != nil || intent.PublicationIntentVersion != 2 {
+		t.Fatalf("single-slot publication = %#v err=%v", intent, err)
+	}
+	appearance, err := service.Appearance(ctx, actor)
+	if err != nil {
+		t.Fatalf("single-slot appearance read: %v", err)
+	}
+	input := appearance.input()
+	input.FooterText = "single-slot acknowledgement proof"
+	updated, err := service.SaveAppearance(ctx, actor, newOperationID(), appearance.Revision, input)
+	if err != nil || updated.Revision != appearance.Revision+1 {
+		t.Fatalf("single-slot appearance save = %#v err=%v", updated, err)
+	}
 }
 
 func assertEditorialDatabaseIsolation(t *testing.T, ctx context.Context, dsnA, dsnB, aContentID, bContentID, assetID string) {
@@ -209,7 +324,7 @@ func assertEditorialDatabaseIsolation(t *testing.T, ctx context.Context, dsnA, d
 	if err = b.QueryRow(ctx, "SELECT count(*) FROM rixa.content_media_refs WHERE asset_id=$1", assetID).Scan(&count); err != nil || count != 0 {
 		t.Fatalf("site A Media reference leaked to site B: count=%d err=%v", count, err)
 	}
-	if err = a.QueryRow(ctx, "SELECT count(*) FROM rixa.appearance_revisions").Scan(&count); err != nil || count != 2 {
+	if err = a.QueryRow(ctx, "SELECT count(*) FROM rixa.appearance_revisions").Scan(&count); err != nil || count != 3 {
 		t.Fatalf("site A appearance revisions count=%d err=%v", count, err)
 	}
 	if err = b.QueryRow(ctx, "SELECT count(*) FROM rixa.appearance_revisions").Scan(&count); err != nil || count != 1 {

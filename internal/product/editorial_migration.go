@@ -11,7 +11,12 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-const editorialMigrationIdentity = "rixa-editorial-v1-20261006"
+const (
+	editorialMigrationIdentity  = "rixa-editorial-v1-20261006"
+	editorialMigration2Identity = "rixa-editorial-v2-20261006"
+)
+
+const editorialMigration2SQL = `ALTER TABLE rixa.content_items ADD COLUMN publication_intent_version bigint NOT NULL DEFAULT 1 CHECK (publication_intent_version >= 1);`
 
 const editorialMigrationSQL = `
 CREATE TABLE rixa.content_items (
@@ -121,6 +126,23 @@ func migrateEditorial(parent context.Context, dsn, siteID string) error {
 		}
 	default:
 		return fmt.Errorf("editorial migration lookup: %w", err)
+	}
+
+	err = tx.QueryRow(ctx, "SELECT identity FROM rixa.schema_migrations WHERE version=2").Scan(&identity)
+	switch {
+	case err == nil && identity != editorialMigration2Identity:
+		return fmt.Errorf("%w: editorial migration 2 identity mismatch", ErrConfiguration)
+	case err == nil:
+		// Already applied and identity-checked.
+	case errors.Is(err, pgx.ErrNoRows):
+		if _, err = tx.Exec(ctx, editorialMigration2SQL); err != nil {
+			return fmt.Errorf("editorial migration 2: %w", err)
+		}
+		if _, err = tx.Exec(ctx, "INSERT INTO rixa.schema_migrations(version,identity) VALUES(2,$1)", editorialMigration2Identity); err != nil {
+			return fmt.Errorf("editorial migration 2 record: %w", err)
+		}
+	default:
+		return fmt.Errorf("editorial migration 2 lookup: %w", err)
 	}
 
 	var head int64

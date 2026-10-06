@@ -206,10 +206,11 @@ func (h *contentSurface) save(w http.ResponseWriter, r *http.Request, view shell
 
 func (h *contentSurface) publicationIntent(w http.ResponseWriter, r *http.Request, view shell.Request, clear bool) {
 	var body struct {
-		OperationID string `json:"operation_id"`
-		ID          string `json:"id"`
-		Expected    string `json:"expected_head"`
-		Revision    string `json:"revision"`
+		OperationID         string `json:"operation_id"`
+		ID                  string `json:"id"`
+		Expected            string `json:"expected_head"`
+		ExpectedPublication string `json:"expected_publication_version"`
+		Revision            string `json:"revision"`
 	}
 	if err := decodeEditorialJSON(w, r, &body); err != nil {
 		editorialHTTPFail(w, err, body.OperationID)
@@ -220,21 +221,31 @@ func (h *contentSurface) publicationIntent(w http.ResponseWriter, r *http.Reques
 		editorialHTTPFail(w, ErrEditorialInvalid, body.OperationID)
 		return
 	}
+	expectedPublication, err := parseRevision(body.ExpectedPublication)
+	if err != nil {
+		editorialHTTPFail(w, ErrEditorialInvalid, body.OperationID)
+		return
+	}
 	var revision ContentRevision
 	if clear {
-		revision, err = h.service.ClearPublicationIntent(r.Context(), view.Principal, body.OperationID, body.ID, expected)
+		revision, err = h.service.ClearPublicationIntent(r.Context(), view.Principal, body.OperationID, body.ID, expected, expectedPublication)
 	} else {
 		var selected int64
 		selected, err = parseRevision(body.Revision)
 		if err == nil {
-			revision, err = h.service.SetPublicationIntent(r.Context(), view.Principal, body.OperationID, body.ID, expected, selected)
+			revision, err = h.service.SetPublicationIntent(r.Context(), view.Principal, body.OperationID, body.ID, expected, expectedPublication, selected)
 		}
 	}
 	if err != nil {
 		editorialHTTPFail(w, err, body.OperationID)
 		return
 	}
-	editorialJSON(w, map[string]string{"id": revision.ID, "revision": strconv.FormatInt(revision.Revision, 10), "publication_intent_revision": strconv.FormatInt(revision.PublicationIntentRevision, 10), "operation_id": body.OperationID})
+	editorialJSON(w, map[string]string{
+		"id": revision.ID, "revision": strconv.FormatInt(revision.Revision, 10),
+		"publication_intent_revision": strconv.FormatInt(revision.PublicationIntentRevision, 10),
+		"publication_intent_version":  strconv.FormatInt(revision.PublicationIntentVersion, 10),
+		"operation_id":                body.OperationID,
+	})
 }
 
 func (h *contentSurface) operation(w http.ResponseWriter, r *http.Request, view shell.Request) {
@@ -321,7 +332,7 @@ var contentEditTemplate = template.Must(template.New("content-edit").Parse(`{{de
 <fieldset><legend>{{if eq .Language "fa"}}قالب‌بندی{{else}}Formatting{{end}}</legend><div class="editor-toolbar" role="toolbar"><button type="button" data-wrap="strong"><strong>B</strong></button><button type="button" data-wrap="em"><em>I</em></button><button type="button" data-block="p">P</button><button type="button" data-block="h2">H2</button><button type="button" data-block="h3">H3</button></div><label>{{if eq .Language "fa"}}پیوند HTTPS یا داخلی{{else}}HTTPS or site-relative link{{end}} <input data-link-url dir="ltr"></label><button type="button" data-add-link>{{if eq .Language "fa"}}پیوند دادن انتخاب{{else}}Link selection{{end}}</button><label>Media ID <input data-media-id dir="ltr" maxlength="26" pattern="[A-Z2-7]{26}"></label><label>{{if eq .Language "fa"}}توضیح Media{{else}}Media description{{end}} <input data-media-caption maxlength="300" dir="auto"></label><button type="button" data-add-media>{{if eq .Language "fa"}}افزودن ارجاع Media{{else}}Insert Media reference{{end}}</button></fieldset>
 <div data-editor contenteditable="true" role="textbox" aria-multiline="true" aria-label="{{if eq .Language "fa"}}متن محتوا{{else}}Content body{{end}}" dir="auto">{{.Body}}</div><button type="submit">{{if eq .Language "fa"}}ذخیرهٔ نسخهٔ تازه{{else}}Save new revision{{end}}</button></form>
 <p><a data-preview-link href="/admin/content/preview/{{.Revision.ID}}/{{.Revision.Revision}}">{{if eq .Language "fa"}}پیش‌نمایش خصوصی همین نسخه{{else}}Private preview of this revision{{end}}</a></p>
-<section><h2>{{if eq .Language "fa"}}قصد انتشار{{else}}Publication intent{{end}}</h2><p>{{if eq .Language "fa"}}این عمل چیزی را عمومی نمی‌کند.{{else}}This action does not make anything public.{{end}}</p><form data-admin-form data-publication-form action="/admin/content/publication-intent" method="post"><input type="hidden" name="operation_id" value="{{.OperationID}}" data-operation-field><input type="hidden" name="id" value="{{.Revision.ID}}"><input type="hidden" name="expected_head" value="{{.Revision.Revision}}" data-head-field><label>{{if eq .Language "fa"}}نسخه{{else}}Revision{{end}} <input name="revision" value="{{.Revision.Revision}}" data-revision-field inputmode="numeric" pattern="[0-9]+" required></label><button type="submit">{{if eq .Language "fa"}}ثبت قصد انتشار{{else}}Set publication intent{{end}}</button></form>{{if .Revision.PublicationIntentRevision}}<p>{{if eq .Language "fa"}}نسخهٔ علامت‌خورده{{else}}Marked revision{{end}}: <output data-publication-output>{{.Revision.PublicationIntentRevision}}</output></p><form data-admin-form data-publication-clear action="/admin/content/publication-intent-clear" method="post"><input type="hidden" name="operation_id" value="{{.OperationID}}" data-operation-field><input type="hidden" name="id" value="{{.Revision.ID}}"><input type="hidden" name="expected_head" value="{{.Revision.Revision}}" data-head-field><input type="hidden" name="revision" value="{{.Revision.Revision}}"><button type="submit">{{if eq .Language "fa"}}پاک کردن قصد انتشار{{else}}Clear publication intent{{end}}</button></form>{{end}}</section>
+<section><h2>{{if eq .Language "fa"}}قصد انتشار{{else}}Publication intent{{end}}</h2><p>{{if eq .Language "fa"}}این عمل چیزی را عمومی نمی‌کند.{{else}}This action does not make anything public.{{end}}</p><form data-admin-form data-publication-form action="/admin/content/publication-intent" method="post"><input type="hidden" name="operation_id" value="{{.OperationID}}" data-operation-field><input type="hidden" name="id" value="{{.Revision.ID}}"><input type="hidden" name="expected_head" value="{{.Revision.Revision}}" data-head-field><input type="hidden" name="expected_publication_version" value="{{.Revision.PublicationIntentVersion}}" data-publication-version-field><label>{{if eq .Language "fa"}}نسخه{{else}}Revision{{end}} <input name="revision" value="{{.Revision.Revision}}" data-revision-field inputmode="numeric" pattern="[0-9]+" required></label><button type="submit">{{if eq .Language "fa"}}ثبت قصد انتشار{{else}}Set publication intent{{end}}</button></form>{{if .Revision.PublicationIntentRevision}}<p>{{if eq .Language "fa"}}نسخهٔ علامت‌خورده{{else}}Marked revision{{end}}: <output data-publication-output>{{.Revision.PublicationIntentRevision}}</output></p><form data-admin-form data-publication-clear action="/admin/content/publication-intent-clear" method="post"><input type="hidden" name="operation_id" value="{{.OperationID}}" data-operation-field><input type="hidden" name="id" value="{{.Revision.ID}}"><input type="hidden" name="expected_head" value="{{.Revision.Revision}}" data-head-field><input type="hidden" name="expected_publication_version" value="{{.Revision.PublicationIntentVersion}}" data-publication-version-field><input type="hidden" name="revision" value="{{.Revision.Revision}}"><button type="submit">{{if eq .Language "fa"}}پاک کردن قصد انتشار{{else}}Clear publication intent{{end}}</button></form>{{end}}</section>
 <section><h2>{{if eq .Language "fa"}}نسخه‌های ذخیره‌شده{{else}}Saved revisions{{end}}</h2><ol>{{range .History}}<li><a href="/admin/content/preview/{{$.Revision.ID}}/{{.Revision}}">{{if eq $.Language "fa"}}نسخه{{else}}Revision{{end}} {{.Revision}}</a> — <bdi dir="auto">{{.Title}}</bdi> · <code>{{.Actor}}</code></li>{{end}}</ol></section>
 <section><h2>{{if eq .Language "fa"}}بررسی نتیجهٔ عملیات{{else}}Inspect mutation outcome{{end}}</h2><form data-admin-form data-read-only data-operation-lookup action="/admin/content/operation" method="post"><label>Operation ID <input name="operation_id" data-operation-lookup-input dir="ltr" maxlength="36" required></label><button type="submit">{{if eq .Language "fa"}}بررسی{{else}}Inspect{{end}}</button></form></section>{{end}}`))
 
@@ -352,7 +363,7 @@ const contentEditorJS = `
   }
 
   function safeLink(value) {
-    if (!value || /[\\\r\n\t]/.test(value)) return false;
+    if (!value || /[\\\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/u.test(value)) return false;
     if (value.startsWith("/")) return !value.startsWith("//");
     try {
       const parsed = new URL(value);
@@ -516,8 +527,10 @@ const contentEditorJS = `
 
   document.querySelectorAll("[data-publication-form],[data-publication-clear]").forEach(form => form.addEventListener("admin:success", event => {
     const value = event.detail?.publication_intent_revision;
+    const version = event.detail?.publication_intent_version;
     const output = document.querySelector("[data-publication-output]");
     if (output && value !== undefined) output.textContent = value === "0" ? "—" : value;
+    if (version) document.querySelectorAll("[data-publication-version-field]").forEach(field => field.value = version);
     rotate(form);
   }));
 

@@ -21,11 +21,12 @@ func TestContentEditorPersianMixedDirectionSurface(t *testing.T) {
 	data := contentEditView{
 		Language: "fa",
 		Revision: ContentRevision{
-			ID:       "AAAAAAAAAAAAAAAAAAAAAAAAAA",
-			Kind:     ContentPost,
-			Revision: 2,
-			Title:    "عنوان English",
-			BodyHTML: body,
+			ID:                       "AAAAAAAAAAAAAAAAAAAAAAAAAA",
+			Kind:                     ContentPost,
+			Revision:                 2,
+			Title:                    "عنوان English",
+			BodyHTML:                 body,
+			PublicationIntentVersion: 3,
 		},
 		History:     []RevisionSummary{{Revision: 2, Title: "عنوان English", Actor: "actor"}},
 		Body:        trusted,
@@ -39,6 +40,7 @@ func TestContentEditorPersianMixedDirectionSurface(t *testing.T) {
 	for _, expected := range []string{
 		`contenteditable="true"`, `aria-multiline="true"`, `dir="auto"`,
 		`قالب‌بندی`, `پیش‌نمایش خصوصی همین نسخه`, `بررسی نتیجهٔ عملیات`,
+		`name="expected_publication_version" value="3"`,
 		`<p dir="auto">سلام English 123</p>`,
 	} {
 		if !strings.Contains(page, expected) {
@@ -77,7 +79,7 @@ func TestPrivatePreviewUsesSiteLanguageWithoutInliningPrivateMedia(t *testing.T)
 }
 
 func TestEditorialClientAssetsKeepMutationRecoveryAndPasteBoundary(t *testing.T) {
-	for _, expected := range []string{`addEventListener("paste"`, `getData("text/plain")`, `addEventListener("drop"`, `function safeLink`} {
+	for _, expected := range []string{`addEventListener("paste"`, `getData("text/plain")`, `addEventListener("drop"`, `function safeLink`, `\u202a-\u202e`} {
 		if !strings.Contains(contentEditorJS, expected) && !strings.Contains(contentIndexTemplate.Tree.Root.String(), expected) {
 			t.Fatalf("editor client missing %q", expected)
 		}

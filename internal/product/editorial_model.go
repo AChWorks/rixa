@@ -61,6 +61,11 @@ func newOperationID() string {
 	return rand.Text()
 }
 
+func forbiddenEditorialDirectionControl(r rune) bool {
+	return r == 0x061c || r == 0x200e || r == 0x200f ||
+		r >= 0x202a && r <= 0x202e || r >= 0x2066 && r <= 0x2069
+}
+
 func validPlainText(value string, maximum int, required bool) bool {
 	if !utf8.ValidString(value) || strings.TrimSpace(value) != value {
 		return false
@@ -70,8 +75,7 @@ func validPlainText(value string, maximum int, required bool) bool {
 		return false
 	}
 	for _, r := range value {
-		if unicode.IsControl(r) || r == 0x061c || r == 0x200e || r == 0x200f ||
-			r >= 0x202a && r <= 0x202e || r >= 0x2066 && r <= 0x2069 {
+		if unicode.IsControl(r) || forbiddenEditorialDirectionControl(r) {
 			return false
 		}
 	}
@@ -87,9 +91,7 @@ func validRichText(value string) bool {
 		return false
 	}
 	for _, r := range value {
-		if r == 0 || unicode.IsControl(r) && r != '\n' && r != '\t' ||
-			r == 0x061c || r == 0x200e || r == 0x200f ||
-			r >= 0x202a && r <= 0x202e || r >= 0x2066 && r <= 0x2069 {
+		if r == 0 || unicode.IsControl(r) && r != '\n' && r != '\t' || forbiddenEditorialDirectionControl(r) {
 			return false
 		}
 	}
@@ -297,8 +299,13 @@ func editorialDirectionalBlock(name string) bool {
 }
 
 func validEditorialLink(raw string) bool {
-	if raw == "" || len(raw) > 2048 || strings.ContainsAny(raw, "\\\r\n\t") {
+	if raw == "" || len(raw) > 2048 || !utf8.ValidString(raw) || strings.ContainsRune(raw, '\\') {
 		return false
+	}
+	for _, r := range raw {
+		if unicode.IsControl(r) || forbiddenEditorialDirectionControl(r) {
+			return false
+		}
 	}
 	u, err := url.Parse(raw)
 	if err != nil || u.User != nil {

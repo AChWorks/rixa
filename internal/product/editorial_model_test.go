@@ -58,6 +58,8 @@ func TestCanonicalBodyRejectsActiveOrAmbiguousMarkup(t *testing.T) {
 		`<a href="javascript:alert(1)">x</a>`,
 		`<a href="http://example.com">x</a>`,
 		`<a href="//example.com">x</a>`,
+		"<a href=\"https://example.com/abc\u202edef\">x</a>",
+		"<a href=\"/abc\u2067def\">x</a>",
 		`<p dir="rtl">spoof</p>`,
 		"<p>abc\u202edef</p>",
 		`<figure data-media-id="not-an-id"><figcaption>x</figcaption></figure>`,
@@ -129,6 +131,11 @@ func TestEditorialTextAndAppearanceValidation(t *testing.T) {
 
 func TestOperationFingerprintBindsExactIntent(t *testing.T) {
 	refs := []ContentMediaRef{{AssetID: "AAAAAAAAAAAAAAAAAAAAAAAAAA", AssetRevision: 2}}
+	createPost := contentCreateRequestHash("actor", ContentPost, "title", "<p dir=\"auto\">body</p>", refs)
+	createPage := contentCreateRequestHash("actor", ContentPage, "title", "<p dir=\"auto\">body</p>", refs)
+	if createPost == createPage {
+		t.Fatal("content.create fingerprint did not bind ContentKind")
+	}
 	base := contentRequestHash("content.save", "actor", "BBBBBBBBBBBBBBBBBBBBBBBBBB", 1, "title", `<p dir="auto">body</p>`, refs)
 	if len(base) != 64 {
 		t.Fatalf("fingerprint length = %d", len(base))
