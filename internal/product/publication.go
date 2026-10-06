@@ -720,7 +720,7 @@ func (s *PublicationService) prepareAssets(ctx context.Context, actor achrix.Pri
 		}
 		if prepared.SourceAssetID != id || prepared.SourceRevision != revision ||
 			prepared.Profile != media.PublicImageProfile || prepared.Size < 1 ||
-			prepared.Size > maxPublicationBytes || prepared.Width < 1 || prepared.Height < 1 ||
+			prepared.Size > media.MaxPublicImageBytes || prepared.Width < 1 || prepared.Height < 1 ||
 			!validSHA256(prepared.SHA256) || !validSHA256(prepared.SourceSHA256) {
 			_ = os.Remove(temp)
 			return nil, 0, ErrEditorialConflict
