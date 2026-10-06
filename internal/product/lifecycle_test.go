@@ -237,12 +237,16 @@ func TestRuntimeShutdownDrainFailurePreservesApplicationsUntilRetry(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = app.Start(context.Background()); err != nil {
+	setupCtx, setupCancel := context.WithTimeout(context.Background(), time.Second)
+	if err = app.Start(setupCtx); err != nil {
+		setupCancel()
 		t.Fatal(err)
 	}
-	if err = app.Ready(context.Background()); err != nil {
+	if err = app.Ready(setupCtx); err != nil {
+		setupCancel()
 		t.Fatal(err)
 	}
+	setupCancel()
 
 	lifecycleCtx, lifecycleCancel := context.WithCancel(context.Background())
 	defer lifecycleCancel()
@@ -276,9 +280,12 @@ func TestRuntimeShutdownDrainFailurePreservesApplicationsUntilRetry(t *testing.T
 	if !started || stopped {
 		t.Fatalf("dependent Application was torn down during unresolved publication drain: started=%v stopped=%v", started, stopped)
 	}
-	if err = app.Ready(context.Background()); err != nil {
+	readyCtx, readyCancel := context.WithTimeout(context.Background(), time.Second)
+	if err = app.Ready(readyCtx); err != nil {
+		readyCancel()
 		t.Fatalf("dependent Application lost readiness before publication drain resolved: %v", err)
 	}
+	readyCancel()
 
 	<-publication.applyGate
 	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Second)
