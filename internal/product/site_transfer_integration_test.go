@@ -319,7 +319,7 @@ func TestSiteTransferRoundTrip(t *testing.T) {
 	if _, err = targetRuntime.ControlService().CreateSiteAccount(ctx, targetControlActor, "site-a", "target-control-created", "Target-Control-Created-2026!"); err != nil {
 		t.Fatalf("remapped target control authority failed: %v", err)
 	}
-	if _, err = targetRuntime.Sites["site-a"].Identity.Account(ctx, sourceControl.Account.ID, member.ID); !errors.Is(err, achrix.ErrDenied) {
+	if _, err = targetRuntime.Sites["site-a"].Identity.Account(ctx, achrix.Principal(sourceControl.Account.ID), member.ID); !errors.Is(err, achrix.ErrDenied) {
 		t.Fatalf("source control principal gained active target-site authority: %v", err)
 	}
 
