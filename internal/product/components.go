@@ -396,6 +396,15 @@ func (r *Runtime) Shutdown(parent context.Context) error {
 	}
 	ctx, cancel := context.WithTimeout(parent, r.Config.ShutdownTimeout)
 	defer cancel()
+	var drainErr error
+	for _, site := range r.Sites {
+		if site.Publication != nil {
+			drainErr = errors.Join(drainErr, site.Publication.Stop(ctx))
+		}
+	}
+	if drainErr != nil {
+		return drainErr
+	}
 	var result error
 	for i := len(r.applications) - 1; i >= 0; i-- {
 		result = errors.Join(result, r.applications[i].Shutdown(ctx))
