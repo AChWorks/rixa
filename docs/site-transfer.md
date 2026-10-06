@@ -11,7 +11,7 @@ A completed capture contains one enabled site's:
 - Rixa content/revisions/media references/appearance/theme/operation state;
 - exact private Media originals;
 - the private Rixa public artifact tree when publication is enabled, preserving active generation, route/withdrawal history and source relationships;
-- the exact site ID, public origin, site administrator principal, public policy, Rixa/AChrix identity and bounded data/ledger summary.
+- the exact site ID, public origin, site administrator principal, public policy, transfer-schema identity, Rixa build-version string, exact AChrix version and bounded data/ledger summary.
 
 The bundle deliberately excludes deployment DSNs/credentials, TLS material, the control database/control administrator, deployment-specific root paths and **all Identity session rows**. Restored browser/API sessions therefore do not remain valid. A new compatible target control administrator is separately bootstrapped and its site operator identity is derived again; historical audit actors remain historical evidence, not active grants.
 
@@ -36,7 +36,7 @@ A bundle is restorable only after `manifest.json` is written and hashed by `comp
 Restore accepts only:
 
 - a canonical private completed bundle directory that is disjoint from the target Media/Public roots;
-- a completed hash-valid bundle for the exact current Rixa/AChrix identities;
+- a completed hash-valid bundle for the current transfer schema, Rixa build-version string and exact AChrix identity;
 - a separate empty local PostgreSQL target database;
 - nonexistent target Media/public roots under canonical existing parents;
 - the same site identity/origin/admin/public policy.
@@ -47,7 +47,7 @@ Native `pg_restore` uses one transaction with `--exit-on-error --no-owner --no-p
 
 The target is still **not ingress-ready merely because restore returned**. Recreate/bootstrap the target control administrator, set the preserved site administrator principal in target configuration, run normal `rixa check`, and only then open ingress. The integration proof reconstructs the normal pinned runtime and verifies account/grant behavior, old-session rejection, fresh login, exact Media bytes, content/appearance/public output and target control-operator remapping.
 
-A failed/unknown final root activation leaves the target isolated and reports failure/unknown outcome; do not infer rollback or replay into the now-nonempty database. Use a new empty target for another restore attempt.
+A failed/unknown final root activation leaves the target isolated and reports failure/unknown outcome; do not infer rollback or replay into the now-nonempty database. When the second root rename fails after Media activation, the tool renames Media back and fsyncs that parent before returning an ordinary failure; an unconfirmed rollback is reported as unknown. Use a new empty target for another restore attempt.
 
 ## Tooling
 
@@ -61,3 +61,8 @@ rixa restore-site --config /etc/rixa/target.json --site site-a --input /private/
 ```
 
 `RIXA_PG_DUMP` / `RIXA_PG_RESTORE` or the corresponding flags may select compatible maintained PostgreSQL binaries. CI uses PostgreSQL 18.6 tooling against the same disposable PostgreSQL 18.6 profile; this does not establish remote/production transfer support.
+
+
+## Identity interpretation
+
+The bundle is a compatibility record, not a source-control attestation. Release packaging may set the Rixa build version; development builds deliberately report `development`, so that string alone is not an exact commit identity. Transfer compatibility is therefore fail-closed on the versioned transfer schema, exact AChrix version, exact Identity/Audit/Media/Rixa migration ledgers, captured site/public-policy identity, artifact hashes and successful current-composition readiness before activation. The exact Rixa candidate SHA used for repository acceptance remains CI/PR evidence rather than being invented inside a development bundle.

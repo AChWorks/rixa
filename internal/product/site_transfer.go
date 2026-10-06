@@ -1158,6 +1158,9 @@ func activateSiteTransferRoots(mediaStage, mediaTarget, publicStage, publicTarge
 			if rollbackErr := os.Rename(mediaTarget, mediaStage); rollbackErr != nil {
 				return fmt.Errorf("%w: partial root activation", ErrSiteTransferUnknown)
 			}
+			if rollbackSyncErr := syncTransferDirectory(filepath.Dir(mediaTarget)); rollbackSyncErr != nil {
+				return fmt.Errorf("%w: rollback root activation durability", ErrSiteTransferUnknown)
+			}
 			mediaActivated = false
 			return fmt.Errorf("%w: activate public root", ErrSiteTransfer)
 		}
