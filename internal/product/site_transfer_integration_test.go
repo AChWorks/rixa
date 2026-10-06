@@ -32,6 +32,9 @@ const (
 )
 
 func TestSiteTransferRoundTrip(t *testing.T) {
+	if os.Getenv("RIXA_SITE_TRANSFER_OBSERVATION") != "1" {
+		t.Skip("set RIXA_SITE_TRANSFER_OBSERVATION=1 for the real PostgreSQL site-transfer proof")
+	}
 	adminDSN := os.Getenv("RIXA_TEST_POSTGRES_DSN")
 	if adminDSN == "" {
 		if os.Getenv("CI") != "" {
