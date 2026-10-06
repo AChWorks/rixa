@@ -15,14 +15,14 @@ A public generation contains server-rendered HTML, `sitemap.xml`, `robots.txt`, 
 
 ## Publication transaction
 
-Publication apply is serialized per site and uses an optimistic expected-generation precondition.
+Publication apply is serialized per site and uses an optimistic expected-generation precondition. This first executable boundary supports one active publication writer process per configured `public_root`; shared-root multi-writer replicas require a separate coordination contract and are not supported by this slice.
 
 1. Read all selected publication intents and Appearance in a read-only PostgreSQL `REPEATABLE READ` snapshot.
 2. Build route ownership from the previous active manifest. Corrections retain the public route, explicit reroutes preserve old routes as permanent redirects, and withdrawals preserve owned routes as HTTP 410 tombstones.
 3. Prepare each exact Media revision into private staging. Only the supported clean PNG/JPEG profile is accepted, and every published figure must have a non-empty description.
 4. Render semantic HTML, truthful JSON-LD, sitemap, robots policy, and content-addressed images into a new immutable generation.
 5. Re-read the editorial snapshot and Media source metadata. Any revision/hash drift aborts without changing the active generation.
-6. Persist and fsync the generation, then atomically replace the small `current` pointer. A failure before pointer replacement leaves the previous generation active. If durability after pointer replacement is ambiguous, the mutation returns an unknown-outcome result and the operation ID can be reconciled from the active generation chain.
+6. Persist and fsync the generation, then atomically replace the small `current` pointer. A failure before pointer replacement leaves the previous generation active. If durability after pointer replacement is ambiguous, the mutation returns an unknown-outcome result and the operation ID can be reconciled from the active generation plus its bounded retained parent chain. Callers must reconcile an unknown outcome before advancing through later publication generations rather than blindly replaying the mutation.
 
 At startup Rixa validates the current pointer, private manifest, routes, and generated file inventory before public serving becomes ready. Orphaned staging/uncommitted generations are not served.
 
@@ -68,6 +68,6 @@ Create `public_root` ahead of startup as the Rixa service account with mode `070
 
 ## Validation evidence
 
-Issue #5 and its implementation PR are the durable evidence ledger for the exact candidate. Required evidence includes the real two-site fixture, JavaScript-independent page reads, clean public image proof, correction/reroute/withdrawal/restart reconciliation, negative cross-site/private/spoofed-route checks, static-read-after-dynamic-shutdown proof, current CI, and the exact-candidate independent HIGH_ASSURANCE review.
+Issue #5 and its implementation PR are the durable evidence ledger for the exact candidate. Required evidence includes the real two-site fixture, JavaScript-independent page reads, clean public image proof, correction/reroute/withdrawal/restart reconciliation, negative cross-site/private/spoofed-route checks, static-read-without-dynamic-service-dependencies proof, current CI, and the exact-candidate independent HIGH_ASSURANCE review.
 
 Serving-path measurement is recorded on the Issue/PR against the candidate used for the measurement rather than encoded as a performance promise or flaky CI threshold.
