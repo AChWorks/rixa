@@ -60,7 +60,7 @@ The measurement profile deliberately raises each AChrix pool ceiling to 6, keeps
 
 The exact constructor/start/saturation/mixed-load/post-burst counts are observation evidence tied to the current CI run and its disposable GitHub-hosted runner, not durable capacity numbers. The test logs `runner_goos`, `runner_goarch`, logical CPU count and Linux `MemTotal` together with the workload counts so the measured host profile is declared by evidence rather than assumed from a runner label. Record those values in the PR/CI evidence for the exact candidate. Do not turn them into a production SLO.
 
-Existing lifecycle regression proof remains authoritative for partial startup cleanup, and publication shutdown tests retain the rule that a failed publication drain prevents dependent Application teardown from racing active publication work.
+Lifecycle regression proof now covers both failure directions required by this profile: if a later site readiness step fails after an earlier publication service became ready, that publication service is disabled and its admitted apply work is drained before dependent AChrix Applications are torn down; if a publication drain itself times out during shutdown, dependent Applications remain running until the held publication work is released and a supported cleanup retry succeeds.
 
 ## Supported claim boundary
 
