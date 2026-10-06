@@ -242,6 +242,8 @@ const appearanceJS = `
   const fa=document.documentElement.lang==="fa",status=document.getElementById("status"),text=(en,faText)=>fa?faText:en;
   function uuid(){if(crypto.randomUUID)return crypto.randomUUID();const b=new Uint8Array(16);crypto.getRandomValues(b);b[6]=(b[6]&15)|64;b[8]=(b[8]&63)|128;const h=[...b].map(v=>v.toString(16).padStart(2,"0")).join("");return h.slice(0,8)+"-"+h.slice(8,12)+"-"+h.slice(12,16)+"-"+h.slice(16,20)+"-"+h.slice(20)}
   const form=document.querySelector("[data-appearance-save]"),mode=document.querySelector("[data-home-mode]"),pageID=document.querySelector("[data-home-page]");
+  const publicationForm=document.querySelector("[data-publication-apply]");
+  if(publicationForm){const operation=publicationForm.querySelector("[data-operation-field]");if(operation)operation.value=uuid()}
   function homeState(){if(!mode||!pageID)return;const page=mode.value==="page";pageID.disabled=!page;pageID.required=page;if(!page)pageID.value=""}
   mode?.addEventListener("change",homeState);homeState();
   form?.addEventListener("admin:success",event=>{const rev=event.detail?.revision;if(!rev)return;document.querySelector("[data-head-field]").value=rev;document.querySelector("[data-appearance-revision]").textContent=rev;form.querySelector("[data-operation-field]").value=uuid()});
