@@ -28,6 +28,7 @@ var (
 	siteIDSyntax    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
 	envNameSyntax   = regexp.MustCompile(`^[A-Z][A-Z0-9_]{1,127}$`)
 	accountIDSyntax = regexp.MustCompile(`^[A-Z2-7]{26}$`)
+	publicCrawlerSyntax = regexp.MustCompile(`^[A-Za-z0-9*][A-Za-z0-9._*:/-]{0,127}$`)
 )
 
 type TLSConfig struct {
@@ -41,13 +42,70 @@ type ControlConfig struct {
 	AdminPrincipal string `json:"admin_principal,omitempty"`
 }
 
+type PublicCrawlerPolicy struct {
+	UserAgent string `json:"user_agent"`
+	Access    string `json:"access"`
+	Purpose   string `json:"purpose"`
+}
+
+type PublicPolicyConfig struct {
+	Indexing string                `json:"indexing"`
+	Snippet  string                `json:"snippet"`
+	Crawlers []PublicCrawlerPolicy `json:"crawlers"`
+}
+
+func (p PublicPolicyConfig) empty() bool {
+	return p.Indexing == "" && p.Snippet == "" && len(p.Crawlers) == 0
+}
+
+func (p PublicPolicyConfig) validate() error {
+	if p.Indexing != "allow" && p.Indexing != "noindex" {
+		return ErrConfiguration
+	}
+	if p.Snippet != "allow" && p.Snippet != "none" {
+		return ErrConfiguration
+	}
+	if len(p.Crawlers) == 0 || len(p.Crawlers) > 64 {
+		return ErrConfiguration
+	}
+	seen := make(map[string]struct{}, len(p.Crawlers))
+	hasDefault := false
+	for _, crawler := range p.Crawlers {
+		if !publicCrawlerSyntax.MatchString(crawler.UserAgent) {
+			return ErrConfiguration
+		}
+		if crawler.Access != "allow" && crawler.Access != "disallow" {
+			return ErrConfiguration
+		}
+		switch crawler.Purpose {
+		case "search", "ai-search", "ai-training", "other":
+		default:
+			return ErrConfiguration
+		}
+		key := strings.ToLower(crawler.UserAgent)
+		if _, duplicate := seen[key]; duplicate {
+			return ErrConfiguration
+		}
+		seen[key] = struct{}{}
+		if crawler.UserAgent == "*" {
+			hasDefault = true
+		}
+	}
+	if !hasDefault {
+		return ErrConfiguration
+	}
+	return nil
+}
+
 type SiteConfig struct {
-	ID             string `json:"id"`
-	Origin         string `json:"origin"`
-	DatabaseEnv    string `json:"database_env"`
-	MediaRoot      string `json:"media_root"`
-	AdminPrincipal string `json:"admin_principal,omitempty"`
-	Disabled       bool   `json:"disabled,omitempty"`
+	ID             string             `json:"id"`
+	Origin         string             `json:"origin"`
+	DatabaseEnv    string             `json:"database_env"`
+	MediaRoot      string             `json:"media_root"`
+	PublicRoot     string             `json:"public_root,omitempty"`
+	PublicPolicy   PublicPolicyConfig `json:"public_policy,omitempty"`
+	AdminPrincipal string             `json:"admin_principal,omitempty"`
+	Disabled       bool               `json:"disabled,omitempty"`
 }
 
 type Config struct {
@@ -195,6 +253,19 @@ func (c Config) validateStructure() error {
 			return fmt.Errorf("%w: site media root", ErrConfiguration)
 		}
 		roots[site.MediaRoot] = true
+		if site.PublicRoot == "" {
+			if !site.PublicPolicy.empty() {
+				return fmt.Errorf("%w: site public policy without public root", ErrConfiguration)
+			}
+		} else {
+			if !filepath.IsAbs(site.PublicRoot) || filepath.Clean(site.PublicRoot) != site.PublicRoot || site.PublicRoot == "/" || roots[site.PublicRoot] {
+				return fmt.Errorf("%w: site public root", ErrConfiguration)
+			}
+			if err := site.PublicPolicy.validate(); err != nil {
+				return fmt.Errorf("%w: site public policy", ErrConfiguration)
+			}
+			roots[site.PublicRoot] = true
+		}
 	}
 	return nil
 }

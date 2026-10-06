@@ -12,7 +12,12 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-func testEditorialRuntime(t *testing.T, ctx context.Context, runtime *Runtime, aAdmin, bAdmin achrix.Principal, assetID string, assetRevision int64, dsnA, dsnB string) {
+type publicationFixture struct {
+	PostID     string
+	HomePageID string
+}
+
+func testEditorialRuntime(t *testing.T, ctx context.Context, runtime *Runtime, aAdmin, bAdmin achrix.Principal, assetID string, assetRevision int64, dsnA, dsnB string) publicationFixture {
 	t.Helper()
 	a := runtime.Sites["site-a"].Editorial
 	b := runtime.Sites["site-b"].Editorial
@@ -158,6 +163,11 @@ func testEditorialRuntime(t *testing.T, ctx context.Context, runtime *Runtime, a
 		t.Fatalf("post accepted as home page: %v", err)
 	}
 
+	homeIntent, err := a.SetPublicationIntent(ctx, aAdmin, newOperationID(), homePage.ID, 1, 1, 1)
+	if err != nil || homeIntent.PublicationIntentRevision != 1 || homeIntent.PublicationIntentVersion != 2 {
+		t.Fatalf("home page publication intent = %#v err=%v", homeIntent, err)
+	}
+
 	bPost, err := b.Create(ctx, bAdmin, newOperationID(), ContentPost, "site B only", `<p>site B</p>`)
 	if err != nil {
 		t.Fatalf("site B create: %v", err)
@@ -173,6 +183,7 @@ func testEditorialRuntime(t *testing.T, ctx context.Context, runtime *Runtime, a
 	}
 
 	assertEditorialDatabaseIsolation(t, ctx, dsnA, dsnB, post.ID, bPost.ID, assetID)
+	return publicationFixture{PostID: post.ID, HomePageID: homePage.ID}
 }
 
 func testPublicationIntentConcurrency(t *testing.T, ctx context.Context, service *EditorialService, actor achrix.Principal, id string) {

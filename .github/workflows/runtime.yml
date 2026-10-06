@@ -69,6 +69,9 @@ jobs:
       - name: Runtime proof
         run: go test -race ./...
 
+      - name: Measure static HTTPS path
+        run: go test ./internal/product -run '^$' -bench '^BenchmarkStaticPublicationHTTPSRead$' -benchtime=250ms -count=1 -benchmem
+
       - name: Build product
         shell: bash
         run: |

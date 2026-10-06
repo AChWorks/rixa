@@ -161,9 +161,10 @@ func (s *editorialStore) ready(parent context.Context) error {
 }
 
 type EditorialService struct {
-	app   *achrix.Application
-	store *editorialStore
-	media *media.Service
+	app             *achrix.Application
+	store           *editorialStore
+	media           *media.Service
+	publicationGate chan struct{}
 }
 
 func newEditorialService(app *achrix.Application, mediaService *media.Service, dsn string) (*EditorialService, error) {
@@ -174,7 +175,10 @@ func newEditorialService(app *achrix.Application, mediaService *media.Service, d
 	if err != nil {
 		return nil, err
 	}
-	return &EditorialService{app: app, store: store, media: mediaService}, nil
+	return &EditorialService{
+		app: app, store: store, media: mediaService,
+		publicationGate: make(chan struct{}, 1),
+	}, nil
 }
 
 func (s *EditorialService) Ready(ctx context.Context) error {
@@ -274,6 +278,11 @@ func (s *EditorialService) SetPublicationIntent(ctx context.Context, actor achri
 	if err := s.authorize(ctx, actor, CapabilityContentPublishIntent, id); err != nil {
 		return ContentRevision{}, err
 	}
+	release, err := s.acquirePublicationSource(ctx)
+	if err != nil {
+		return ContentRevision{}, err
+	}
+	defer release()
 	return s.store.publicationIntent(ctx, string(actor), operationID, id, expectedHead, expectedPublicationVersion, revision, false)
 }
 
@@ -284,6 +293,11 @@ func (s *EditorialService) ClearPublicationIntent(ctx context.Context, actor ach
 	if err := s.authorize(ctx, actor, CapabilityContentPublishIntent, id); err != nil {
 		return ContentRevision{}, err
 	}
+	release, err := s.acquirePublicationSource(ctx)
+	if err != nil {
+		return ContentRevision{}, err
+	}
+	defer release()
 	return s.store.publicationIntent(ctx, string(actor), operationID, id, expectedHead, expectedPublicationVersion, 0, true)
 }
 
@@ -314,7 +328,24 @@ func (s *EditorialService) SaveAppearance(ctx context.Context, actor achrix.Prin
 	if err := s.authorize(ctx, actor, CapabilityAppearanceEdit, AppearanceTarget); err != nil {
 		return Appearance{}, err
 	}
+	release, err := s.acquirePublicationSource(ctx)
+	if err != nil {
+		return Appearance{}, err
+	}
+	defer release()
 	return s.store.saveAppearance(ctx, string(actor), operationID, expectedHead, input)
+}
+
+func (s *EditorialService) acquirePublicationSource(ctx context.Context) (func(), error) {
+	if s == nil || s.publicationGate == nil {
+		return nil, ErrEditorialUnavailable
+	}
+	select {
+	case s.publicationGate <- struct{}{}:
+		return func() { <-s.publicationGate }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 func (s *EditorialService) authorize(ctx context.Context, actor achrix.Principal, capability, resource string) error {

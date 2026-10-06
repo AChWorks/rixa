@@ -261,3 +261,25 @@ func (s *ControlService) SaveSiteAppearance(ctx context.Context, actor achrix.Pr
 	}
 	return site.Editorial.SaveAppearance(ctx, site.operator, operationID, expectedHead, input)
 }
+
+func (s *ControlService) ApplySitePublication(ctx context.Context, actor achrix.Principal, siteID string, request PublicationRequest) (PublicationResult, error) {
+	site, err := s.site(ctx, actor, siteID)
+	if err != nil {
+		return PublicationResult{}, err
+	}
+	if site.Publication == nil {
+		return PublicationResult{}, ErrEditorialUnavailable
+	}
+	return site.Publication.Apply(ctx, site.operator, request)
+}
+
+func (s *ControlService) SitePublicationOperation(ctx context.Context, actor achrix.Principal, siteID, operationID string) (PublicationOperation, error) {
+	site, err := s.site(ctx, actor, siteID)
+	if err != nil {
+		return PublicationOperation{}, err
+	}
+	if site.Publication == nil {
+		return PublicationOperation{}, ErrEditorialUnavailable
+	}
+	return site.Publication.Operation(ctx, site.operator, operationID)
+}

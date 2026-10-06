@@ -53,7 +53,9 @@ func TestRuntimeIsolationLifecycleAndTLSIngress(t *testing.T) {
 	dir := t.TempDir()
 	rootA := filepath.Join(dir, "media-a")
 	rootB := filepath.Join(dir, "media-b")
-	for _, root := range []string{rootA, rootB} {
+	publicA := filepath.Join(dir, "public-a")
+	publicB := filepath.Join(dir, "public-b")
+	for _, root := range []string{rootA, rootB, publicA, publicB} {
 		if err := os.Mkdir(root, 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -73,8 +75,8 @@ func TestRuntimeIsolationLifecycleAndTLSIngress(t *testing.T) {
 			DatabaseEnv: "RIXA_TEST_CONTROL",
 		},
 		Sites: []SiteConfig{
-			{ID: "site-a", Origin: "https://a.rixa.test:19443", DatabaseEnv: "RIXA_TEST_A", MediaRoot: rootA},
-			{ID: "site-b", Origin: "https://b.rixa.test:19443", DatabaseEnv: "RIXA_TEST_B", MediaRoot: rootB},
+			{ID: "site-a", Origin: "https://a.rixa.test:19443", DatabaseEnv: "RIXA_TEST_A", MediaRoot: rootA, PublicRoot: publicA, PublicPolicy: testPublicPolicy()},
+			{ID: "site-b", Origin: "https://b.rixa.test:19443", DatabaseEnv: "RIXA_TEST_B", MediaRoot: rootB, PublicRoot: publicB, PublicPolicy: PublicPolicyConfig{Indexing: "noindex", Snippet: "none", Crawlers: []PublicCrawlerPolicy{{UserAgent: "*", Access: "disallow", Purpose: "search"}}}},
 			{ID: "disabled", Origin: "https://disabled.rixa.test:19443", DatabaseEnv: "RIXA_TEST_DISABLED", MediaRoot: filepath.Join(dir, "disabled-root"), Disabled: true},
 		},
 	}
@@ -203,7 +205,8 @@ func TestRuntimeIsolationLifecycleAndTLSIngress(t *testing.T) {
 		t.Fatal("control path returned wrong site bytes")
 	}
 
-	testEditorialRuntime(t, ctx, runtime, aAdmin, bAdmin, assetA.ID, assetA.Revision, dsns["a"], dsns["b"])
+	publicationFixture := testEditorialRuntime(t, ctx, runtime, aAdmin, bAdmin, assetA.ID, assetA.Revision, dsns["a"], dsns["b"])
+	testStaticPublicationRuntime(t, ctx, runtime, aAdmin, assetA.ID, publicationFixture)
 
 	assertDatabaseIsolation(t, ctx, dsns["a"], dsns["b"], accountA.ID, accountB.ID)
 
@@ -287,6 +290,8 @@ func testTrustedTLSIngress(t *testing.T, parent context.Context, config Config, 
 	for i := range config.Sites {
 		host, _ := url.Parse(config.Sites[i].Origin)
 		config.Sites[i].Origin = "https://" + net.JoinHostPort(host.Hostname(), strconv.Itoa(port))
+		config.Sites[i].PublicRoot = ""
+		config.Sites[i].PublicPolicy = PublicPolicyConfig{}
 	}
 	controlURL, _ := url.Parse(config.Control.Origin)
 	config.Control.Origin = "https://" + net.JoinHostPort(controlURL.Hostname(), strconv.Itoa(port))

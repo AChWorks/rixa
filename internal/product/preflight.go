@@ -152,22 +152,33 @@ func validateDeclaredMediaRoots(sites []SiteConfig) error {
 }
 
 func validateMediaRoots(sites []ResolvedSite) error {
-	roots := make([]mediaRootIdentity, 0, len(sites))
-	for _, site := range sites {
-		if site.Disabled {
-			continue
-		}
-		current, err := inspectMediaRoot(site.ID, site.MediaRoot)
+	roots := make([]mediaRootIdentity, 0, len(sites)*2)
+	add := func(siteID, kind, root string) error {
+		current, err := inspectMediaRoot(siteID+":"+kind, root)
 		if err != nil {
-			return fmt.Errorf("%w: media root for %s", ErrConfiguration, site.ID)
+			return fmt.Errorf("%w: %s root for %s", ErrConfiguration, kind, siteID)
 		}
 		for _, existing := range roots {
 			if os.SameFile(existing.info, current.info) ||
 				pathsOverlap(existing.canonical, current.canonical) {
-				return fmt.Errorf("%w: media roots for %s and %s are not exclusive", ErrConfiguration, existing.siteID, current.siteID)
+				return fmt.Errorf("%w: private roots %s and %s are not exclusive", ErrConfiguration, existing.siteID, current.siteID)
 			}
 		}
 		roots = append(roots, current)
+		return nil
+	}
+	for _, site := range sites {
+		if site.Disabled {
+			continue
+		}
+		if err := add(site.ID, "media", site.MediaRoot); err != nil {
+			return err
+		}
+		if site.PublicRoot != "" {
+			if err := add(site.ID, "public", site.PublicRoot); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }

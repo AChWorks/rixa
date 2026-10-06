@@ -3,6 +3,7 @@
 package product
 
 import (
+	"errors"
 	"html/template"
 	"io"
 	"net/http"
@@ -12,14 +13,15 @@ import (
 )
 
 type appearanceSurface struct {
-	service *EditorialService
+	service     *EditorialService
+	publication *PublicationService
 }
 
-func newAppearanceSurface(service *EditorialService) (shell.Surface, error) {
+func newAppearanceSurface(service *EditorialService, publication *PublicationService) (shell.Surface, error) {
 	if service == nil {
 		return shell.Surface{}, shell.ErrConfiguration
 	}
-	h := &appearanceSurface{service: service}
+	h := &appearanceSurface{service: service, publication: publication}
 	return shell.Surface{
 		ID:         "appearance",
 		Title:      shell.Text{English: "Appearance", Persian: "ظاهر سایت"},
@@ -32,6 +34,7 @@ func newAppearanceSurface(service *EditorialService) (shell.Surface, error) {
 type appearanceView struct {
 	Language    string
 	Appearance  Appearance
+	Publication PublicationState
 	OperationID string
 }
 
@@ -58,6 +61,8 @@ func (h *appearanceSurface) serve(w http.ResponseWriter, r *http.Request, view s
 		h.save(w, r, view)
 	case "/operation":
 		h.operation(w, r, view)
+	case "/publish":
+		h.publish(w, r, view)
 	default:
 		editorialHTTPFail(w, ErrEditorialNotFound, "")
 	}
@@ -73,7 +78,8 @@ func (h *appearanceSurface) show(w http.ResponseWriter, r *http.Request, view sh
 		Title:    (shell.Text{English: "Appearance", Persian: "ظاهر سایت"}).In(view.Language),
 		Template: appearanceTemplate,
 		Data: appearanceView{
-			Language: view.Language, Appearance: current, OperationID: newOperationID(),
+			Language: view.Language, Appearance: current,
+			Publication: h.publication.State("", ""), OperationID: newOperationID(),
 		},
 	}); err != nil {
 		editorialHTTPFail(w, ErrEditorialUnavailable, "")
@@ -127,14 +133,52 @@ func (h *appearanceSurface) operation(w http.ResponseWriter, r *http.Request, vi
 		return
 	}
 	op, err := h.service.Operation(r.Context(), view.Principal, body.OperationID)
+	if err == nil {
+		editorialJSON(w, map[string]string{
+			"operation_id": op.ID, "kind": op.Kind, "resource_id": op.ResourceID,
+			"result_revision": strconv.FormatInt(op.ResultRevision, 10),
+			"created_at":      op.CreatedAt.Format("2006-01-02T15:04:05.999999Z07:00"),
+		})
+		return
+	}
+	if !errors.Is(err, ErrEditorialNotFound) || h.publication == nil {
+		editorialHTTPFail(w, err, body.OperationID)
+		return
+	}
+	publication, publicationErr := h.publication.Operation(r.Context(), view.Principal, body.OperationID)
+	if publicationErr != nil {
+		editorialHTTPFail(w, publicationErr, body.OperationID)
+		return
+	}
+	editorialJSON(w, map[string]string{
+		"operation_id": publication.ID, "kind": "publication.apply",
+		"result_generation": publication.Generation, "route": publication.Route,
+		"created_at": publication.CreatedAt.Format("2006-01-02T15:04:05.999999Z07:00"),
+	})
+}
+
+func (h *appearanceSurface) publish(w http.ResponseWriter, r *http.Request, view shell.Request) {
+	if h.publication == nil {
+		editorialHTTPFail(w, ErrEditorialUnavailable, "")
+		return
+	}
+	var body struct {
+		OperationID        string `json:"operation_id"`
+		ExpectedGeneration string `json:"expected_generation"`
+	}
+	if err := decodeEditorialJSON(w, r, &body); err != nil {
+		editorialHTTPFail(w, err, body.OperationID)
+		return
+	}
+	result, err := h.publication.Apply(r.Context(), view.Principal, PublicationRequest{
+		OperationID: body.OperationID, ExpectedGeneration: body.ExpectedGeneration,
+	})
 	if err != nil {
 		editorialHTTPFail(w, err, body.OperationID)
 		return
 	}
 	editorialJSON(w, map[string]string{
-		"operation_id": op.ID, "kind": op.Kind, "resource_id": op.ResourceID,
-		"result_revision": strconv.FormatInt(op.ResultRevision, 10),
-		"created_at":      op.CreatedAt.Format("2006-01-02T15:04:05.999999Z07:00"),
+		"operation_id": body.OperationID, "generation": result.Generation,
 	})
 }
 
@@ -176,6 +220,14 @@ var appearanceTemplate = template.Must(template.New("appearance").Parse(`{{defin
 </fieldset>
 <button type="submit">{{if eq .Language "fa"}}ذخیرهٔ تنظیمات{{else}}Save appearance{{end}}</button>
 </form>
+{{if .Publication.Enabled}}<section aria-labelledby="appearance-publication-heading"><h2 id="appearance-publication-heading">{{if eq .Language "fa"}}انتشار عمومی{{else}}Public publication{{end}}</h2>
+<p>{{if eq .Language "fa"}}ظاهر ذخیره‌شده تا زمان ساخت و فعال‌سازی یک نسل عمومی جدید، سایت عمومی را تغییر نمی‌دهد.{{else}}Saved appearance does not change the public site until a new coherent public generation is built and activated.{{end}}</p>
+<p>{{if eq .Language "fa"}}نسل فعال{{else}}Active generation{{end}}: <output data-publication-output>{{if .Publication.Generation}}{{.Publication.Generation}}{{else}}—{{end}}</output></p>
+<form data-admin-form data-publication-apply action="/admin/appearance/publish" method="post">
+<input type="hidden" name="operation_id" value="{{.OperationID}}" data-operation-field>
+<input type="hidden" name="expected_generation" value="{{.Publication.Generation}}" data-publication-generation>
+<button type="submit">{{if eq .Language "fa"}}اعمال انتشار یکپارچه{{else}}Apply coherent publication{{end}}</button>
+</form></section>{{end}}
 <section aria-labelledby="appearance-operation-heading"><h2 id="appearance-operation-heading">{{if eq .Language "fa"}}بررسی نتیجهٔ عملیات{{else}}Inspect mutation outcome{{end}}</h2>
 <p>{{if eq .Language "fa"}}اگر پاسخ ذخیره از دست رفت، همان شناسهٔ عملیات را بررسی کنید؛ ذخیره را خودکار تکرار نکنید.{{else}}If the save response was lost, inspect the same operation ID; do not automatically submit it again.{{end}}</p>
 <form data-admin-form data-read-only data-operation-lookup action="/admin/appearance/operation" method="post">
@@ -190,9 +242,12 @@ const appearanceJS = `
   const fa=document.documentElement.lang==="fa",status=document.getElementById("status"),text=(en,faText)=>fa?faText:en;
   function uuid(){if(crypto.randomUUID)return crypto.randomUUID();const b=new Uint8Array(16);crypto.getRandomValues(b);b[6]=(b[6]&15)|64;b[8]=(b[8]&63)|128;const h=[...b].map(v=>v.toString(16).padStart(2,"0")).join("");return h.slice(0,8)+"-"+h.slice(8,12)+"-"+h.slice(12,16)+"-"+h.slice(16,20)+"-"+h.slice(20)}
   const form=document.querySelector("[data-appearance-save]"),mode=document.querySelector("[data-home-mode]"),pageID=document.querySelector("[data-home-page]");
+  const publicationForm=document.querySelector("[data-publication-apply]");
+  if(publicationForm){const operation=publicationForm.querySelector("[data-operation-field]");if(operation)operation.value=uuid()}
   function homeState(){if(!mode||!pageID)return;const page=mode.value==="page";pageID.disabled=!page;pageID.required=page;if(!page)pageID.value=""}
   mode?.addEventListener("change",homeState);homeState();
   form?.addEventListener("admin:success",event=>{const rev=event.detail?.revision;if(!rev)return;document.querySelector("[data-head-field]").value=rev;document.querySelector("[data-appearance-revision]").textContent=rev;form.querySelector("[data-operation-field]").value=uuid()});
+  document.querySelector("[data-publication-apply]")?.addEventListener("admin:success",event=>{const generation=event.detail?.generation;if(!generation)return;document.querySelector("[data-publication-generation]").value=generation;document.querySelector("[data-publication-output]").textContent=generation;document.querySelector("[data-publication-apply] [data-operation-field]").value=uuid()});
   document.querySelectorAll("form[data-admin-form]").forEach(current=>current.addEventListener("admin:failure",event=>{if(!event.detail?.unknown)return;const op=current.querySelector("input[name=operation_id]"),lookup=document.querySelector("[data-operation-lookup-input]");if(op&&lookup)lookup.value=op.value;if(op&&status)status.textContent=text("Outcome unknown. Do not submit again. Inspect operation "+op.value+".","نتیجه نامعلوم است. دوباره ارسال نکنید. عملیات "+op.value+" را بررسی کنید.")}));
   document.querySelector("[data-operation-lookup]")?.addEventListener("admin:success",event=>{const d=event.detail||{};if(status)status.textContent=text("Operation "+(d.operation_id||"")+" committed as "+(d.kind||"")+" revision "+(d.result_revision||"0")+".","عملیات "+(d.operation_id||"")+" ثبت شده است.")});
 })();

@@ -20,6 +20,7 @@ const (
 	CapabilityContentEdit          = "rixa.content.edit"
 	CapabilityContentPreview       = "rixa.content.preview"
 	CapabilityContentPublishIntent = "rixa.content.publication-intent"
+	CapabilityPublicationApply     = "rixa.publication.apply"
 	CapabilityAppearanceRead       = "rixa.appearance.read"
 	CapabilityAppearanceEdit       = "rixa.appearance.edit"
 	CapabilityOperationRead        = "rixa.editorial.operation.read"
@@ -60,7 +61,7 @@ func sitePolicy(siteAdmin, controlOperator achrix.Principal) achrix.Policy {
 			if resource == media.LibraryTarget {
 				return nil
 			}
-		case media.Read:
+		case media.Read, media.PreparePublicImage:
 			return nil
 		case CapabilityContentList:
 			if resource == ContentCollectionTarget {
@@ -68,6 +69,10 @@ func sitePolicy(siteAdmin, controlOperator achrix.Principal) achrix.Policy {
 			}
 		case CapabilityContentRead, CapabilityContentEdit, CapabilityContentPreview, CapabilityContentPublishIntent:
 			if resource == ContentCollectionTarget || validEditorialID(resource) {
+				return nil
+			}
+		case CapabilityPublicationApply:
+			if resource == PublicationTarget {
 				return nil
 			}
 		case CapabilityAppearanceRead, CapabilityAppearanceEdit:
