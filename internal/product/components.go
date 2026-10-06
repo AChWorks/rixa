@@ -244,7 +244,7 @@ func buildSite(config Config, site ResolvedSite, adminPrincipal, operator achrix
 	if err != nil {
 		return nil, fmt.Errorf("content surface: %w", err)
 	}
-	appearanceSurface, err := newAppearanceSurface(editorialService)
+	appearanceSurface, err := newAppearanceSurface(editorialService, publicationService)
 	if err != nil {
 		return nil, fmt.Errorf("appearance surface: %w", err)
 	}
