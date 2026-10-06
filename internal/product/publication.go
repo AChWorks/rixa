@@ -28,6 +28,7 @@ const (
 	maxPublicationBytes     int64  = 256 << 20
 	publicationHistoryLimit       = 16
 	publicReadConcurrency      = 32
+	publicationApplyTimeout   = 2 * time.Minute
 )
 
 var publicRouteSegmentSyntax = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._~-]{0,127}$`)
@@ -220,6 +221,11 @@ func (s *PublicationService) Operation(ctx context.Context, actor achrix.Princip
 
 func (s *PublicationService) Apply(ctx context.Context, actor achrix.Principal, request PublicationRequest) (PublicationResult, error) {
 	if s == nil || !validOperationID(request.OperationID) {
+		return PublicationResult{}, ErrEditorialInvalid
+	}
+	ctx, cancel := context.WithTimeout(ctx, publicationApplyTimeout)
+	defer cancel()
+	if !validOperationID(request.OperationID) {
 		return PublicationResult{}, ErrEditorialInvalid
 	}
 	if request.ExpectedGeneration != "" && !validEditorialID(request.ExpectedGeneration) {
