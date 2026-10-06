@@ -69,6 +69,19 @@ jobs:
       - name: Runtime proof
         run: go test -race ./...
 
+      - name: Measure static HTTPS path
+        run: go test ./internal/product -run '^
+        run: |
+          set -euo pipefail
+          go build -trimpath -o "$RUNNER_TEMP/rixa" ./cmd/rixa
+          "$RUNNER_TEMP/rixa" version
+ -bench '^BenchmarkStaticPublicationHTTPSRead
+        run: |
+          set -euo pipefail
+          go build -trimpath -o "$RUNNER_TEMP/rixa" ./cmd/rixa
+          "$RUNNER_TEMP/rixa" version
+ -benchtime=250ms -count=1 -benchmem
+
       - name: Build product
         shell: bash
         run: |
