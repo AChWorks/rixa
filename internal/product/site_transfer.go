@@ -775,6 +775,7 @@ func inspectSiteTransferDatabaseQuery(parent context.Context, query siteTransfer
 	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
 	defer cancel()
 
+	var err error
 	var result siteTransferSnapshot
 	var versionText string
 	if err = query.QueryRow(ctx, "SHOW server_version_num").Scan(&versionText); err != nil {
