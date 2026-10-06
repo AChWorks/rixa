@@ -26,6 +26,7 @@ func TestContentEditorPersianMixedDirectionSurface(t *testing.T) {
 			Revision:                 2,
 			Title:                    "عنوان English",
 			BodyHTML:                 body,
+			PublicationIntentRevision: 2,
 			PublicationIntentVersion: 3,
 		},
 		History:     []RevisionSummary{{Revision: 2, Title: "عنوان English", Actor: "actor"}},
@@ -88,10 +89,13 @@ func TestPrivatePreviewUsesSiteLanguageWithoutInliningPrivateMedia(t *testing.T)
 }
 
 func TestEditorialClientAssetsKeepMutationRecoveryAndPasteBoundary(t *testing.T) {
-	for _, expected := range []string{`addEventListener("paste"`, `getData("text/plain")`, `addEventListener("drop"`, `function safeLink`, `\u202a-\u202e`, `data-publication-generation-output`, `publicationForm.querySelector("[data-operation-field]")`} {
+	for _, expected := range []string{`addEventListener("paste"`, `getData("text/plain")`, `addEventListener("drop"`, `function safeLink`, `\u202a-\u202e`, `data-publication-generation-output`} {
 		if !strings.Contains(contentEditorJS, expected) && !strings.Contains(contentIndexTemplate.Tree.Root.String(), expected) {
 			t.Fatalf("editor client missing %q", expected)
 		}
+	}
+	if !strings.Contains(appearanceJS, `publicationForm.querySelector("[data-operation-field]")`) {
+		t.Fatal("appearance publication form does not rotate its initial operation identity")
 	}
 	for _, forbidden := range []string{"localStorage", "sessionStorage", "setInterval("} {
 		if strings.Contains(contentEditorJS, forbidden) || strings.Contains(appearanceJS, forbidden) {
