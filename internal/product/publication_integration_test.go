@@ -193,9 +193,8 @@ func testStaticPublicationRuntime(t *testing.T, ctx context.Context, runtime *Ru
 		t.Fatalf("corrected publication intent=%#v err=%v", intent, err)
 	}
 	second, err := site.Publication.Apply(ctx, actor, PublicationRequest{
-		OperationID: newOperationID(), ExpectedGeneration: first.Generation,
+		OperationID: newOperationID(), ExpectedGeneration: themePublication.Generation,
 		ContentID: fixture.PostID, Route: "/news/launch/",
-		ExpectedGeneration: themePublication.Generation,
 	})
 	if err != nil || second.Generation == themePublication.Generation {
 		t.Fatalf("corrected publication=%#v err=%v", second, err)
