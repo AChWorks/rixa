@@ -4,8 +4,11 @@ package product
 
 import (
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/hex"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -112,5 +115,50 @@ func TestPublicationReadyRejectsSameSizeTamperedArtifact(t *testing.T) {
 	}
 	if err := reloaded.Ready(); !errors.Is(err, ErrEditorialUnavailable) {
 		t.Fatalf("same-size artifact tampering was not rejected: %v", err)
+	}
+}
+
+
+func TestStaticPublicationReadNeedsNoDynamicServices(t *testing.T) {
+	root := t.TempDir()
+	generationRoot := filepath.Join(root, "generations", "CCCCCCCCCCCCCCCCCCCCCCCCCC")
+	publicRoot := filepath.Join(generationRoot, "public")
+	if err := os.MkdirAll(publicRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	body := []byte("<!doctype html><html><body>static-only</body></html>")
+	if err := os.WriteFile(filepath.Join(publicRoot, "home.html"), body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(body)
+	manifest := &publicationManifest{
+		Generation: "CCCCCCCCCCCCCCCCCCCCCCCCCC",
+		CreatedAt:  time.Unix(20, 0).UTC(),
+		Routes: map[string]publicationRoute{
+			"/": {Kind: "file", File: "home.html"},
+		},
+		Files: map[string]publicationFile{
+			"home.html": {
+				Path: "home.html", ContentType: "text/html; charset=utf-8",
+				Cache: generatedFileCache, Size: int64(len(body)), SHA256: hex.EncodeToString(sum[:]),
+			},
+		},
+		Assets: map[string]publicationAsset{},
+		Entries: map[string]publicationEntry{},
+	}
+	generation := &publishedGeneration{manifest: manifest, root: generationRoot}
+	service := &PublicationService{
+		authority: "site.example", slots: make(chan struct{}, publicReadConcurrency),
+	}
+	service.state.Store(newPublicationReadState([]*publishedGeneration{generation}))
+	service.ready.Store(true)
+
+	req := httptest.NewRequest(http.MethodGet, "https://site.example/", nil)
+	req.Host = "site.example"
+	req.TLS = &tls.ConnectionState{}
+	rec := httptest.NewRecorder()
+	service.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "static-only") {
+		t.Fatalf("static read unexpectedly needed dynamic services: status=%d body=%q", rec.Code, rec.Body.String())
 	}
 }
