@@ -147,12 +147,12 @@ func TestSiteTransferRoundTrip(t *testing.T) {
 		t.Fatalf("source appearance: %v", err)
 	}
 	publication, err := sourceRuntime.Sites["site-a"].Publication.Apply(ctx, aAdmin, PublicationRequest{
-		OperationID: newOperationID(), ContentID: postA.ID, Route: "/transferred-post",
+		OperationID: newOperationID(), ContentID: postA.ID, Route: "/transferred-post/",
 	})
 	if err != nil {
 		t.Fatalf("source publication: %v", err)
 	}
-	if publication.Route != "/transferred-post" {
+	if publication.Route != "/transferred-post/" {
 		t.Fatalf("source publication route=%q", publication.Route)
 	}
 
@@ -302,7 +302,7 @@ func TestSiteTransferRoundTrip(t *testing.T) {
 		t.Fatalf("restored appearance=%#v err=%v", gotAppearance, err)
 	}
 
-	publicReq := httptest.NewRequest(http.MethodGet, source.Sites[0].Origin+"/transferred-post", nil)
+	publicReq := httptest.NewRequest(http.MethodGet, source.Sites[0].Origin+"/transferred-post/", nil)
 	publicReq.Host = mustTransferURL(t, source.Sites[0].Origin).Host
 	publicReq.TLS = &tls.ConnectionState{}
 	publicRec := httptest.NewRecorder()
