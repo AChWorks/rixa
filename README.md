@@ -50,6 +50,12 @@ A single declared site omits the optional Multi-Site resolver. Disabled declared
 
 The exact AChrix dependency identity is machine-owned by `achworks.yaml`, `go.mod` and `go.sum`. The runtime CI verifies ordinary checksum-backed module consumption with no `replace` or `go.work`, then runs the real PostgreSQL/isolation/TLS lifecycle proof.
 
+## Development prerelease packages
+
+When GitHub Releases publishes a Rixa development prerelease, the supported release asset is a clean Linux-amd64 product package rather than a repository snapshot. The package carries the runnable binary, example configuration/environment files, license, build identity and concise [release installation guidance](docs/release-install.md). Published release assets remain bounded by the development profile: they do not imply production hosting support, public-internet exposure, RPO/RTO or an in-product updater.
+
+Release builds embed their Rixa version while ordinary source/development builds continue to report `development`. The package build records the exact source commit and pinned AChrix dependency; GitHub Releases and CI remain the delivery/evidence owners.
+
 ## Where truth lives
 
 | Question | Authoritative source |

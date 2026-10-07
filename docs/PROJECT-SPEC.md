@@ -18,7 +18,7 @@ Users are the infrastructure administrator managing declared sites, independent 
 - Basic SEO, truthful structured data and understandable public meaning for AI retrieval are built into actual publication, with a path to later improvement.
 - The development profile demonstrates scoped authorization, independent site data/assets, finite aggregate resources and coherent isolated transfer/restore. It makes no production delivery or fleet-capacity promise.
 
-[The milestone](https://github.com/AChWorks/rixa/milestone/1) groups implementation acceptance. Production install/distribution, hosting support and release readiness require executable evidence and a separately authorized delivery profile.
+[The milestone](https://github.com/AChWorks/rixa/milestone/1) groups implementation acceptance. A versioned development prerelease may package exactly the already-proven development profile without creating a production-support promise. Production installation/distribution, hosting support and production release readiness require executable evidence and a separately authorized delivery profile.
 
 ## Site independence on shared infrastructure
 
