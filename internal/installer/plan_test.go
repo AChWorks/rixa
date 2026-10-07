@@ -112,3 +112,28 @@ func TestBuildPlanRejectsDuplicateRequiredEvidence(t *testing.T) {
 		t.Fatalf("duplicate required evidence did not fail closed: %#v", plan)
 	}
 }
+
+func TestPanelAdapterCanProvisionWithoutRootWhenItExplicitlyOwnsMechanisms(t *testing.T) {
+	report := Evaluate(Environment{
+		OS: "linux", Arch: "amd64", EUID: 1000,
+		Distribution: "panel-host",
+		Commands:     map[string]string{},
+		HTTPSPort:    PortInUse,
+	}, ProvisioningSupport{
+		PersistentService:    "panel-supervisor",
+		PostgreSQL:           "panel-database",
+		PrivateStorage:       "panel-filesystem",
+		HTTPSIngress:         "panel-proxy",
+		PublicTLSCertificate: "panel-tls",
+	})
+	plan := BuildPlan(report)
+	if plan.Status != PlanReady {
+		t.Fatalf("explicit non-root panel adapter was blocked: %#v", plan)
+	}
+	if len(plan.Actions) != 5 {
+		t.Fatalf("panel adapter actions=%d want=5: %#v", len(plan.Actions), plan.Actions)
+	}
+	if len(plan.Requirements) != 0 {
+		t.Fatalf("panel adapter retained requirements: %#v", plan.Requirements)
+	}
+}

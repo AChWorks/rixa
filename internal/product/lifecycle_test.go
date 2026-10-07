@@ -5,8 +5,11 @@ package product
 import (
 	"context"
 	"errors"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -20,6 +23,8 @@ type lifecycleProbe struct {
 	fail    bool
 	started bool
 	stopped bool
+	startEntered chan struct{}
+	startRelease <-chan struct{}
 }
 
 func (m *lifecycleProbe) Descriptor() achrix.Descriptor {
@@ -28,12 +33,29 @@ func (m *lifecycleProbe) Descriptor() achrix.Descriptor {
 
 func (m *lifecycleProbe) Start(ctx context.Context) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	if err := ctx.Err(); err != nil {
+		m.mu.Unlock()
 		return err
 	}
 	m.started = true
-	if m.fail {
+	entered := m.startEntered
+	release := m.startRelease
+	fail := m.fail
+	m.mu.Unlock()
+	if entered != nil {
+		select {
+		case entered <- struct{}{}:
+		default:
+		}
+	}
+	if release != nil {
+		select {
+		case <-release:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	if fail {
 		return errors.New("probe start failed")
 	}
 	return nil
@@ -299,5 +321,119 @@ func TestRuntimeShutdownDrainFailurePreservesApplicationsUntilRetry(t *testing.T
 	}
 	if runtime.started {
 		t.Fatal("runtime remained marked started after successful cleanup retry")
+	}
+}
+
+
+func TestServeDoesNotOpenListenerBeforeRuntimeReadiness(t *testing.T) {
+	entered := make(chan struct{}, 1)
+	release := make(chan struct{})
+	module := &lifecycleProbe{id: "rixa.probe.serve-readiness", startEntered: entered, startRelease: release}
+	policy := achrix.PolicyFunc(func(context.Context, achrix.Principal, string, string) error { return achrix.ErrDenied })
+	app, err := achrix.New(
+		achrix.Config{StartupTimeout: 3 * time.Second, ShutdownTimeout: time.Second},
+		policy,
+		module,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	port := freePort(t)
+	address := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
+	dir := t.TempDir()
+	cert, key, _ := writeTestCertificate(t, dir, []string{"localhost"})
+	runtime := &Runtime{
+		Config: RuntimeConfig{Config: Config{
+			Listen:          address,
+			TLS:             TLSConfig{CertFile: cert, KeyFile: key},
+			StartupTimeout:  3 * time.Second,
+			ShutdownTimeout: time.Second,
+		}},
+		Handler:      http.NotFoundHandler(),
+		applications: []*achrix.Application{app},
+		Sites:        map[string]*SiteRuntime{},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	result := make(chan error, 1)
+	go func() { result <- Serve(ctx, runtime, nil) }()
+
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("runtime startup did not begin")
+	}
+	if conn, dialErr := net.DialTimeout("tcp", address, 100*time.Millisecond); dialErr == nil {
+		_ = conn.Close()
+		t.Fatal("ingress listener opened before runtime became ready")
+	}
+
+	close(release)
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		conn, dialErr := net.DialTimeout("tcp", address, 100*time.Millisecond)
+		if dialErr == nil {
+			_ = conn.Close()
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("ingress listener did not open after readiness: %v", dialErr)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	cancel()
+	select {
+	case serveErr := <-result:
+		if serveErr != nil {
+			t.Fatalf("Serve returned error: %v", serveErr)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Serve did not shut down")
+	}
+	started, stopped := module.state()
+	if !started || !stopped {
+		t.Fatalf("runtime lifecycle incomplete: started=%v stopped=%v", started, stopped)
+	}
+}
+
+func TestServeBindFailureShutsDownReadyRuntime(t *testing.T) {
+	occupied, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer occupied.Close()
+
+	module := &lifecycleProbe{id: "rixa.probe.serve-bind-failure"}
+	policy := achrix.PolicyFunc(func(context.Context, achrix.Principal, string, string) error { return achrix.ErrDenied })
+	app, err := achrix.New(
+		achrix.Config{StartupTimeout: time.Second, ShutdownTimeout: time.Second},
+		policy,
+		module,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	cert, key, _ := writeTestCertificate(t, dir, []string{"localhost"})
+	runtime := &Runtime{
+		Config: RuntimeConfig{Config: Config{
+			Listen:          occupied.Addr().String(),
+			TLS:             TLSConfig{CertFile: cert, KeyFile: key},
+			StartupTimeout:  time.Second,
+			ShutdownTimeout: time.Second,
+		}},
+		Handler:      http.NotFoundHandler(),
+		applications: []*achrix.Application{app},
+		Sites:        map[string]*SiteRuntime{},
+	}
+
+	if err := Serve(context.Background(), runtime, nil); err == nil {
+		t.Fatal("expected listener bind failure")
+	}
+	started, stopped := module.state()
+	if !started || !stopped {
+		t.Fatalf("bind failure leaked ready runtime: started=%v stopped=%v", started, stopped)
 	}
 }

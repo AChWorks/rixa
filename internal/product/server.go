@@ -19,12 +19,14 @@ func Serve(parent context.Context, runtime *Runtime, logger *slog.Logger) error 
 	if logger == nil {
 		logger = slog.Default()
 	}
-	listener, err := net.Listen("tcp", runtime.Config.Listen)
-	if err != nil {
+	if err := runtime.Start(parent); err != nil {
 		return err
 	}
-	if err = runtime.Start(parent); err != nil {
-		return errors.Join(err, listener.Close())
+	listener, err := net.Listen("tcp", runtime.Config.Listen)
+	if err != nil {
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.WithoutCancel(parent), runtime.Config.ShutdownTimeout)
+		defer shutdownCancel()
+		return errors.Join(err, runtime.Shutdown(shutdownCtx))
 	}
 
 	server := &http.Server{
