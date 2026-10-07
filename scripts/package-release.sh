@@ -89,7 +89,7 @@ GOWORK=off go list -deps -f '{{with .Module}}{{if and .Path .Version .Dir}}{{.Pa
 
 module_manifest="$tmp/third-party-modules.unsorted"
 : > "$module_manifest"
-while IFS="$(printf '\\t')" read -r module module_version module_dir; do
+while IFS="$(printf '\011')" read -r module module_version module_dir; do
   [[ -n "$module" && -n "$module_version" && -n "$module_dir" ]] || continue
   [[ "$module" != "github.com/AChWorks/rixa" ]] || continue
 
