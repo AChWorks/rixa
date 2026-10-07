@@ -286,7 +286,8 @@ func assertDatabaseIsolation(t *testing.T, ctx context.Context, dsnA, dsnB, acco
 func testTrustedTLSIngress(t *testing.T, parent context.Context, config Config, getenv func(string) (string, bool)) {
 	t.Helper()
 	port := freePort(t)
-	config.Listen = net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
+	config.HostingProfile = HostingProfileDirectTLS
+	config.Listen = net.JoinHostPort("0.0.0.0", strconv.Itoa(port))
 	for i := range config.Sites {
 		host, _ := url.Parse(config.Sites[i].Origin)
 		config.Sites[i].Origin = "https://" + net.JoinHostPort(host.Hostname(), strconv.Itoa(port))
@@ -315,7 +316,8 @@ func testTrustedTLSIngress(t *testing.T, parent context.Context, config Config, 
 	transport := &http.Transport{
 		TLSClientConfig: &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12},
 		DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
-			return (&net.Dialer{Timeout: time.Second}).DialContext(ctx, network, config.Listen)
+			dialAddress := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
+			return (&net.Dialer{Timeout: time.Second}).DialContext(ctx, network, dialAddress)
 		},
 	}
 	client := &http.Client{

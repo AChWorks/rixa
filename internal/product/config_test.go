@@ -230,3 +230,88 @@ func TestMediaRootsRejectParentSymlinkAliasesAndNestedTrees(t *testing.T) {
 		t.Fatalf("separate private roots rejected: %v", err)
 	}
 }
+
+func TestDirectTLSHostingProfileValidatesCanonicalPublicBoundary(t *testing.T) {
+	dir := t.TempDir()
+	root := filepath.Join(dir, "media")
+	if err := os.Mkdir(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cert, key, _ := writeTestCertificate(t, dir, []string{"control.rixa.test", "site.rixa.test"})
+	config := Config{
+		HostingProfile:  HostingProfileDirectTLS,
+		Listen:          "0.0.0.0:443",
+		TLS:             TLSConfig{CertFile: cert, KeyFile: key},
+		Language:        "en",
+		StartupTimeout:  time.Second,
+		ShutdownTimeout: time.Second,
+		Control: ControlConfig{
+			Origin:         "https://control.rixa.test",
+			DatabaseEnv:    "RIXA_CONTROL",
+			AdminPrincipal: testControlAdmin,
+		},
+		Sites: []SiteConfig{{
+			ID:             "site",
+			Origin:         "https://site.rixa.test",
+			DatabaseEnv:    "RIXA_SITE",
+			MediaRoot:      root,
+			AdminPrincipal: testSiteAAdmin,
+		}},
+	}
+	if err := config.validateStructure(); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.ValidateRuntimeFiles(); err != nil {
+		t.Fatalf("valid direct TLS profile rejected: %v", err)
+	}
+
+	wrongPort := config
+	wrongPort.Listen = "0.0.0.0:8443"
+	if err := wrongPort.ValidateRuntimeFiles(); !errors.Is(err, ErrConfiguration) {
+		t.Fatalf("non-443 direct TLS listener accepted: %v", err)
+	}
+
+	explicitDefaultPort := config
+	explicitDefaultPort.Control.Origin = "https://control.rixa.test:443"
+	if err := explicitDefaultPort.ValidateRuntimeFiles(); !errors.Is(err, ErrConfiguration) {
+		t.Fatalf("non-canonical direct TLS origin accepted: %v", err)
+	}
+
+	loopback := config
+	loopback.Listen = "127.0.0.1:443"
+	if err := loopback.ValidateRuntimeFiles(); !errors.Is(err, ErrConfiguration) {
+		t.Fatalf("loopback direct TLS listener accepted: %v", err)
+	}
+}
+
+func TestDirectTLSHostingProfileRejectsCertificateWithoutEveryOrigin(t *testing.T) {
+	dir := t.TempDir()
+	root := filepath.Join(dir, "media")
+	if err := os.Mkdir(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cert, key, _ := writeTestCertificate(t, dir, []string{"control.rixa.test"})
+	config := Config{
+		HostingProfile:  HostingProfileDirectTLS,
+		Listen:          "192.0.2.10:443",
+		TLS:             TLSConfig{CertFile: cert, KeyFile: key},
+		Language:        "en",
+		StartupTimeout:  time.Second,
+		ShutdownTimeout: time.Second,
+		Control: ControlConfig{
+			Origin:         "https://control.rixa.test",
+			DatabaseEnv:    "RIXA_CONTROL",
+			AdminPrincipal: testControlAdmin,
+		},
+		Sites: []SiteConfig{{
+			ID:             "site",
+			Origin:         "https://site.rixa.test",
+			DatabaseEnv:    "RIXA_SITE",
+			MediaRoot:      root,
+			AdminPrincipal: testSiteAAdmin,
+		}},
+	}
+	if err := config.ValidateRuntimeFiles(); !errors.Is(err, ErrConfiguration) {
+		t.Fatalf("direct TLS certificate missing site SAN accepted: %v", err)
+	}
+}

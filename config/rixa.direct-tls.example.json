@@ -1,9 +1,9 @@
 {
-  "hosting_profile": "development",
-  "listen": "127.0.0.1:8443",
+  "hosting_profile": "direct_tls",
+  "listen": "0.0.0.0:443",
   "tls": {
-    "cert_file": "/etc/rixa/tls/dev.crt",
-    "key_file": "/etc/rixa/tls/dev.key"
+    "cert_file": "/etc/rixa/tls/fullchain.pem",
+    "key_file": "/etc/rixa/tls/privkey.pem"
   },
   "language": "en",
   "startup_timeout": "10s",
@@ -15,14 +15,14 @@
     "editorial_max_operations": 4
   },
   "control": {
-    "origin": "https://control.rixa.test:8443",
+    "origin": "https://control.example.com",
     "database_env": "RIXA_CONTROL_DSN",
     "admin_principal": ""
   },
   "sites": [
     {
       "id": "site-a",
-      "origin": "https://a.rixa.test:8443",
+      "origin": "https://www.example.com",
       "database_env": "RIXA_SITE_A_DSN",
       "media_root": "/var/lib/rixa/site-a/media",
       "public_root": "/var/lib/rixa/site-a/public",
@@ -31,21 +31,6 @@
         "snippet": "allow",
         "crawlers": [
           {"user_agent": "*", "access": "allow", "purpose": "search"}
-        ]
-      },
-      "admin_principal": ""
-    },
-    {
-      "id": "site-b",
-      "origin": "https://b.rixa.test:8443",
-      "database_env": "RIXA_SITE_B_DSN",
-      "media_root": "/var/lib/rixa/site-b/media",
-      "public_root": "/var/lib/rixa/site-b/public",
-      "public_policy": {
-        "indexing": "noindex",
-        "snippet": "none",
-        "crawlers": [
-          {"user_agent": "*", "access": "disallow", "purpose": "search"}
         ]
       },
       "admin_principal": ""

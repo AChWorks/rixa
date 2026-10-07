@@ -15,6 +15,7 @@ import (
 	"syscall"
 
 	"github.com/AChWorks/achrix"
+	"github.com/AChWorks/rixa/internal/installer"
 	"github.com/AChWorks/rixa/internal/product"
 )
 
@@ -27,12 +28,23 @@ func main() {
 
 func run(args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: rixa <migrate|bootstrap-admin|capture-site|restore-site|check|run|version>")
+		return errors.New("usage: rixa <install-preflight|migrate|bootstrap-admin|capture-site|restore-site|check|run|version>")
 	}
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	switch args[0] {
 	case "version":
 		return json.NewEncoder(os.Stdout).Encode(map[string]string{"rixa": product.Version, "achrix": achrix.Version()})
+	case "install-preflight":
+		fs := flag.NewFlagSet("install-preflight", flag.ContinueOnError)
+		jsonOutput := fs.Bool("json", false, "emit machine-readable JSON")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		assessment := installer.Assess()
+		if *jsonOutput {
+			return json.NewEncoder(os.Stdout).Encode(assessment)
+		}
+		return installer.WriteText(os.Stdout, assessment.Report)
 	case "migrate":
 		fs, configPath := commandFlags("migrate", args[1:])
 		if err := fs.Parse(args[1:]); err != nil {

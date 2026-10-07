@@ -64,6 +64,7 @@ Release builds embed their Rixa version while ordinary source/development builds
 | Composition, site isolation, publication and dependency upgrade | [Architecture](docs/architecture.md), [two-site contract](docs/two-site-contract.md) |
 | Outcome order and Foundation coordination | [Roadmap](docs/roadmap.md) |
 | Development, validation, integration and secrets | [Contributing](CONTRIBUTING.md), [AGENTS](AGENTS.md) |
+| Installation preflight, hosting profiles and installer ownership | [Installation foundation](docs/installation.md) |
 | Live work, dependencies, review, validation and delivery | [Issues](https://github.com/AChWorks/rixa/issues), [milestone](https://github.com/AChWorks/rixa/milestone/1), [PRs](https://github.com/AChWorks/rixa/pulls), Git/CI, Releases |
 | Product identity and discovery | [achworks.yaml](achworks.yaml) |
 | License | [MPL-2.0](LICENSE) |

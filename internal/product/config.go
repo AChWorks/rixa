@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,13 +22,18 @@ import (
 	"github.com/AChWorks/achrix"
 )
 
+const (
+	HostingProfileDevelopment = "development"
+	HostingProfileDirectTLS   = "direct_tls"
+)
+
 var (
 	ErrConfiguration = errors.New("invalid rixa configuration")
 	ErrUnavailable   = errors.New("rixa unavailable")
 
-	siteIDSyntax    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
-	envNameSyntax   = regexp.MustCompile(`^[A-Z][A-Z0-9_]{1,127}$`)
-	accountIDSyntax = regexp.MustCompile(`^[A-Z2-7]{26}$`)
+	siteIDSyntax        = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
+	envNameSyntax       = regexp.MustCompile(`^[A-Z][A-Z0-9_]{1,127}$`)
+	accountIDSyntax     = regexp.MustCompile(`^[A-Z2-7]{26}$`)
 	publicCrawlerSyntax = regexp.MustCompile(`^[A-Za-z0-9*][A-Za-z0-9._*:/-]{0,127}$`)
 )
 
@@ -121,21 +127,23 @@ type SiteConfig struct {
 }
 
 type Config struct {
-	Listen          string        `json:"listen"`
-	TLS             TLSConfig     `json:"tls"`
-	Language        string        `json:"language,omitempty"`
-	StartupTimeout  time.Duration `json:"-"`
-	ShutdownTimeout time.Duration `json:"-"`
+	HostingProfile  string         `json:"hosting_profile,omitempty"`
+	Listen          string         `json:"listen"`
+	TLS             TLSConfig      `json:"tls"`
+	Language        string         `json:"language,omitempty"`
+	StartupTimeout  time.Duration  `json:"-"`
+	ShutdownTimeout time.Duration  `json:"-"`
 	Resources       ResourceConfig `json:"resources,omitempty"`
-	Control         ControlConfig `json:"control"`
-	Sites           []SiteConfig  `json:"sites"`
+	Control         ControlConfig  `json:"control"`
+	Sites           []SiteConfig   `json:"sites"`
 }
 
 type fileConfig struct {
-	Listen          string        `json:"listen"`
-	TLS             TLSConfig     `json:"tls"`
-	Language        string        `json:"language,omitempty"`
-	StartupTimeout  string        `json:"startup_timeout,omitempty"`
+	HostingProfile  string         `json:"hosting_profile,omitempty"`
+	Listen          string         `json:"listen"`
+	TLS             TLSConfig      `json:"tls"`
+	Language        string         `json:"language,omitempty"`
+	StartupTimeout  string         `json:"startup_timeout,omitempty"`
 	ShutdownTimeout string         `json:"shutdown_timeout,omitempty"`
 	Resources       ResourceConfig `json:"resources,omitempty"`
 	Control         ControlConfig  `json:"control"`
@@ -190,7 +198,11 @@ func LoadConfig(path string) (Config, error) {
 	if raw.Language == "" {
 		raw.Language = "en"
 	}
+	if raw.HostingProfile == "" {
+		raw.HostingProfile = HostingProfileDevelopment
+	}
 	c := Config{
+		HostingProfile:  raw.HostingProfile,
 		Listen:          raw.Listen,
 		TLS:             raw.TLS,
 		Language:        raw.Language,
@@ -227,6 +239,10 @@ func boundedDuration(value string, fallback time.Duration) (time.Duration, error
 }
 
 func (c Config) validateStructure() error {
+	profile := c.hostingProfile()
+	if profile != HostingProfileDevelopment && profile != HostingProfileDirectTLS {
+		return fmt.Errorf("%w: hosting profile", ErrConfiguration)
+	}
 	if err := c.Resources.validate(); err != nil {
 		return fmt.Errorf("%w: resources", ErrConfiguration)
 	}
@@ -309,9 +325,24 @@ func originAuthority(raw string) (string, error) {
 }
 
 func (c Config) ValidateRuntimeFiles() error {
-	host, _, err := net.SplitHostPort(c.Listen)
-	if err != nil || !loopbackHost(host) {
-		return fmt.Errorf("%w: development listener must be explicit loopback host:port", ErrConfiguration)
+	host, port, err := net.SplitHostPort(c.Listen)
+	if err != nil || host == "" || port == "" {
+		return fmt.Errorf("%w: listener must be explicit host:port", ErrConfiguration)
+	}
+	switch c.hostingProfile() {
+	case HostingProfileDevelopment:
+		if !loopbackHost(host) {
+			return fmt.Errorf("%w: development listener must be explicit loopback host:port", ErrConfiguration)
+		}
+	case HostingProfileDirectTLS:
+		if ip := net.ParseIP(host); ip == nil || ip.IsLoopback() {
+			return fmt.Errorf("%w: direct TLS listener must be an explicit non-loopback IP host:port", ErrConfiguration)
+		}
+		if err := validateDirectTLSOrigins(c, port); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("%w: hosting profile", ErrConfiguration)
 	}
 	if !filepath.IsAbs(c.TLS.CertFile) || !filepath.IsAbs(c.TLS.KeyFile) || c.TLS.CertFile == c.TLS.KeyFile {
 		return fmt.Errorf("%w: TLS file paths", ErrConfiguration)
@@ -326,8 +357,14 @@ func (c Config) ValidateRuntimeFiles() error {
 	if err != nil || keyInfo.Mode().Perm()&0o077 != 0 {
 		return fmt.Errorf("%w: TLS private key permissions", ErrConfiguration)
 	}
-	if _, err = tls.LoadX509KeyPair(c.TLS.CertFile, c.TLS.KeyFile); err != nil {
+	pair, err := tls.LoadX509KeyPair(c.TLS.CertFile, c.TLS.KeyFile)
+	if err != nil {
 		return fmt.Errorf("%w: TLS certificate/key pair", ErrConfiguration)
+	}
+	if c.hostingProfile() == HostingProfileDirectTLS {
+		if err := validateDirectTLSCertificate(c, pair); err != nil {
+			return err
+		}
 	}
 	if !accountIDSyntax.MatchString(c.Control.AdminPrincipal) {
 		return fmt.Errorf("%w: control admin principal required", ErrConfiguration)
@@ -343,6 +380,72 @@ func (c Config) ValidateRuntimeFiles() error {
 	}
 	if active == 0 {
 		return fmt.Errorf("%w: at least one enabled site required", ErrConfiguration)
+	}
+	return nil
+}
+
+func (c Config) hostingProfile() string {
+	if c.HostingProfile == "" {
+		return HostingProfileDevelopment
+	}
+	return c.HostingProfile
+}
+
+func validateDirectTLSOrigins(c Config, listenPort string) error {
+	check := func(raw string) error {
+		u, err := url.Parse(raw)
+		if err != nil || u == nil {
+			return ErrConfiguration
+		}
+		if listenPort == "443" {
+			if u.Port() != "" {
+				return ErrConfiguration
+			}
+			return nil
+		}
+		if u.Port() != listenPort {
+			return ErrConfiguration
+		}
+		return nil
+	}
+	if err := check(c.Control.Origin); err != nil {
+		return fmt.Errorf("%w: direct TLS control origin must match listener port", ErrConfiguration)
+	}
+	for _, site := range c.Sites {
+		if site.Disabled {
+			continue
+		}
+		if err := check(site.Origin); err != nil {
+			return fmt.Errorf("%w: direct TLS site origin must match listener port", ErrConfiguration)
+		}
+	}
+	return nil
+}
+
+func validateDirectTLSCertificate(c Config, pair tls.Certificate) error {
+	if len(pair.Certificate) == 0 {
+		return fmt.Errorf("%w: direct TLS certificate leaf", ErrConfiguration)
+	}
+	leaf, err := x509.ParseCertificate(pair.Certificate[0])
+	if err != nil {
+		return fmt.Errorf("%w: direct TLS certificate leaf", ErrConfiguration)
+	}
+	now := time.Now()
+	if now.Before(leaf.NotBefore) || !now.Before(leaf.NotAfter) {
+		return fmt.Errorf("%w: direct TLS certificate validity", ErrConfiguration)
+	}
+	_, controlHost, _ := originParts(c.Control.Origin)
+	if err := leaf.VerifyHostname(controlHost); err != nil {
+		return fmt.Errorf("%w: direct TLS certificate control hostname", ErrConfiguration)
+	}
+	for _, site := range c.Sites {
+		if site.Disabled {
+			continue
+		}
+		_, hostname, _ := originParts(site.Origin)
+		if err := leaf.VerifyHostname(hostname); err != nil {
+			return fmt.Errorf("%w: direct TLS certificate site hostname", ErrConfiguration)
+		}
 	}
 	return nil
 }
