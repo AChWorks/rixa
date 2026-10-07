@@ -10,10 +10,11 @@ The initial package target is Linux amd64 and contains:
 - `.env.example` — secret-name/value examples only;
 - `config/rixa.example.json` — development-profile configuration example;
 - `BUILDINFO.json` — Rixa version, pinned AChrix version, source commit, Go toolchain and target;
+- `THIRD_PARTY_MODULES.txt` plus `licenses/` — the packaged Go dependency inventory and discovered root license/notice files;
 - `LICENSE`;
 - `INSTALL.md` — this guide.
 
-PostgreSQL, TLS certificates/keys and operator secrets are deployment inputs and are not bundled. Site transfer additionally requires compatible maintained PostgreSQL `pg_dump`/`pg_restore` tooling as documented in [site-transfer.md](site-transfer.md).
+PostgreSQL, TLS certificates/keys and operator secrets are deployment inputs and are not bundled. Site transfer additionally requires compatible maintained PostgreSQL `pg_dump`/`pg_restore` tooling; consult `docs/site-transfer.md` in the source tree for the exact release tag when using that development-profile feature.
 
 The current runtime is deliberately loopback-only. Use it as the proven development profile; do not infer public exposure or production support from the existence of a release asset.
 

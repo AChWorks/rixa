@@ -34,6 +34,10 @@ if ! git diff --quiet || ! git diff --cached --quiet; then
   echo "release packaging requires a clean tracked working tree" >&2
   exit 1
 fi
+if [[ "$(git rev-parse HEAD)" != "$source_commit" ]]; then
+  echo "source commit does not match checked-out HEAD" >&2
+  exit 1
+fi
 
 expected_achrix="$(awk '/^[[:space:]]*sourceVersion:/ {print $2; exit}' achworks.yaml)"
 actual_achrix="$(GOWORK=off go list -m -f '{{.Version}}' github.com/AChWorks/achrix)"
@@ -57,7 +61,7 @@ rm -f "$archive" "$checksum"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 root="$tmp/$base"
-mkdir -p "$root/config"
+mkdir -p "$root/config" "$root/licenses"
 
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOWORK=off \
   go build -trimpath -buildvcs=false \
@@ -79,7 +83,41 @@ cat > "$root/BUILDINFO.json" <<EOF
 }
 EOF
 chmod 0644 "$root/BUILDINFO.json"
-chmod 0755 "$root/rixa" "$root" "$root/config"
+
+GOWORK=off go mod download all
+module_manifest="$tmp/third-party-modules.unsorted"
+: > "$module_manifest"
+while IFS=$'\t' read -r module module_version module_dir; do
+  [[ -n "$module" && -n "$module_version" && -n "$module_dir" ]] || continue
+  [[ "$module" != "github.com/AChWorks/rixa" ]] || continue
+
+  digest="$(printf '%s@%s' "$module" "$module_version" | sha256sum | awk '{print substr($1,1,16)}')"
+  license_id="dep-$digest"
+  license_dir="$root/licenses/$license_id"
+  mkdir -p "$license_dir"
+
+  found=0
+  while IFS= read -r -d '' license_file; do
+    install -m 0644 "$license_file" "$license_dir/$(basename "$license_file")"
+    found=1
+  done < <(find "$module_dir" -maxdepth 1 -type f \( -iname 'LICENSE*' -o -iname 'COPYING*' -o -iname 'NOTICE*' \) -print0)
+
+  if [[ "$found" -ne 1 ]]; then
+    echo "dependency has no discoverable root license/notice file: $module $module_version" >&2
+    exit 1
+  fi
+
+  printf '%s\t%s\t%s\n' "$module" "$module_version" "$license_id" >> "$module_manifest"
+done < <(GOWORK=off go list -m -f '{{if and .Dir .Version}}{{.Path}}{{"\t"}}{{.Version}}{{"\t"}}{{.Dir}}{{end}}' all)
+
+if [[ ! -s "$module_manifest" ]]; then
+  echo "third-party module inventory is unexpectedly empty" >&2
+  exit 1
+fi
+LC_ALL=C sort "$module_manifest" > "$root/THIRD_PARTY_MODULES.txt"
+chmod 0644 "$root/THIRD_PARTY_MODULES.txt"
+chmod 0755 "$root/rixa" "$root" "$root/config" "$root/licenses"
+find "$root/licenses" -mindepth 1 -maxdepth 1 -type d -exec chmod 0755 {} +
 
 LC_ALL=C tar \
   --sort=name \
