@@ -54,11 +54,11 @@ type Report struct {
 }
 
 type ProvisioningSupport struct {
-	PostgreSQL           bool
-	SystemdService       bool
-	PrivateStorage       bool
-	DirectTLSIngress     bool
-	PublicTLSCertificate bool
+	PersistentService    string
+	PostgreSQL           string
+	PrivateStorage       string
+	HTTPSIngress         string
+	PublicTLSCertificate string
 }
 
 type Environment struct {
@@ -148,7 +148,7 @@ func Evaluate(env Environment, support ProvisioningSupport) Report {
 	packageName, packageSupported := packageManager(env)
 	switch {
 	case packageName != "" && packageSupported:
-		report.add("host.package-manager", false, StateAvailable, packageName, "Supported Debian-family package management is available.")
+		report.add("host.package-manager", false, StateAvailable, packageName, "Debian-family package management was detected; adapter support is declared separately.")
 	case packageName != "":
 		report.add("host.package-manager", false, StateOperatorRequired, packageName, "A package manager is present, but automated provisioning for this distribution is not yet a supported Rixa path.")
 	default:
@@ -157,20 +157,20 @@ func Evaluate(env Environment, support ProvisioningSupport) Report {
 
 	if env.PersistentServiceReady {
 		report.add("service.persistence", true, StateAvailable, "existing", "A persistent restartable Rixa service has already been verified.")
-	} else if env.Systemd && env.EUID == 0 && support.SystemdService {
-		report.add("service.persistence", true, StateProvisionable, "systemd", "The selected installer adapter can create and verify a persistent Rixa systemd service.")
+	} else if support.PersistentService != "" {
+		report.add("service.persistence", true, StateProvisionable, support.PersistentService, "The selected installer adapter declares a supported mechanism to create and verify a persistent Rixa service.")
 	} else {
 		detail := "Provide a persistent restartable Rixa process through the hosting environment."
 		if env.Systemd {
-			detail = "systemd is present, but this installer surface cannot create the Rixa service; use a supported privileged installer adapter or have the operator provide it."
+			detail = "systemd is present, but this installer surface has not declared a supported Rixa service adapter; use a suitable installer adapter or have the operator provide the service."
 		}
 		report.add("service.persistence", true, StateOperatorRequired, "", detail)
 	}
 
 	if env.PostgreSQLReady {
 		report.add("database.postgresql", true, StateAvailable, "existing", "The selected PostgreSQL endpoint and credentials have been verified for this installation.")
-	} else if env.EUID == 0 && packageSupported && support.PostgreSQL {
-		report.add("database.postgresql", true, StateProvisionable, packageName, "The selected installer adapter can provision and verify PostgreSQL, or reuse a supplied compatible endpoint.")
+	} else if support.PostgreSQL != "" {
+		report.add("database.postgresql", true, StateProvisionable, support.PostgreSQL, "The selected installer adapter declares a supported mechanism to provision and verify PostgreSQL, or reuse a supplied compatible endpoint.")
 	} else {
 		detail := "Provide a compatible reachable PostgreSQL database/credentials or use a supported privileged installer path that can provision it."
 		if env.Commands["psql"] != "" && env.Commands["pg_isready"] != "" {
@@ -181,22 +181,24 @@ func Evaluate(env Environment, support ProvisioningSupport) Report {
 
 	if env.PrivateStorageReady {
 		report.add("storage.private", true, StateAvailable, "existing", "Protected non-public Rixa configuration, secret and data roots have been verified.")
-	} else if env.EUID == 0 && support.PrivateStorage {
-		report.add("storage.private", true, StateProvisionable, "filesystem", "The selected installer adapter can provision and verify protected Rixa configuration, secret and data roots.")
+	} else if support.PrivateStorage != "" {
+		report.add("storage.private", true, StateProvisionable, support.PrivateStorage, "The selected installer adapter declares a supported mechanism to provision and verify protected Rixa configuration, secret and data roots.")
 	} else {
 		report.add("storage.private", true, StateOperatorRequired, "", "Provide private non-public configuration/data paths with suitable ownership and permissions; the current installer cannot create them automatically here.")
 	}
 
 	if env.HTTPSIngressReady {
 		report.add("ingress.https", true, StateAvailable, "existing", "A supported public HTTPS ingress path to Rixa has been verified.")
+	} else if support.HTTPSIngress != "" {
+		detail := "The selected installer adapter declares a supported mechanism to configure and verify public HTTPS ingress."
+		if env.HTTPSPort == PortInUse {
+			detail = "TCP/443 already has a listener; the selected adapter declares a supported mechanism to integrate with and verify that existing ingress without blindly replacing it."
+		}
+		report.add("ingress.https", true, StateProvisionable, support.HTTPSIngress, detail)
 	} else {
 		switch env.HTTPSPort {
 		case PortFree:
-			if env.EUID == 0 && support.DirectTLSIngress {
-				report.add("ingress.https", true, StateProvisionable, "direct-tls", "TCP/443 is free and the selected installer adapter can configure Rixa direct TLS without replacing an existing listener.")
-			} else {
-				report.add("ingress.https", true, StateOperatorRequired, "", "TCP/443 is free, but this installer surface cannot currently configure the supported direct-TLS service binding.")
-			}
+			report.add("ingress.https", true, StateOperatorRequired, "", "TCP/443 is free, but this installer surface has not declared a supported ingress adapter.")
 		case PortInUse:
 			report.add("ingress.https", true, StateOperatorRequired, "existing-listener", "TCP/443 already has a listener. Preserve it; a separately supported panel/front-proxy integration is required instead of overwriting it.")
 		default:
@@ -206,8 +208,8 @@ func Evaluate(env Environment, support ProvisioningSupport) Report {
 
 	if env.PublicTLSReady {
 		report.add("tls.public-certificate", true, StateAvailable, "existing", "Certificate/key material for every configured public hostname has been verified.")
-	} else if support.PublicTLSCertificate && env.EUID == 0 {
-		report.add("tls.public-certificate", true, StateProvisionable, "acme", "The selected installer adapter can provision and verify a public certificate after validated domain/DNS input.")
+	} else if support.PublicTLSCertificate != "" {
+		report.add("tls.public-certificate", true, StateProvisionable, support.PublicTLSCertificate, "The selected installer adapter declares a supported mechanism to provision and verify certificate material after validated domain/DNS input.")
 	} else {
 		report.add("tls.public-certificate", true, StateOperatorRequired, "", "Provide validated domain/certificate material or use a supported installer adapter that provisions it; preflight never fabricates or weakens TLS.")
 	}

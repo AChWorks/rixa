@@ -40,6 +40,9 @@ func run(args []string) error {
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
+		if fs.NArg() != 0 {
+			return errors.New("install-preflight accepts no positional arguments")
+		}
 		assessment := installer.Assess()
 		if *jsonOutput {
 			return json.NewEncoder(os.Stdout).Encode(assessment)

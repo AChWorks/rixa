@@ -268,7 +268,7 @@ func TestDirectTLSHostingProfileValidatesCanonicalPublicBoundary(t *testing.T) {
 	wrongPort := config
 	wrongPort.Listen = "0.0.0.0:8443"
 	if err := wrongPort.ValidateRuntimeFiles(); !errors.Is(err, ErrConfiguration) {
-		t.Fatalf("non-443 direct TLS listener accepted: %v", err)
+		t.Fatalf("direct TLS listener/origin port mismatch accepted: %v", err)
 	}
 
 	explicitDefaultPort := config
@@ -281,6 +281,18 @@ func TestDirectTLSHostingProfileValidatesCanonicalPublicBoundary(t *testing.T) {
 	loopback.Listen = "127.0.0.1:443"
 	if err := loopback.ValidateRuntimeFiles(); !errors.Is(err, ErrConfiguration) {
 		t.Fatalf("loopback direct TLS listener accepted: %v", err)
+	}
+
+	multicast := config
+	multicast.Listen = "224.0.0.1:443"
+	if err := multicast.ValidateRuntimeFiles(); !errors.Is(err, ErrConfiguration) {
+		t.Fatalf("multicast direct TLS listener accepted: %v", err)
+	}
+
+	invalidPort := config
+	invalidPort.Listen = "0.0.0.0:0"
+	if err := invalidPort.ValidateRuntimeFiles(); !errors.Is(err, ErrConfiguration) {
+		t.Fatalf("invalid listener port accepted: %v", err)
 	}
 }
 
@@ -313,5 +325,29 @@ func TestDirectTLSHostingProfileRejectsCertificateWithoutEveryOrigin(t *testing.
 	}
 	if err := config.ValidateRuntimeFiles(); !errors.Is(err, ErrConfiguration) {
 		t.Fatalf("direct TLS certificate missing site SAN accepted: %v", err)
+	}
+}
+
+func TestLoadConfigDefaultsHostingProfileAndRejectsUnknownProfile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "rixa.json")
+	base := `{"listen":"127.0.0.1:8443","tls":{"cert_file":"/tmp/cert","key_file":"/tmp/key"},"control":{"origin":"https://control.test:8443","database_env":"RIXA_CONTROL"},"sites":[{"id":"a","origin":"https://a.test:8443","database_env":"RIXA_A","media_root":"/tmp/a"}]}`
+	if err := os.WriteFile(path, []byte(base), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	config, err := LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.HostingProfile != HostingProfileDevelopment {
+		t.Fatalf("default hosting profile=%q", config.HostingProfile)
+	}
+
+	invalid := `{"hosting_profile":"proxy_magic","listen":"127.0.0.1:8443","tls":{"cert_file":"/tmp/cert","key_file":"/tmp/key"},"control":{"origin":"https://control.test:8443","database_env":"RIXA_CONTROL"},"sites":[{"id":"a","origin":"https://a.test:8443","database_env":"RIXA_A","media_root":"/tmp/a"}]}`
+	if err := os.WriteFile(path, []byte(invalid), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadConfig(path); !errors.Is(err, ErrConfiguration) {
+		t.Fatalf("unknown hosting profile accepted: %v", err)
 	}
 }

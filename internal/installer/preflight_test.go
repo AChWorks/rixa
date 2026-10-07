@@ -22,7 +22,7 @@ func TestEvaluatePrivilegedDebianServer(t *testing.T) {
 		Systemd:   true,
 		HTTPSPort: PortFree,
 	}
-	report := Evaluate(env, ProvisioningSupport{DirectTLSIngress: true})
+	report := Evaluate(env, ProvisioningSupport{HTTPSIngress: "direct-tls"})
 	assertCapability(t, report, "runtime.platform", StateAvailable)
 	assertCapability(t, report, "host.privilege", StateAvailable)
 	assertCapability(t, report, "host.package-manager", StateAvailable)

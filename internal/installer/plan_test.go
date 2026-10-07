@@ -31,10 +31,10 @@ func TestBuildPlanUsesOnlyExplicitAdapterSupport(t *testing.T) {
 		Systemd:      true,
 		HTTPSPort:    PortFree,
 	}, ProvisioningSupport{
-		PostgreSQL:       true,
-		SystemdService:   true,
-		PrivateStorage:   true,
-		DirectTLSIngress: true,
+		PostgreSQL:        "apt-postgresql",
+		PersistentService: "systemd",
+		PrivateStorage:    "filesystem",
+		HTTPSIngress:      "direct-tls",
 	})
 	plan := BuildPlan(report)
 	want := map[string]bool{
@@ -85,5 +85,30 @@ func TestBuildPlanAllowsConstrainedHostWhenRequiredCapabilitiesAreAlreadyReady(t
 	}
 	if len(plan.Actions) != 0 || len(plan.Requirements) != 0 {
 		t.Fatalf("ready constrained host produced work: actions=%#v requirements=%#v", plan.Actions, plan.Requirements)
+	}
+}
+
+func TestBuildPlanRejectsMalformedAdapterEvidence(t *testing.T) {
+	for name, capability := range map[string]Capability{
+		"unknown-state":    {ID: "database.postgresql", Required: true, State: CapabilityState("mystery")},
+		"missing-provider": {ID: "database.postgresql", Required: true, State: StateProvisionable},
+		"invalid-id":       {ID: "database postgresql", Required: true, State: StateAvailable},
+	} {
+		t.Run(name, func(t *testing.T) {
+			plan := BuildPlan(Report{Capabilities: []Capability{capability}})
+			if plan.Status != PlanUnsupported || len(plan.Requirements) != 1 {
+				t.Fatalf("malformed evidence did not fail closed: %#v", plan)
+			}
+		})
+	}
+}
+
+func TestBuildPlanRejectsDuplicateRequiredEvidence(t *testing.T) {
+	plan := BuildPlan(Report{Capabilities: []Capability{
+		{ID: "storage.private", Required: true, State: StateAvailable},
+		{ID: "storage.private", Required: true, State: StateAvailable},
+	}})
+	if plan.Status != PlanUnsupported || len(plan.Requirements) != 1 {
+		t.Fatalf("duplicate required evidence did not fail closed: %#v", plan)
 	}
 }

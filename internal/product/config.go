@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -329,14 +330,19 @@ func (c Config) ValidateRuntimeFiles() error {
 	if err != nil || host == "" || port == "" {
 		return fmt.Errorf("%w: listener must be explicit host:port", ErrConfiguration)
 	}
+	portNumber, err := strconv.Atoi(port)
+	if err != nil || portNumber < 1 || portNumber > 65535 || strconv.Itoa(portNumber) != port {
+		return fmt.Errorf("%w: listener port", ErrConfiguration)
+	}
 	switch c.hostingProfile() {
 	case HostingProfileDevelopment:
 		if !loopbackHost(host) {
 			return fmt.Errorf("%w: development listener must be explicit loopback host:port", ErrConfiguration)
 		}
 	case HostingProfileDirectTLS:
-		if ip := net.ParseIP(host); ip == nil || ip.IsLoopback() {
-			return fmt.Errorf("%w: direct TLS listener must be an explicit non-loopback IP host:port", ErrConfiguration)
+		ip := net.ParseIP(host)
+		if ip == nil || ip.IsLoopback() || ip.IsMulticast() || (!ip.IsUnspecified() && !ip.IsGlobalUnicast()) {
+			return fmt.Errorf("%w: direct TLS listener must be an explicit non-loopback unicast or wildcard IP host:port", ErrConfiguration)
 		}
 		if err := validateDirectTLSOrigins(c, port); err != nil {
 			return err
