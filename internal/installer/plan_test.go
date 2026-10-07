@@ -93,10 +93,11 @@ func TestBuildPlanRejectsMalformedAdapterEvidence(t *testing.T) {
 		"unknown-state":    {ID: "database.postgresql", Required: true, State: CapabilityState("mystery")},
 		"missing-provider": {ID: "database.postgresql", Required: true, State: StateProvisionable},
 		"invalid-id":       {ID: "database postgresql", Required: true, State: StateAvailable},
+		"unknown-required": {ID: "runtime.mystery", Required: true, State: StateAvailable},
 	} {
 		t.Run(name, func(t *testing.T) {
 			plan := BuildPlan(Report{Capabilities: []Capability{capability}})
-			if plan.Status != PlanUnsupported || len(plan.Requirements) != 1 {
+			if plan.Status != PlanUnsupported || len(plan.Requirements) == 0 {
 				t.Fatalf("malformed evidence did not fail closed: %#v", plan)
 			}
 		})
@@ -108,7 +109,7 @@ func TestBuildPlanRejectsDuplicateRequiredEvidence(t *testing.T) {
 		{ID: "storage.private", Required: true, State: StateAvailable},
 		{ID: "storage.private", Required: true, State: StateAvailable},
 	}})
-	if plan.Status != PlanUnsupported || len(plan.Requirements) != 1 {
+	if plan.Status != PlanUnsupported || len(plan.Requirements) == 0 {
 		t.Fatalf("duplicate required evidence did not fail closed: %#v", plan)
 	}
 }
@@ -135,5 +136,36 @@ func TestPanelAdapterCanProvisionWithoutRootWhenItExplicitlyOwnsMechanisms(t *te
 	}
 	if len(plan.Requirements) != 0 {
 		t.Fatalf("panel adapter retained requirements: %#v", plan.Requirements)
+	}
+}
+
+func TestBuildPlanRejectsMissingCanonicalRequirement(t *testing.T) {
+	report := Evaluate(Environment{
+		OS: "linux", Arch: "amd64", EUID: 1000,
+		PersistentServiceReady: true,
+		PostgreSQLReady:        true,
+		PrivateStorageReady:    true,
+		HTTPSIngressReady:      true,
+		PublicTLSReady:         true,
+	}, ProvisioningSupport{})
+	filtered := report.Capabilities[:0]
+	for _, capability := range report.Capabilities {
+		if capability.ID != "database.postgresql" {
+			filtered = append(filtered, capability)
+		}
+	}
+	report.Capabilities = filtered
+	plan := BuildPlan(report)
+	if plan.Status != PlanUnsupported {
+		t.Fatalf("missing canonical requirement did not fail closed: %#v", plan)
+	}
+	found := false
+	for _, requirement := range plan.Requirements {
+		if requirement.ID == "database.postgresql" && requirement.State == StateUnsupported {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("missing requirement was not identified: %#v", plan.Requirements)
 	}
 }

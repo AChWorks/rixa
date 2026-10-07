@@ -18,6 +18,15 @@ const (
 
 var planIdentifierSyntax = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,127}$`)
 
+var requiredCapabilityIDs = []string{
+	"runtime.platform",
+	"service.persistence",
+	"database.postgresql",
+	"storage.private",
+	"ingress.https",
+	"tls.public-certificate",
+}
+
 type PlanAction struct {
 	ID         string `json:"id"`
 	Capability string `json:"capability"`
@@ -46,6 +55,10 @@ func Assess() Assessment {
 // Malformed/duplicate required capability evidence fails closed.
 func BuildPlan(report Report) Plan {
 	plan := Plan{Status: PlanReady}
+	expected := make(map[string]struct{}, len(requiredCapabilityIDs))
+	for _, id := range requiredCapabilityIDs {
+		expected[id] = struct{}{}
+	}
 	seen := make(map[string]struct{}, len(report.Capabilities))
 	for _, capability := range report.Capabilities {
 		if !capability.Required {
@@ -53,6 +66,10 @@ func BuildPlan(report Report) Plan {
 		}
 		if !planIdentifierSyntax.MatchString(capability.ID) {
 			plan.reject(capability, "invalid required capability identifier")
+			continue
+		}
+		if _, known := expected[capability.ID]; !known {
+			plan.reject(capability, "unknown required capability identifier")
 			continue
 		}
 		if _, duplicate := seen[capability.ID]; duplicate {
@@ -84,6 +101,12 @@ func BuildPlan(report Report) Plan {
 		default:
 			plan.reject(capability, "unknown required capability state")
 		}
+	}
+	for _, id := range requiredCapabilityIDs {
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		plan.reject(Capability{ID: id, Required: true}, "missing required capability evidence")
 	}
 	sort.Slice(plan.Actions, func(i, j int) bool { return plan.Actions[i].ID < plan.Actions[j].ID })
 	sort.Slice(plan.Requirements, func(i, j int) bool { return plan.Requirements[i].ID < plan.Requirements[j].ID })
