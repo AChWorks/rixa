@@ -83,7 +83,19 @@ To extend, use public interfaces/typed collaborators. Keep content/theme/product
 
 An update reviews the exact released target and relevant API/dependency/schema changes, adapts only affected product code, rebuilds/tests a coherent artifact and stages explicit migrations/activation under the supported lifecycle profile. Product source/configuration is not replaced by a dependency update. Published compatibility commitments remain immutable; breaking Foundation changes follow the Foundation lifecycle/versioning policy.
 
-The desired later simple in-product install/update experience remains separately gated by real deployment/recovery evidence. This architecture supplies no updater, build service, registry or generic host control by implication.
+## Installation and hosting boundary
+
+Installation is a deployment concern outside normal Rixa request authorization and must not leak host/root authority into AChrix Core or site capabilities. One shared installer domain owns environment discovery, planning, provisioning, configuration, migration/bootstrap orchestration, readiness and recoverable partial-failure semantics for every install surface.
+
+Preflight classifies each mandatory capability as already available, safely provisionable by the installer, operator/provider-required, or unsupported. On a privileged supported server the installer may provision missing dependencies through validated OS/service mechanisms. On constrained hosting it performs no privilege bypass; it returns the exact requirements the operator or hosting provider must supply.
+
+Control-panel adapters reuse this installer domain and only integrate through supported panel/host mechanisms. Detection of aaPanel, Plesk, DirectAdmin, cPanel or another panel is contextual evidence, not proof that the account can run a persistent Go service, obtain PostgreSQL, store secrets privately, or receive safe reverse-proxy/TLS ingress. Existing compatible panel-managed services should be reused rather than replaced.
+
+The target user experience includes a one-line server/VPS bootstrap and panel-assisted upload/terminal/web setup where the validated environment permits it. A browser setup wizard may collect installation inputs only after the environment can actually host the persistent Rixa runtime; it is not a workaround for an incompatible shared-hosting model.
+
+Install and update remain separate concerns. A simple installer does not imply a generic in-product updater, build service, registry, destructive recovery mechanism or unrestricted host-control subsystem. Future update work must preserve the separately proven dependency/data compatibility boundaries.
+
+
 
 ## Portable site capture and controlled restore
 
