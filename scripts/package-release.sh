@@ -84,10 +84,67 @@ cat > "$root/BUILDINFO.json" <<EOF
 EOF
 chmod 0644 "$root/BUILDINFO.json"
 
-GOWORK=off go mod download all
+used_modules="$tmp/used-modules"
+GOWORK=off go list -deps -f '{{with .Module}}{{if and .Path .Version .Dir}}{{.Path}}{{"\t"}}{{.Version}}{{"\t"}}{{.Dir}}{{end}}{{end}}' ./cmd/rixa | LC_ALL=C sort -u > "$used_modules"
+
 module_manifest="$tmp/third-party-modules.unsorted"
 : > "$module_manifest"
-while IFS=$'\t' read -r module module_version module_dir; do
+while IFS=
+  [[ -n "$module" && -n "$module_version" && -n "$module_dir" ]] || continue
+  [[ "$module" != "github.com/AChWorks/rixa" ]] || continue
+
+  digest="$(printf '%s@%s' "$module" "$module_version" | sha256sum | awk '{print substr($1,1,16)}')"
+  license_id="dep-$digest"
+  license_dir="$root/licenses/$license_id"
+  mkdir -p "$license_dir"
+
+  found=0
+  while IFS= read -r -d '' license_file; do
+    install -m 0644 "$license_file" "$license_dir/$(basename "$license_file")"
+    found=1
+  done < <(find "$module_dir" -maxdepth 1 -type f \( -iname 'LICENSE*' -o -iname 'COPYING*' -o -iname 'NOTICE*' \) -print0)
+
+  if [[ "$found" -ne 1 ]]; then
+    echo "dependency has no discoverable root license/notice file: $module $module_version" >&2
+    exit 1
+  fi
+
+  printf '%s\t%s\t%s\n' "$module" "$module_version" "$license_id" >> "$module_manifest"
+done < "$used_modules"
+
+if [[ ! -s "$module_manifest" ]]; then
+  echo "third-party module inventory is unexpectedly empty" >&2
+  exit 1
+fi
+LC_ALL=C sort "$module_manifest" > "$root/THIRD_PARTY_MODULES.txt"
+chmod 0644 "$root/THIRD_PARTY_MODULES.txt"
+chmod 0755 "$root/rixa" "$root" "$root/config" "$root/licenses"
+find "$root/licenses" -mindepth 1 -maxdepth 1 -type d -exec chmod 0755 {} +
+
+if ! git diff --quiet || ! git diff --cached --quiet; then
+  echo "release packaging modified tracked source files" >&2
+  git status --short >&2
+  exit 1
+fi
+
+LC_ALL=C tar \
+  --sort=name \
+  --mtime='@0' \
+  --owner=0 --group=0 --numeric-owner \
+  --format=gnu \
+  -cf - -C "$tmp" "$base" | gzip -n > "$archive"
+
+(
+  cd "$output_dir"
+  sha256sum "${base}.tar.gz" > "${base}.tar.gz.sha256"
+)
+
+echo "package=$archive"
+echo "checksum=$checksum"
+echo "rixa=$version"
+echo "achrix=$actual_achrix"
+echo "source_commit=$source_commit"
+\t' read -r module module_version module_dir; do
   [[ -n "$module" && -n "$module_version" && -n "$module_dir" ]] || continue
   [[ "$module" != "github.com/AChWorks/rixa" ]] || continue
 
