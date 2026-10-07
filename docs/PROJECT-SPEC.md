@@ -20,6 +20,18 @@ Users are the infrastructure administrator managing declared sites, independent 
 
 [The milestone](https://github.com/AChWorks/rixa/milestone/1) groups implementation acceptance. A versioned development prerelease may package exactly the already-proven development profile without creating a production-support promise. Production installation/distribution, hosting support and production release readiness require executable evidence and a separately authorized delivery profile.
 
+## Installation and onboarding direction
+
+The supported product must ultimately provide simple installation paths rather than requiring operators to reproduce low-level runtime commands manually. All install surfaces share one capability-driven preflight and provisioning model.
+
+A privileged VPS/server path may install and configure missing dependencies only when the host grants the required authority and the mechanism is explicitly supported and verifiable. A constrained/shared-hosting or control-panel path must instead report exactly which capabilities are missing or must be enabled by the hosting administrator; it must never bypass provider policy or pretend that a generic web-root/PHP account can host the persistent Rixa service.
+
+Direct server installation and control-panel-assisted installation are distinct user experiences over the same installer core. aaPanel is the first concrete panel validation target; Plesk, DirectAdmin and cPanel support is claimed only for configurations that actually provide the required persistent process, PostgreSQL, private secret/data storage, public ingress and TLS capabilities. Panel identity alone is not compatibility evidence.
+
+A supported install should finish by validating migrations/readiness, establishing the initial administrator through secret-safe handling, starting the persistent service, and returning the working administration URL. Re-running after a prerequisite is added or an install is interrupted must reconcile safely rather than duplicate schema, administrators, services or databases.
+
+The existing development-prerelease package remains valid evidence for the runnable CMS baseline but does not by itself satisfy this production installation/onboarding outcome.
+
 ## Site independence on shared infrastructure
 
 Each site owns its content, Media, users/accounts when enabled, roles/grants and future domain state. A future commerce feature may be active on one site and absent on another. Shared implementation/infrastructure must not mix site data or silently introduce undeclared global dependencies.
