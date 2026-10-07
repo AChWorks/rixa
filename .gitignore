@@ -9,4 +9,5 @@ test-artifacts/
 
 # Local build outputs and JSON runtime overrides
 /rixa
+/dist/
 *.local.json

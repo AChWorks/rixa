@@ -1,0 +1,155 @@
+name: Release package
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/release.yml"
+      - "scripts/package-release.sh"
+      - "scripts/verify-release.sh"
+      - "docs/release-install.md"
+      - "internal/product/version.go"
+      - "cmd/rixa/main.go"
+      - ".env.example"
+      - "config/rixa.example.json"
+      - "LICENSE"
+      - "achworks.yaml"
+      - "go.mod"
+      - "go.sum"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to package without publishing (for example v0.1.0)"
+        required: true
+        default: "v0.1.0"
+        type: string
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-package-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    name: package
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CI: "true"
+      GOWORK: "off"
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Resolve package identity
+        id: meta
+        shell: bash
+        env:
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            version="$GITHUB_REF_NAME"
+            git fetch --no-tags origin main
+            git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+          elif [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            version="$INPUT_VERSION"
+          else
+            version="v0.0.0-ci"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "archive=rixa-${version}-linux-amd64.tar.gz" >> "$GITHUB_OUTPUT"
+
+      - name: Build release package
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/package-release.sh "${{ steps.meta.outputs.version }}" "$GITHUB_SHA" dist
+
+      - name: Verify release package
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ steps.meta.outputs.version }}"
+          archive="dist/rixa-${version}-linux-amd64.tar.gz"
+          achrix="$(GOWORK=off go list -m -f '{{.Version}}' github.com/AChWorks/achrix)"
+          ./scripts/verify-release.sh "$archive" "${archive}.sha256" "$version" "$GITHUB_SHA" "$achrix"
+
+      - name: Upload verified package
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-package
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: publish prerelease
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    needs: package
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download verified package
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-package
+          path: dist
+
+      - name: Publish immutable candidate as GitHub prerelease
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="$GITHUB_REF_NAME"
+          base="rixa-${version}-linux-amd64"
+          archive="dist/${base}.tar.gz"
+          checksum="${archive}.sha256"
+
+          (
+            cd dist
+            sha256sum -c "$(basename "$checksum")"
+          )
+
+          if gh release view "$version" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "release $version already exists; refusing to overwrite" >&2
+            exit 1
+          fi
+
+          buildinfo="$(tar -xOzf "$archive" "${base}/BUILDINFO.json")"
+          achrix="$(sed -n 's/.*"achrix": "\([^"]*\)".*/\1/p' <<<"$buildinfo")"
+          source_commit="$(sed -n 's/.*"source_commit": "\([^"]*\)".*/\1/p' <<<"$buildinfo")"
+          [[ -n "$achrix" && "$source_commit" == "$GITHUB_SHA" ]]
+
+          cat > release-notes.md <<EOF
+          Rixa $version is a development prerelease.
+
+          - Packaged target: Linux amd64
+          - Foundation dependency: AChrix $achrix
+          - Source commit: $source_commit
+          - Runtime boundary: current validated development profile; this release does not claim production hosting, HA or RPO/RTO support.
+
+          Verify the adjacent SHA-256 checksum before extraction and follow INSTALL.md inside the package.
+          EOF
+
+          gh release create "$version" "$archive" "$checksum" \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --prerelease \
+            --title "Rixa $version" \
+            --notes-file release-notes.md
