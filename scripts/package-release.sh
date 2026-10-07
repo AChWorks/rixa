@@ -84,10 +84,12 @@ cat > "$root/BUILDINFO.json" <<EOF
 EOF
 chmod 0644 "$root/BUILDINFO.json"
 
-GOWORK=off go mod download all
+used_modules="$tmp/used-modules"
+GOWORK=off go list -deps -f '{{with .Module}}{{if and .Path .Version .Dir}}{{.Path}}|{{.Version}}|{{.Dir}}{{end}}{{end}}' ./cmd/rixa | LC_ALL=C sort -u > "$used_modules"
+
 module_manifest="$tmp/third-party-modules.unsorted"
 : > "$module_manifest"
-while IFS=$'\t' read -r module module_version module_dir; do
+while IFS='|' read -r module module_version module_dir; do
   [[ -n "$module" && -n "$module_version" && -n "$module_dir" ]] || continue
   [[ "$module" != "github.com/AChWorks/rixa" ]] || continue
 
@@ -108,7 +110,7 @@ while IFS=$'\t' read -r module module_version module_dir; do
   fi
 
   printf '%s\t%s\t%s\n' "$module" "$module_version" "$license_id" >> "$module_manifest"
-done < <(GOWORK=off go list -m -f '{{if and .Dir .Version}}{{.Path}}{{"\t"}}{{.Version}}{{"\t"}}{{.Dir}}{{end}}' all)
+done < "$used_modules"
 
 if [[ ! -s "$module_manifest" ]]; then
   echo "third-party module inventory is unexpectedly empty" >&2
@@ -118,6 +120,12 @@ LC_ALL=C sort "$module_manifest" > "$root/THIRD_PARTY_MODULES.txt"
 chmod 0644 "$root/THIRD_PARTY_MODULES.txt"
 chmod 0755 "$root/rixa" "$root" "$root/config" "$root/licenses"
 find "$root/licenses" -mindepth 1 -maxdepth 1 -type d -exec chmod 0755 {} +
+
+if ! git diff --quiet || ! git diff --cached --quiet; then
+  echo "release packaging modified tracked source files" >&2
+  git status --short >&2
+  exit 1
+fi
 
 LC_ALL=C tar \
   --sort=name \
