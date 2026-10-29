@@ -12,7 +12,7 @@ import ssl
 import stat
 import sys
 from urllib.error import HTTPError
-from urllib.request import build_opener, HTTPCookieProcessor, HTTPSHandler, ProxyHandler, Request
+from urllib.request import build_opener, HTTPCookieProcessor, HTTPRedirectHandler, HTTPSHandler, ProxyHandler, Request
 import uuid
 
 
@@ -75,6 +75,36 @@ class Client:
         if self.csrf:
             self.post("/auth/logout", {})
             self.csrf = ""
+
+
+class NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, request, fp, code, message, headers, new_url):
+        return None
+
+
+def check_preview_denial(status, body):
+    # An HTTP/server/transport failure is not privacy evidence. The known real
+    # preview must explicitly reject this credential-free identity request.
+    if status not in (401, 403) or len(body) > 65536:
+        raise ValueError("anonymous private preview did not return bounded authentication denial")
+    if b"Retained native guest publication proof." in body or b"Native guest published proof" in body:
+        raise ValueError("anonymous denial leaked private preview bytes")
+
+
+def anonymous_preview_denial(origin, ca, path):
+    # No cookie processor or credentials; refuse redirects rather than mistake a
+    # followed login page for proof that this exact private request was denied.
+    http = build_opener(ProxyHandler({}), NoRedirect(),
+                        HTTPSHandler(context=ssl.create_default_context(cafile=str(ca))))
+    request = Request(origin + path, headers={"Origin": origin,
+                      "X-Identity-Request": "1", "Sec-Fetch-Site": "same-origin"})
+    try:
+        with http.open(request, timeout=25) as response:
+            status, body = response.status, response.read(65537)
+    except HTTPError as error:
+        status, body = error.code, error.read(65537)
+    check_preview_denial(status, body)
+    return status
 
 
 class Inputs(HTMLParser):
@@ -145,8 +175,10 @@ def proof(args):
             published = mutate("publish", "/admin/content/publish", {
                 "id": state["id"], "expected_generation": generations[0], "route": state["route"]})
             state["generation"] = published["generation"]
-        preview = site.request("GET", "/admin/content/preview/" + state["id"] + "/" + state["revision"])
+        preview_path = "/admin/content/preview/" + state["id"] + "/" + state["revision"]
+        preview = site.request("GET", preview_path)
         assert b"Retained native guest publication proof." in preview
+        anonymous_status = anonymous_preview_denial(draft["site_origin"], args.ca, preview_path)
         public = Client(draft["site_origin"], args.ca).request("GET", state["route"])
         assert b"Native guest published proof" in public and b"Retained native guest publication proof." in public
         public_hash = hashlib.sha256(public).hexdigest()
@@ -162,7 +194,7 @@ def proof(args):
             site.logout()
     print(json.dumps({"status": "verified", "action": args.action, "id": state["id"],
                       "revision": state["revision"], "generation": state["generation"],
-                      "public_sha256": public_hash, "sessions": "revoked after each scope"}))
+                      "public_sha256": public_hash, "anonymous_preview_status": anonymous_status, "sessions": "revoked after each scope"}))
 
 
 if __name__ == "__main__":
