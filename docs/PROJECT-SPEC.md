@@ -18,19 +18,27 @@ Users are the infrastructure administrator managing declared sites, independent 
 - Basic SEO, truthful structured data and understandable public meaning for AI retrieval are built into actual publication, with a path to later improvement.
 - The development profile demonstrates scoped authorization, independent site data/assets, finite aggregate resources and coherent isolated transfer/restore. It makes no production delivery or fleet-capacity promise.
 
-[The milestone](https://github.com/AChWorks/rixa/milestone/1) groups implementation acceptance. A versioned development prerelease may package exactly the already-proven development profile without creating a production-support promise. Production installation/distribution, hosting support and production release readiness require executable evidence and a separately authorized delivery profile.
+A versioned development prerelease may package exactly the already-proven development profile without creating a production-support promise. Production installation/distribution, hosting support and production release readiness require executable evidence and a separately authorized delivery profile.
+
+## Product usability and engineering direction
+
+CMS capabilities and operational management develop together: content, Media, appearance, publication and selected-site administration must remain simple to understand and complete. Use a modern minimal interface, consistent vocabulary, clear scope/actions and recoverable errors. Preserve Persian/English, RTL/LTR and accessible keyboard behavior in delivered flows; accessibility and usability are verified outcomes rather than visual-style claims.
+
+Keep the implementation readable, efficient and extensible through demonstrated needs and supported boundaries. Prefer the smallest maintainable solution and measure relevant performance/resource effects before adding optimization machinery or speculative abstractions.
 
 ## Installation and onboarding direction
 
-The supported product must ultimately provide simple installation paths rather than requiring operators to reproduce low-level runtime commands manually. All install surfaces share one capability-driven preflight and provisioning model.
+The supported product must ultimately provide simple installation paths rather than requiring operators to reproduce low-level runtime commands manually. The one-line bootstrap, full-screen terminal menu, direct CLI and web interfaces share one capability-driven product operation model and durable progress, while using interactions appropriate to each environment.
 
 A privileged VPS/server path may install and configure missing dependencies only when the host grants the required authority and the mechanism is explicitly supported and verifiable. A constrained/shared-hosting or control-panel path must instead report exactly which capabilities are missing or must be enabled by the hosting administrator; it must never bypass provider policy or pretend that a generic web-root/PHP account can host the persistent Rixa service.
 
-Direct server installation and control-panel-assisted installation are distinct user experiences over the same installer core. aaPanel is the first concrete panel validation target; Plesk, DirectAdmin and cPanel support is claimed only for configurations that actually provide the required persistent process, PostgreSQL, private secret/data storage, public ingress and TLS capabilities. Panel identity alone is not compatibility evidence.
+Direct server installation and control-panel-assisted installation are distinct user experiences over the same product operation model. aaPanel is the first concrete panel validation target; Plesk, DirectAdmin and cPanel support is claimed only for configurations that actually provide the required persistent process, PostgreSQL, private secret/data storage, public ingress and TLS capabilities. Panel identity alone is not compatibility evidence.
 
 A supported install should finish by validating migrations/readiness, establishing the initial administrator through secret-safe handling, starting the persistent service, and returning the working administration URL. Re-running after a prerequisite is added or an install is interrupted must reconcile safely rather than duplicate schema, administrators, services or databases.
 
-The existing development-prerelease package remains valid evidence for the runnable CMS baseline but does not by itself satisfy this production installation/onboarding outcome.
+Installation, administrator-triggered update and ownership-aware uninstall must be understandable, safely resumable and consistent across supported paths. Preserve durable state by default; destructive purge is separate. AChrix owns reusable assessment/lifecycle contracts, while Rixa owns trusted host evidence, supported adapters, protected configuration, actual effects and activation. The [installation and management contract](installation-and-management.md) owns detailed experience and failure behavior.
+
+The development-prerelease package proves only its documented runnable profile. It does not itself establish the full installation/onboarding, managed-update or production-hosting experience.
 
 ## Site independence on shared infrastructure
 
@@ -40,15 +48,15 @@ A site must be transferable or captured independently using its coherent data/fi
 
 A separate database and exclusive private Media root per site on one PostgreSQL installation is the starting profile to evaluate, not a hardware-capacity guarantee or a database-engine security boundary. The architecture/consumer proof must establish its real resource and operational costs before broader support.
 
-All sites on one shared installation initially use one compatible Core/Module/product release. Per-site feature activation is required where justified; arbitrary simultaneous Module versions and process isolation per site are not current requirements.
+All sites on one shared installation use one compatible product artifact with one selected version per Core/component module. Per-site feature activation is required where justified; arbitrary simultaneous Module versions and process isolation per site are not current requirements.
 
 ## Foundation use and extension
 
-AChrix remains a reusable Foundation independent of Rixa and of CMS semantics. Rixa consumes a pinned released Go dependency, selected reusable Modules and intentionally public extension seams. Product source, domain schemas, theme/content behavior and deployment ownership stay in Rixa.
+AChrix remains a reusable Foundation independent of Rixa and of CMS semantics. Rixa consumes pinned released Go modules, selected reusable capabilities and intentionally public extension seams. Product source, domain schemas, theme/content behavior and deployment ownership stay in Rixa.
 
 Updates deliberately rebuild and validate a coherent product artifact; product extensions/configuration/data remain independently owned. API/schema changes may require adaptation. A source rollback is not data rollback.
 
-Optional Multi-Site is accepted in the existing AChrix repository/Go module/shared release. Its bounded real-consumer contract/proof is still required. No mandatory Core tenancy, new empty Module, separate repository/service or runtime plugin loader follows from that decision.
+Core and official AChrix components are independently versioned Go modules in the existing repository. Rixa selects and validates a compatible set through public versioned contracts; independent version units do not imply separate processes or arbitrary version combinations. Optional Multi-Site owns reusable resolution and, when selected, authorized inventory/selection planning. Rixa owns persisted site configuration, actual composition/activation and real consumer proof. No mandatory Core tenancy, empty Module, separate service or runtime plugin loader follows from those boundaries.
 
 ## Media publication policy
 
@@ -89,7 +97,7 @@ Use supported web standards/provider guidance; no separate universal AI schema/f
 | Search / Settings / Notifications | Implement only a real search flow, concrete application-level settings or real delivery flow; do not create empty shared Modules. Product/domain settings remain product-owned. |
 | Commerce and larger CMS | Preserve isolated/extensible site ownership; no empty commerce Module, page builder, marketplace or WordPress feature-parity commitment. |
 | Gateway and AI content management | Desired optional installation/composition through normal permissions, supporting future manual/AI management. Any implementation requires its own AChrix ownership/packaging/security decision and a real flow; Gateway-side work is out of this repository's authority. |
-| Product install/update/recovery UI | Desired simple supported product experience, not server commands for routine users. Generic lifecycle/recovery implementation remains separately gated by real deployment/recovery evidence; controlled site-transfer proof does not activate it by itself. |
+| Product install/update/uninstall/recovery | Accepted coherent CLI/TUI/web experience under the installation and management contract. Each adapter/profile needs real execution, privilege and recovery proof. Generic shared lifecycle/recovery mechanisms remain evidence-gated; controlled site transfer is not production recovery support. |
 | Hosting | Prefer a small Go management process and static serving. An extra web server is optional when TLS/operations/performance justify it; no claim that web serving is free or that no TLS ingress is needed. |
 
 ## Material assumptions

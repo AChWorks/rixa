@@ -32,7 +32,7 @@ func run(args []string) error {
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	switch args[0] {
 	case "version":
-		return json.NewEncoder(os.Stdout).Encode(map[string]string{"rixa": product.Version, "achrix": achrix.Version()})
+		return json.NewEncoder(os.Stdout).Encode(map[string]any{"rixa": product.Version, "achrix": achrix.Version(), "achrix_components": product.FoundationVersions()})
 	case "migrate":
 		fs, configPath := commandFlags("migrate", args[1:])
 		if err := fs.Parse(args[1:]); err != nil {
@@ -143,10 +143,11 @@ func run(args []string) error {
 				return err
 			}
 			return json.NewEncoder(os.Stdout).Encode(map[string]any{
-				"status":    "ok",
-				"sites":     len(runtime.Sites),
-				"multisite": runtime.UsesMultiSite(),
-				"achrix":    achrix.Version(),
+				"status":            "ok",
+				"sites":             len(runtime.Sites),
+				"multisite":         runtime.UsesMultiSite(),
+				"achrix":            achrix.Version(),
+				"achrix_components": product.FoundationVersions(),
 			})
 		}
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

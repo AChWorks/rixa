@@ -12,6 +12,9 @@ version="$3"
 source_commit="$4"
 achrix_version="$5"
 base="rixa-${version}-linux-amd64"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+expected_components="$("$script_dir/verify-dependencies.sh" --tsv)"
+components_json="$(awk 'BEGIN { printf "{" } { printf "%s\"%s\":\"%s\"", (NR == 1 ? "" : ","), $1, $2 } END { print "}" }' <<<"$expected_components")"
 
 [[ -f "$archive" && -f "$checksum" ]] || {
   echo "release archive/checksum missing" >&2
@@ -89,11 +92,24 @@ unsafe="$(find "$root" \( -type l -o -type b -o -type c -o -type p -o -type s \)
 version_output="$("$root/rixa" version)"
 grep -Fq "\"rixa\":\"$version\"" <<<"$version_output"
 grep -Fq "\"achrix\":\"$achrix_version\"" <<<"$version_output"
+grep -Fq "\"achrix_components\":$components_json" <<<"$version_output"
+compiled_components="$(go version -m "$root/rixa" | awk '$1 == "dep" && $2 ~ /^github\.com\/AChWorks\/achrix($|\/)/ {print $2 "\t" $3}' | LC_ALL=C sort)"
+[[ "$compiled_components" == "$expected_components" ]] || {
+  echo "packaged binary component graph differs from selected dependencies" >&2
+  exit 1
+}
 
 grep -Fq "\"rixa\": \"$version\"" "$root/BUILDINFO.json"
 grep -Fq "\"achrix\": \"$achrix_version\"" "$root/BUILDINFO.json"
+grep -Fq "\"achrix_components\": $components_json" "$root/BUILDINFO.json"
 grep -Fq "\"source_commit\": \"$source_commit\"" "$root/BUILDINFO.json"
 grep -Fq "\"target\": \"linux-amd64\"" "$root/BUILDINFO.json"
+
+inventory_components="$(awk '$1 ~ /^github\.com\/AChWorks\/achrix($|\/)/ {print $1 "\t" $2}' "$root/THIRD_PARTY_MODULES.txt" | LC_ALL=C sort)"
+[[ "$inventory_components" == "$expected_components" ]] || {
+  echo "packaged component/license inventory differs from selected dependencies" >&2
+  exit 1
+}
 
 manifest_count=0
 while IFS=$'\t' read -r module module_version license_id extra; do

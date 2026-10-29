@@ -1,6 +1,6 @@
 # Rixa Architecture and Consumption
 
-This document owns the accepted ownership model and starting technical profile. It is not an implemented API inventory. The [two-site consumer contract](two-site-contract.md) records the source-backed request/authorization/composition matrix and bounded Foundation needs for [#2](https://github.com/AChWorks/rixa/issues/2). It is a design contract for Rixa, not a runnable product.
+This document owns the accepted ownership model and starting technical profile. It is not an implemented API inventory. The [two-site consumer contract](two-site-contract.md) records the source-backed request/authorization/composition matrix and bounded Foundation needs for [#2](https://github.com/AChWorks/rixa/issues/2). That contract specifies required behavior; the selected implementation and release own actual runtime availability.
 
 ## Ownership and first shape
 
@@ -13,7 +13,7 @@ Use a modular Go product with shared code and a single compatible release. Publi
 | Rixa | Site registry/trusted ingress integration, role meanings/policy, content/revisions, themes/configuration, preview, public publication/freshness, operation identity, product delivery and recovery policy. |
 | Infrastructure | PostgreSQL and private/public storage, secrets, HTTPS/TLS, optional serving/fronting and resource provisioning; no generic root/shell authority enters Core. |
 
-The UI is deliberately small: reuse the Admin shell/owning Module surfaces where they fit; add the actual visual editorial surface without adopting a frontend framework merely for a hypothetical larger CMS.
+Keep the product interface small and coherent: reuse supported Admin shell/owning Module seams, improve real editorial/Media/appearance/publication/control tasks, and preserve explicit site/action scope. Modern minimal presentation, recoverable state and Persian/English keyboard/RTL/LTR behavior are product requirements; a frontend framework or shared-shell fork is not implied. The [installation and management contract](installation-and-management.md) owns the accepted terminal/web experience.
 
 ## Trusted sites and identity
 
@@ -31,7 +31,9 @@ Each site owns content, local accounts/sessions when enabled, authorization stat
 
 AChrix Application composition permits one provider per capability ID per Application. Use explicit site-bound compositions for single-provider Modules; do not duplicate providers in one Application, tenant-filter SQL by a path prefix, or change qualified tables by search_path. Reusable address-resolution semantics belong to the [AChrix Multi-Site contract](https://github.com/AChWorks/achrix/blob/HEAD/multisite/README.md), not a copied product tenancy framework.
 
-Single-site composition remains supported without Multi-Site. Omit unneeded imports/runtime constructors where useful. Packaged-but-disabled code does not mean independent package versions, hot unloading, deleted data or bypassed dependencies. Changes to the active graph normally construct/validate/activate a new Application instance/artifact. Deferred activation is earned by measured resource savings and must retain bounded readiness, draining and cleanup; the required AChrix surface does not imply a generic runtime feature loader.
+Single-site composition remains supported without Multi-Site. Omit unneeded runtime constructors. Independent module packaging identifies the selected code; it is separate from per-site composition, resource activation, authorization and data removal. Changes to the active graph construct/validate/activate a new Application instance/artifact and retain data by default.
+
+The optional managed Multi-Site contract can authorize inventory and propose validated per-site Module selections. It does not mutate an active Application. Rixa owns persisted revision/CAS, fresh activation authorization, domain draining, controlled reconstruction, readiness, activation state and reconciliation. The current resolver composition remains valid without managed planning. No arbitrary hot loader or per-site version mixing is implied.
 
 ## Content, appearance and publication
 
@@ -77,7 +79,7 @@ No production hosting, RPO/RTO, live upgrade or off-host recovery profile is est
 
 ## Dependency upgrades and extension ownership
 
-The reviewed starting baseline for executable Rixa work is the exact released AChrix dependency recorded by the active implementation Issue and machine-readable dependency metadata. That selected release must supply the required resolver, resource configuration, private SVG, clean public-image preparation and reviewed Module error-privacy corrections. Initial executable consumption must pin that exact released dependency with product-owned go.mod/go.sum. Do not use replacement workspaces, copied Core runtime, private imports or edited dependency caches. Official packages in one Foundation Go module share a compatible version; retain source-backed product/Core/Module/migration identities.
+The reviewed starting baseline for executable Rixa work is the exact released AChrix dependency recorded by the active implementation Issue and machine-readable dependency metadata. That selected release must supply the required resolver, resource configuration, private SVG, clean public-image preparation and reviewed Module error-privacy corrections. Initial executable consumption must pin that exact released dependency with product-owned go.mod/go.sum. Do not use replacement workspaces, copied Core runtime, private imports or edited dependency caches. Core and the selected official components have independent Go module/version units in one repository. Pin one compatible version per selected module, retain checksums and record the complete selected component set alongside product/build and immutable migration identities. A monolithic-to-split transition adopts the split root and its compatible selected children together; mixing an old root that contains those packages with split child modules is unsupported.
 
 To extend, use public interfaces/typed collaborators. Keep content/theme/product policy local. When no public seam fits, record a concrete minimal AChrix contract gap and obtain a compatible released dependency before claiming it is available. Changing Foundation repository source or documentation does not update an immutable release or a deployed product.
 
@@ -85,7 +87,7 @@ An update reviews the exact released target and relevant API/dependency/schema c
 
 ## Installation and hosting boundary
 
-Installation is a deployment concern outside normal Rixa request authorization and must not leak host/root authority into AChrix Core or site capabilities. One shared installer domain owns environment discovery, planning, provisioning, configuration, migration/bootstrap orchestration, readiness and recoverable partial-failure semantics for every install surface.
+Installation is a deployment concern and must not leak host/root authority into Core or site capabilities. AChrix Installation owns pure requirement/evidence/adapter/progress assessment, immutable plans and rechecking. It performs no host discovery, provisioning, persistence, migration or activation. Rixa owns trustworthy environment probes, selected supported adapters, protected configuration, durable intent/progress, locking/fencing, actual effects, migration/bootstrap reconciliation, readiness and activation. All install surfaces consume those same product operations.
 
 Preflight classifies each mandatory capability as already available, safely provisionable by the installer, operator/provider-required, or unsupported. On a privileged supported server the installer may provision missing dependencies through validated OS/service mechanisms. On constrained hosting it performs no privilege bypass; it returns the exact requirements the operator or hosting provider must supply.
 
@@ -93,7 +95,7 @@ Control-panel adapters reuse this installer domain and only integrate through su
 
 The target user experience includes a one-line server/VPS bootstrap and panel-assisted upload/terminal/web setup where the validated environment permits it. A browser setup wizard may collect installation inputs only after the environment can actually host the persistent Rixa runtime; it is not a workaround for an incompatible shared-hosting model.
 
-Install and update remain separate concerns. A simple installer does not imply a generic in-product updater, build service, registry, destructive recovery mechanism or unrestricted host-control subsystem. Future update work must preserve the separately proven dependency/data compatibility boundaries.
+Install, update and uninstall share product operation identity, progress and diagnostics while retaining distinct effects and recovery semantics. The [experience contract](installation-and-management.md) owns the stable bootstrap, guided TUI/CLI/web flow, state-preserving update and ownership-aware removal. A web operation uses a narrow supported deployment mechanism that survives application replacement; it grants no root/shell proxy. Actual implementations and support remain profile-specific and evidence-gated. No universal updater, registry or production recovery promise follows from this architecture.
 
 
 
