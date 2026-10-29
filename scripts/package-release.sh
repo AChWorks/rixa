@@ -39,16 +39,8 @@ if [[ "$(git rev-parse HEAD)" != "$source_commit" ]]; then
   exit 1
 fi
 
-expected_achrix="$(awk '/^[[:space:]]*sourceVersion:/ {print $2; exit}' achworks.yaml)"
+components_json="$(./scripts/verify-dependencies.sh --json)"
 actual_achrix="$(GOWORK=off go list -m -f '{{.Version}}' github.com/AChWorks/achrix)"
-if [[ -z "$expected_achrix" || "$actual_achrix" != "$expected_achrix" ]]; then
-  echo "AChrix dependency identity mismatch: descriptor=$expected_achrix module=$actual_achrix" >&2
-  exit 1
-fi
-if [[ "$(go env GOSUMDB)" == "off" ]]; then
-  echo "release packaging requires checksum-backed Go module verification" >&2
-  exit 1
-fi
 
 go_version="$(go env GOVERSION)"
 base="rixa-${version}-linux-amd64"
@@ -68,6 +60,12 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOWORK=off \
   -ldflags "-s -w -X github.com/AChWorks/rixa/internal/product.Version=$version" \
   -o "$root/rixa" ./cmd/rixa
 
+version_output="$("$root/rixa" version)"
+if ! grep -Fq "\"achrix_components\":$components_json" <<<"$version_output"; then
+  echo "compiled AChrix component identities differ from selected dependencies" >&2
+  exit 1
+fi
+
 install -m 0644 .env.example "$root/.env.example"
 install -m 0644 config/rixa.example.json "$root/config/rixa.example.json"
 install -m 0644 LICENSE "$root/LICENSE"
@@ -77,6 +75,7 @@ cat > "$root/BUILDINFO.json" <<EOF
 {
   "rixa": "$version",
   "achrix": "$actual_achrix",
+  "achrix_components": $components_json,
   "source_commit": "$source_commit",
   "go": "$go_version",
   "target": "linux-amd64"

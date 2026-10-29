@@ -33,17 +33,17 @@ var (
 )
 
 const (
-	siteTransferSchema         = "rixa.site-transfer.v1"
-	siteTransferDBFile         = "database.dump"
-	siteTransferMediaFile      = "media.tar"
-	siteTransferPublicFile     = "public.tar"
-	siteTransferManifestFile   = "manifest.json"
-	siteTransferCompleteFile   = "complete.json"
-	maxSiteTransferDumpBytes   = int64(2 << 30)
-	maxSiteTransferArchiveBytes = int64(8 << 30)
+	siteTransferSchema           = "rixa.site-transfer.v2"
+	siteTransferDBFile           = "database.dump"
+	siteTransferMediaFile        = "media.tar"
+	siteTransferPublicFile       = "public.tar"
+	siteTransferManifestFile     = "manifest.json"
+	siteTransferCompleteFile     = "complete.json"
+	maxSiteTransferDumpBytes     = int64(2 << 30)
+	maxSiteTransferArchiveBytes  = int64(8 << 30)
 	maxSiteTransferManifestBytes = int64(8 << 20)
-	maxSiteTransferEntries     = 100000
-	maxSiteTransferPathBytes   = 512
+	maxSiteTransferEntries       = 100000
+	maxSiteTransferPathBytes     = 512
 )
 
 type SiteTransferTooling struct {
@@ -78,16 +78,16 @@ type SiteTransferMediaAsset struct {
 }
 
 type SiteTransferSummary struct {
-	Accounts           int64  `json:"accounts"`
-	AuditRecords       int64  `json:"audit_records"`
-	ContentItems       int64  `json:"content_items"`
-	ContentRevisions   int64  `json:"content_revisions"`
-	ContentMediaRefs   int64  `json:"content_media_refs"`
-	EditorialOperations int64 `json:"editorial_operations"`
-	ReadyMedia         int64  `json:"ready_media"`
-	SourceSessionRows  int64  `json:"source_session_rows"`
-	AppearanceRevision int64  `json:"appearance_revision"`
-	Theme              string `json:"theme"`
+	Accounts            int64  `json:"accounts"`
+	AuditRecords        int64  `json:"audit_records"`
+	ContentItems        int64  `json:"content_items"`
+	ContentRevisions    int64  `json:"content_revisions"`
+	ContentMediaRefs    int64  `json:"content_media_refs"`
+	EditorialOperations int64  `json:"editorial_operations"`
+	ReadyMedia          int64  `json:"ready_media"`
+	SourceSessionRows   int64  `json:"source_session_rows"`
+	AppearanceRevision  int64  `json:"appearance_revision"`
+	Theme               string `json:"theme"`
 }
 
 type SiteTransferSite struct {
@@ -100,24 +100,25 @@ type SiteTransferSite struct {
 }
 
 type SiteTransferManifest struct {
-	Schema              string                               `json:"schema"`
-	CapturedAt          time.Time                            `json:"captured_at"`
-	RixaVersion         string                               `json:"rixa_version"`
-	AChrixVersion       string                               `json:"achrix_version"`
+	Schema               string                               `json:"schema"`
+	CapturedAt           time.Time                            `json:"captured_at"`
+	RixaVersion          string                               `json:"rixa_version"`
+	AChrixVersion        string                               `json:"achrix_version"`
+	AChrixComponents     map[string]string                    `json:"achrix_components"`
 	PostgreSQLVersionNum int                                  `json:"postgresql_server_version_num"`
-	PGDumpVersion       string                               `json:"pg_dump_version"`
-	Site                SiteTransferSite                     `json:"site"`
-	SessionPolicy       string                               `json:"session_policy"`
-	GlobalControlPolicy string                               `json:"global_control_policy"`
-	Excluded            []string                             `json:"excluded"`
-	Ledgers             map[string][]SiteTransferLedgerEntry `json:"ledgers"`
-	Summary             SiteTransferSummary                  `json:"summary"`
-	ReadyMedia          []SiteTransferMediaAsset             `json:"ready_media"`
-	Database            SiteTransferArtifact                 `json:"database"`
-	MediaArchive        SiteTransferArtifact                 `json:"media_archive"`
-	MediaEntries        []SiteTransferArchiveEntry           `json:"media_entries"`
-	PublicArchive       *SiteTransferArtifact                `json:"public_archive,omitempty"`
-	PublicEntries       []SiteTransferArchiveEntry           `json:"public_entries,omitempty"`
+	PGDumpVersion        string                               `json:"pg_dump_version"`
+	Site                 SiteTransferSite                     `json:"site"`
+	SessionPolicy        string                               `json:"session_policy"`
+	GlobalControlPolicy  string                               `json:"global_control_policy"`
+	Excluded             []string                             `json:"excluded"`
+	Ledgers              map[string][]SiteTransferLedgerEntry `json:"ledgers"`
+	Summary              SiteTransferSummary                  `json:"summary"`
+	ReadyMedia           []SiteTransferMediaAsset             `json:"ready_media"`
+	Database             SiteTransferArtifact                 `json:"database"`
+	MediaArchive         SiteTransferArtifact                 `json:"media_archive"`
+	MediaEntries         []SiteTransferArchiveEntry           `json:"media_entries"`
+	PublicArchive        *SiteTransferArtifact                `json:"public_archive,omitempty"`
+	PublicEntries        []SiteTransferArchiveEntry           `json:"public_entries,omitempty"`
 }
 
 type siteTransferComplete struct {
@@ -126,11 +127,11 @@ type siteTransferComplete struct {
 
 type siteTransferSnapshot struct {
 	PostgreSQLVersionNum int
-	OtherSessions int64
-	Unfinished    int64
-	Ledgers       map[string][]SiteTransferLedgerEntry
-	Summary       SiteTransferSummary
-	ReadyMedia    []SiteTransferMediaAsset
+	OtherSessions        int64
+	Unfinished           int64
+	Ledgers              map[string][]SiteTransferLedgerEntry
+	Summary              SiteTransferSummary
+	ReadyMedia           []SiteTransferMediaAsset
 }
 
 func defaultSiteTransferTooling() SiteTransferTooling {
@@ -256,10 +257,11 @@ func CaptureSite(parent context.Context, config Config, siteID, destination stri
 	}
 
 	manifest := SiteTransferManifest{
-		Schema:        siteTransferSchema,
-		CapturedAt:    time.Now().UTC().Truncate(time.Microsecond),
+		Schema:               siteTransferSchema,
+		CapturedAt:           time.Now().UTC().Truncate(time.Microsecond),
 		RixaVersion:          Version,
 		AChrixVersion:        achrix.Version(),
+		AChrixComponents:     FoundationVersions(),
 		PostgreSQLVersionNum: before.PostgreSQLVersionNum,
 		PGDumpVersion:        pgDumpVersion,
 		Site: SiteTransferSite{
@@ -510,7 +512,8 @@ func validateSiteTransferCompatibility(site SiteConfig, manifest SiteTransferMan
 	if err := validateSiteTransferManifest(manifest); err != nil {
 		return err
 	}
-	if manifest.RixaVersion != Version || manifest.AChrixVersion != achrix.Version() {
+	if manifest.RixaVersion != Version || manifest.AChrixVersion != achrix.Version() ||
+		!reflect.DeepEqual(manifest.AChrixComponents, FoundationVersions()) {
 		return fmt.Errorf("%w: incompatible source dependency identity", ErrSiteTransfer)
 	}
 	if manifest.Site.ID != site.ID || manifest.Site.Origin != site.Origin ||
@@ -533,6 +536,19 @@ func validateSiteTransferManifest(manifest SiteTransferManifest) error {
 		manifest.GlobalControlPolicy != "not-captured-target-must-recreate-and-remap" ||
 		len(manifest.Excluded) == 0 {
 		return fmt.Errorf("%w: invalid transfer manifest", ErrSiteTransfer)
+	}
+	// Require the complete declared component set, including a Core identity
+	// consistent with the legacy field. Compatibility then compares exact values.
+	current := FoundationVersions()
+	if len(manifest.AChrixComponents) != len(current) ||
+		manifest.AChrixComponents["github.com/AChWorks/achrix"] != manifest.AChrixVersion {
+		return fmt.Errorf("%w: invalid component identity set", ErrSiteTransfer)
+	}
+	for module := range current {
+		version := manifest.AChrixComponents[module]
+		if version == "" || len(version) > 128 {
+			return fmt.Errorf("%w: missing or invalid component identity", ErrSiteTransfer)
+		}
 	}
 	if manifest.Site.PublicEnabled {
 		if manifest.PublicArchive == nil || manifest.Site.PublicPolicy.validate() != nil {

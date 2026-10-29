@@ -8,6 +8,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
+
+	"github.com/AChWorks/achrix"
 	"testing"
 )
 
@@ -55,18 +58,18 @@ func TestSiteTransferArchiveRejectsUnsafeEntries(t *testing.T) {
 		expected []SiteTransferArchiveEntry
 	}{
 		{
-			name: "traversal",
-			header: tar.Header{Name: "../escape", Typeflag: tar.TypeReg, Mode: 0o600, Size: 1},
+			name:     "traversal",
+			header:   tar.Header{Name: "../escape", Typeflag: tar.TypeReg, Mode: 0o600, Size: 1},
 			expected: []SiteTransferArchiveEntry{{Path: "safe", Type: "file", Mode: 0o600, Size: 1, SHA256: strings.Repeat("0", 64)}},
 		},
 		{
-			name: "symlink",
-			header: tar.Header{Name: "safe", Typeflag: tar.TypeSymlink, Linkname: "elsewhere", Mode: 0o600},
+			name:     "symlink",
+			header:   tar.Header{Name: "safe", Typeflag: tar.TypeSymlink, Linkname: "elsewhere", Mode: 0o600},
 			expected: []SiteTransferArchiveEntry{{Path: "safe", Type: "file", Mode: 0o600, Size: 0, SHA256: strings.Repeat("0", 64)}},
 		},
 		{
-			name: "hardlink",
-			header: tar.Header{Name: "safe", Typeflag: tar.TypeLink, Linkname: "other", Mode: 0o600},
+			name:     "hardlink",
+			header:   tar.Header{Name: "safe", Typeflag: tar.TypeLink, Linkname: "other", Mode: 0o600},
 			expected: []SiteTransferArchiveEntry{{Path: "safe", Type: "file", Mode: 0o600, Size: 0, SHA256: strings.Repeat("0", 64)}},
 		},
 	} {
@@ -185,9 +188,9 @@ func TestSiteTransferDestinationPreflightRejectsPrivateRootOverlapWithoutMutatio
 	}}}
 
 	for name, destination := range map[string]string{
-		"inside media": filepath.Join(mediaRoot, "capture"),
+		"inside media":   filepath.Join(mediaRoot, "capture"),
 		"contains media": base,
-		"inside public": filepath.Join(publicRoot, "capture"),
+		"inside public":  filepath.Join(publicRoot, "capture"),
 	} {
 		t.Run(name, func(t *testing.T) {
 			if err := validateSiteTransferCaptureDestination(config, destination); !errors.Is(err, ErrSiteTransfer) && !errors.Is(err, ErrConfiguration) {
@@ -215,8 +218,8 @@ func TestSiteTransferRestoreSourceRejectsTargetOverlap(t *testing.T) {
 		t.Fatal(err)
 	}
 	site := SiteConfig{
-		ID: "site-a",
-		MediaRoot: filepath.Join(source, "media-target"),
+		ID:         "site-a",
+		MediaRoot:  filepath.Join(source, "media-target"),
 		PublicRoot: filepath.Join(base, "public-target"),
 	}
 	if err := validateSiteTransferRestoreSource(source, site); !errors.Is(err, ErrSiteTransfer) {
@@ -278,5 +281,47 @@ func TestSiteTransferArchivePathAdmission(t *testing.T) {
 		if validSiteTransferArchivePath(value) {
 			t.Fatalf("unsafe path accepted: %q", value)
 		}
+	}
+}
+
+// A compatible Core version must not hide a different, missing or extra child.
+func TestSiteTransferRejectsDifferentComponentSet(t *testing.T) {
+	site := SiteConfig{ID: "site-a", Origin: "https://a.rixa.test", AdminPrincipal: strings.Repeat("A", 26)}
+	artifact := SiteTransferArtifact{File: "state.dump", Size: 1, SHA256: strings.Repeat("0", 64)}
+	makeManifest := func() SiteTransferManifest {
+		return SiteTransferManifest{
+			Schema: siteTransferSchema, CapturedAt: time.Now(), RixaVersion: Version,
+			AChrixVersion: achrix.Version(), AChrixComponents: FoundationVersions(),
+			PostgreSQLVersionNum: 180006, PGDumpVersion: "pg_dump (PostgreSQL) 18.6",
+			Site:          SiteTransferSite{ID: site.ID, Origin: site.Origin, AdminPrincipal: site.AdminPrincipal, AuthorizationProfile: "rixa.fixed-site-admin-v1"},
+			SessionPolicy: "excluded-at-capture", GlobalControlPolicy: "not-captured-target-must-recreate-and-remap",
+			Excluded: []string{"identity session rows"}, Database: artifact, MediaArchive: artifact,
+			Ledgers: map[string][]SiteTransferLedgerEntry{
+				"identity": {{Version: 1}}, "audit": {{Version: 1}}, "media": {{Version: 1}}, "rixa": {{Version: 1}},
+			},
+		}
+	}
+	if err := validateSiteTransferCompatibility(site, makeManifest()); err != nil {
+		t.Fatalf("current component set rejected: %v", err)
+	}
+	for name, change := range map[string]func(*SiteTransferManifest){
+		"changed child": func(m *SiteTransferManifest) { m.AChrixComponents["github.com/AChWorks/achrix/media"] = "v9.0.0" },
+		"missing child": func(m *SiteTransferManifest) { delete(m.AChrixComponents, "github.com/AChWorks/achrix/identity") },
+		"unknown child": func(m *SiteTransferManifest) { m.AChrixComponents["github.com/AChWorks/achrix/unknown"] = "v0.1.0" },
+		"substituted child": func(m *SiteTransferManifest) {
+			delete(m.AChrixComponents, "github.com/AChWorks/achrix/admin")
+			m.AChrixComponents["github.com/AChWorks/achrix/unknown"] = "v0.1.0"
+		},
+		"inconsistent Core":     func(m *SiteTransferManifest) { m.AChrixComponents["github.com/AChWorks/achrix"] = "v9.0.0" },
+		"old schema":            func(m *SiteTransferManifest) { m.Schema = "rixa.site-transfer.v1" },
+		"missing component set": func(m *SiteTransferManifest) { m.AChrixComponents = nil },
+	} {
+		t.Run(name, func(t *testing.T) {
+			manifest := makeManifest()
+			change(&manifest)
+			if err := validateSiteTransferCompatibility(site, manifest); !errors.Is(err, ErrSiteTransfer) {
+				t.Fatalf("incompatible transfer accepted: %v", err)
+			}
+		})
 	}
 }
