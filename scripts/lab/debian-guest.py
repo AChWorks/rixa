@@ -172,21 +172,34 @@ def load(lab):
     return data
 
 
+def launch_lock(lab):
+    fd = os.open(lab / "qemu.lock", os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    info = os.fstat(fd)
+    if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid():
+        os.close(fd)
+        raise ValueError("unexpected launch lock ownership/type")
+    return os.fdopen(fd, "w")
+
+
 def boot(args):
     lab = directory(args.lab)
     data = load(lab)
-    with (lab / "qemu.lock").open("a") as lock:
+    with launch_lock(lab) as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        if (lab / "qmp.sock").exists():
+        if (lab / "qmp.sock").exists() or (lab / "qmp.sock").is_symlink():
             raise ValueError("QMP socket exists; reconcile the prior guest before another launch")
         if args.action == "install":
             iso = regular(lab / data["iso"])
             if digest(iso, "sha512") != data["iso_sha512"]:
                 raise ValueError("installer ISO changed")
+        serial = lab / (args.action + "-" + secrets.token_hex(4) + "-serial.log")
+        with serial.open("xb"):
+            pass
+        print("serial_log=" + str(serial), flush=True)
         command = ["qemu-system-x86_64", "-name", "rixa-disposable-lab",
                    "-machine", "pc,accel=tcg", "-cpu", "max", "-m", "1024",
                    "-smp", "1", "-display", "none", "-serial",
-                   "file:" + str(lab / (args.action + "-serial.log")),
+                   "file:" + str(serial),
                    "-monitor", "none", "-drive",
                    "file=" + str(lab / "guest.qcow2") + ",format=qcow2,if=virtio",
                    "-netdev", "user,id=net0,hostfwd=tcp:127.0.0.1:" +
@@ -203,7 +216,7 @@ def boot(args):
         finally:
             # QEMU has exited and this instance still holds its launch lock.
             sock = lab / "qmp.sock"
-            if sock.exists() and stat.S_ISSOCK(sock.lstat().st_mode):
+            if sock.exists() and stat.S_ISSOCK(sock.lstat().st_mode) and sock.lstat().st_uid == os.getuid():
                 sock.unlink()
 
 

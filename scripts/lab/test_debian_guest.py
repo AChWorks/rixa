@@ -38,6 +38,16 @@ class LaboratoryBoundaryTests(unittest.TestCase):
                 labtool.directory(str(path), create=True)
             self.assertEqual(sentinel.read_text(), "retain")
 
+    def test_refuses_a_linked_launch_lock(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            sentinel = root / "unrelated"
+            sentinel.write_text("retain")
+            (root / "qemu.lock").symlink_to(sentinel)
+            with self.assertRaises(OSError):
+                labtool.launch_lock(root)
+            self.assertEqual(sentinel.read_text(), "retain")
+
     def test_refuses_changed_boot_inputs(self):
         with tempfile.TemporaryDirectory() as raw:
             import hashlib

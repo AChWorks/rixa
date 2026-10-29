@@ -41,7 +41,7 @@ First discover and reconcile prior laboratory jobs/processes. Keep the foregroun
 python3 scripts/lab/debian-guest.py install --lab /private/rixa-lab
 ```
 
-The installer exits on its first reboot. Inspect `install-serial.log` and the real process exit before starting the installed disk:
+The installer exits on its first reboot. Inspect the printed private serial-log path and the real process exit before starting the installed disk:
 
 ```bash
 python3 scripts/lab/debian-guest.py boot --lab /private/rixa-lab
