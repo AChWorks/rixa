@@ -15,10 +15,15 @@ var codeSyntax = regexp.MustCompile(`^[a-z0-9-]{1,64}$`)
 var knownStages = map[string]bool{"executor": true, "payload": true, "account": true, "runtime-paths": true, "prepare": true, "migrate": true, "bootstrap-control": true, "bootstrap-site": true, "setup": true, "check": true, "service": true, "postflight": true, "remove": true}
 
 func validJournal(j *journal) bool {
+	for k, v := range j.TransportEnv {
+		if !transportKeys[k] || len(v) > 4096 || strings.ContainsAny(v, "\r\n\x00") {
+			return false
+		}
+	}
 	if j.Attempts == nil || !codeSyntax.MatchString(j.Code) || len(j.Message) > 2048 || j.Stage != "" && j.Stage != "review" && !knownStages[j.Stage] {
 		return false
 	}
-	for _, h := range []string{j.Frozen, j.ArchiveSHA256, j.BinarySHA256, j.ManagerSHA256, j.CertSHA256, j.KeySHA256, j.UnitSHA256, j.ReviewToken} {
+	for _, h := range []string{j.Frozen, j.ArchiveSHA256, j.BinarySHA256, j.ManagerSHA256, j.CertSHA256, j.KeySHA256, j.UnitSHA256, j.ReviewToken, j.HelperSHA256} {
 		if h != "" && !hashSyntax.MatchString(h) {
 			return false
 		}
@@ -55,7 +60,7 @@ func validJournal(j *journal) bool {
 			return false
 		}
 	} else {
-		if !hashSyntax.MatchString(j.ManagerSHA256) || !hashSyntax.MatchString(j.ArchiveSHA256) || !hashSyntax.MatchString(j.CertSHA256) || !hashSyntax.MatchString(j.KeySHA256) || len(j.DatabaseTargets) != 2 || j.ExecutorGeneration < 1 || j.ReviewToken == "" {
+		if !hashSyntax.MatchString(j.ManagerSHA256) || !hashSyntax.MatchString(j.ArchiveSHA256) || !hashSyntax.MatchString(j.CertSHA256) || !hashSyntax.MatchString(j.KeySHA256) || len(j.DatabaseTargets) != 2 || j.ExecutorGeneration < 1 || j.ReviewToken == "" || !hashSyntax.MatchString(j.HelperSHA256) || !safePath(j.HelperPath) {
 			return false
 		}
 		if j.State == "draft" || j.State == "ready" || j.State == "blocked" {

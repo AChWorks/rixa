@@ -50,6 +50,13 @@ func (m *Manager) resumable(ctx context.Context, j *journal) bool {
 	if e != nil || h != j.ManagerSHA256 || !trustedExecutable(filepath.Join(managerRoot, j.ManagerSHA256)) {
 		return false
 	}
+	if !trustedExecutable(filepath.Join(m.helperDir(j), "gh")) {
+		return false
+	}
+	helperHash, he := hashFile(filepath.Join(m.helperDir(j), "gh"))
+	if he != nil || helperHash != j.HelperSHA256 {
+		return false
+	}
 	observed, e := databaseIdentities(ctx, j.Draft)
 	if e != nil || !reflect.DeepEqual(observed, j.DatabaseTargets) {
 		return false
@@ -92,7 +99,7 @@ func (m *Manager) queue(ctx context.Context, j *journal) (Result, error) {
 		return Result{}, e
 	}
 	manager := filepath.Join(managerRoot, j.ManagerSHA256)
-	_, e := m.run(ctx, "/usr/bin/systemd-run", "--unit="+strings.TrimSuffix(executorName(j), ".service"), "--property=Type=exec", "--property=RuntimeMaxSec=600", "--property=KillMode=control-group", "--collect", manager, "manage", "internal-apply", j.Draft.OperationID)
+	_, e := m.run(ctx, "/usr/bin/systemd-run", "--unit="+strings.TrimSuffix(executorName(j), ".service"), "--property=Type=exec", "--property=RuntimeMaxSec=600", "--property=KillMode=control-group", "--collect", "--property=EnvironmentFile="+filepath.Join(m.stateRoot, j.Draft.OperationID+".transport.env"), "--setenv=PATH="+m.helperDir(j)+":/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", manager, "manage", "internal-apply", j.Draft.OperationID)
 	if e != nil {
 		j.State, j.Code, j.Message = "reconciliation-required", "executor-acknowledgement-unknown", "Inspect the exact executor "+executorName(j)+" and retained state; its unknown start is not replayed."
 		_ = m.save(j)

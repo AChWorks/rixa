@@ -39,6 +39,7 @@ func redactDiagnostic(s string, d Draft) string {
 			if password, ok := u.User.Password(); ok && password != "" {
 				s = strings.ReplaceAll(s, password, "[redacted]")
 				s = strings.ReplaceAll(s, url.QueryEscape(password), "[redacted]")
+				s = strings.ReplaceAll(s, url.PathEscape(password), "[redacted]")
 			}
 		}
 		// libpq syntax is not a URL. Keep endpoint/database context and mask its

@@ -81,7 +81,7 @@ func RuntimeStage(parent context.Context, args []string) error {
 	receipt := stageReceipt{Stage: args[0], Code: "verified"}
 	switch args[0] {
 	case "prepare":
-		for _, p := range []string{runtimeRoot + "/tls", "/var/lib/rixa/site-a", "/var/lib/rixa/site-a/media"} {
+		for _, p := range []string{runtimeRoot + "/tls", "/var/lib/rixa/site-a", "/var/lib/rixa/site-a/media", "/var/lib/rixa/site-a/public"} {
 			if e = privateDir(p, os.Geteuid(), true); e != nil {
 				return e
 			}

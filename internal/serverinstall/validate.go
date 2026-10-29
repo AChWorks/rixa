@@ -130,7 +130,7 @@ func configBytes(d Draft, controlPrincipal, sitePrincipal string) []byte {
 		"startup_timeout": "15s", "shutdown_timeout": "15s",
 		"tls":     map[string]string{"cert_file": "/etc/rixa/runtime/tls/cert.pem", "key_file": "/etc/rixa/runtime/tls/key.pem"},
 		"control": map[string]string{"origin": d.ControlOrigin, "database_env": "RIXA_CONTROL_DSN", "admin_principal": controlPrincipal},
-		"sites":   []any{map[string]any{"id": "site-a", "origin": d.SiteOrigin, "database_env": "RIXA_SITE_DSN", "admin_principal": sitePrincipal, "media_root": "/var/lib/rixa/site-a/media"}},
+		"sites":   []any{map[string]any{"id": "site-a", "origin": d.SiteOrigin, "database_env": "RIXA_SITE_DSN", "admin_principal": sitePrincipal, "media_root": "/var/lib/rixa/site-a/media", "public_root": "/var/lib/rixa/site-a/public", "public_policy": map[string]any{"indexing": "noindex", "snippet": "none", "crawlers": []any{map[string]string{"user_agent": "*", "access": "disallow", "purpose": "search"}}}}},
 	}
 	b, _ := json.Marshal(v)
 	return b

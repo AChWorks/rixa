@@ -154,7 +154,11 @@ func (m *Manager) review(ctx context.Context, j *journal) []Problem {
 	if _, e = user.Lookup("rixa"); e == nil && j.UID == 0 {
 		add("runtime_user", "ownership", "An existing rixa account is not owned by this operation; inspect it instead of replacing it.")
 	}
-	for _, path := range []string{runtimeRoot, "/var/lib/rixa", releaseRoot, unitPath, unitPath + ".d", "/etc/rixa/service.env"} {
+	loaded, _ := m.run(ctx, "/usr/bin/systemctl", "show", "--property=LoadState", "--value", "rixa.service")
+	if strings.TrimSpace(string(loaded)) != "not-found" {
+		add("service", "existing-unit", "The rixa service name is already loaded or cannot be proven absent; inspect its owner.")
+	}
+	for _, path := range []string{"/run/systemd/system/rixa.service", "/run/systemd/system/rixa.service.d", runtimeRoot, "/var/lib/rixa", releaseRoot, unitPath, unitPath + ".d", "/etc/rixa/service.env"} {
 		if _, e = os.Lstat(path); e == nil {
 			add("host", "existing-material", "Existing Rixa paths require the retained owning operation; first installation will not overwrite them.")
 		} else if !errors.Is(e, os.ErrNotExist) {
@@ -175,6 +179,13 @@ func (m *Manager) review(ctx context.Context, j *journal) []Problem {
 			if e != nil || time.Now().Before(leaf.NotBefore) || !time.Now().Before(leaf.NotAfter) {
 				add("tls_cert", "tls-validity", "The TLS certificate must be currently valid.")
 			} else {
+				serverAuth := len(leaf.ExtKeyUsage) == 0
+				for _, usage := range leaf.ExtKeyUsage {
+					serverAuth = serverAuth || usage == x509.ExtKeyUsageAny || usage == x509.ExtKeyUsageServerAuth
+				}
+				if !serverAuth {
+					add("tls_cert", "tls-usage", "The certificate must allow TLS server authentication.")
+				}
 				for _, o := range []string{d.ControlOrigin, d.SiteOrigin} {
 					u, _ := url.Parse(o)
 					if u == nil || leaf.VerifyHostname(u.Hostname()) != nil {
@@ -195,6 +206,28 @@ func (m *Manager) review(ctx context.Context, j *journal) []Problem {
 		return p
 	}
 	j.CertSHA256, j.KeySHA256 = digest(cert), digest(key)
+	helper, e := exec.LookPath("gh")
+	if e == nil {
+		helper, e = filepath.EvalSymlinks(helper)
+	}
+	if e != nil || !trustedExecutable(helper) {
+		add("archive", "helper-required", "Install the trusted official supported gh helper under root-owned non-writable parents.")
+		return p
+	}
+	helperHash, e := hashFile(helper)
+	if e != nil {
+		add("archive", "helper-required", "The trusted gh executable cannot be bounded and frozen.")
+		return p
+	}
+	j.HelperPath, j.HelperSHA256 = helper, helperHash
+	j.TransportEnv = transportEnvironment()
+	for _, v := range j.TransportEnv {
+		if len(v) > 4096 || strings.ContainsAny(v, "\r\n\x00") {
+			j.TransportEnv = nil
+			add("archive", "invalid-transport", "Standard verification transport settings must be bounded and contain no newline/NUL.")
+			return p
+		}
+	}
 	v, e := m.verify(ctx, releaseartifact.Request{ArchivePath: d.ArchivePath, BundlePath: d.BundlePath, ReleaseTag: d.Release, SourceCommit: d.SourceCommit})
 	if e != nil || v.Status != "verified" {
 		add("archive", v.Code, "Publisher verification failed. Inspect the selected archive/bundle/tag/source and trusted gh helper.")
@@ -247,12 +280,14 @@ func (m *Manager) Apply(ctx context.Context, id, expectedReviewToken string) (Re
 	}
 	priorArchive, priorCert, priorKey := j.ArchiveSHA256, j.CertSHA256, j.KeySHA256
 	priorTargets := j.DatabaseTargets
+	priorHelper := j.HelperSHA256
+	priorTransport := j.TransportEnv
 	if p := m.review(ctx, j); len(p) > 0 {
 		r := result(j)
 		r.Problems = p
 		return r, ErrPrerequisite
 	}
-	if priorArchive != j.ArchiveSHA256 || priorCert != j.CertSHA256 || priorKey != j.KeySHA256 || !reflect.DeepEqual(priorTargets, j.DatabaseTargets) {
+	if priorArchive != j.ArchiveSHA256 || priorCert != j.CertSHA256 || priorKey != j.KeySHA256 || !reflect.DeepEqual(priorTargets, j.DatabaseTargets) || priorHelper != j.HelperSHA256 || !reflect.DeepEqual(priorTransport, j.TransportEnv) {
 		return result(j), ErrState
 	}
 	for _, s := range []struct{ source, suffix, hash string }{{j.Draft.TLSCertPath, ".tls-cert", j.CertSHA256}, {j.Draft.TLSKeyPath, ".tls-key", j.KeySHA256}} {
@@ -280,6 +315,12 @@ func (m *Manager) Apply(ctx context.Context, id, expectedReviewToken string) (Re
 		return result(j), e
 	}
 	j.ManagerSHA256 = filepath.Base(manager)
+	if e = m.snapshotHelper(j); e != nil {
+		return result(j), e
+	}
+	if e = writeExpected(filepath.Join(m.stateRoot, id+".transport.env"), transportFile(j.TransportEnv), 0600, m.ownerUID); e != nil {
+		return result(j), e
+	}
 	j.Frozen = draftDigest(j.Draft)
 	j.Stage = "executor"
 	return m.queue(ctx, j)

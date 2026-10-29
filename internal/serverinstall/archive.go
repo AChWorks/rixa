@@ -7,6 +7,7 @@ import (
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
+	"debug/buildinfo"
 	"encoding/hex"
 	"errors"
 	"golang.org/x/sys/unix"
@@ -208,6 +209,9 @@ func extractAuthenticated(archive, output string, d Draft) (string, error) {
 			return "", ErrInput
 		}
 	}
+	if e = validateCompiled(filepath.Join(output, "rixa"), info); e != nil {
+		return "", e
+	}
 	binary, e := os.ReadFile(filepath.Join(output, "rixa"))
 	if e != nil {
 		return "", ErrState
@@ -236,4 +240,34 @@ func hashFile(path string) (string, error) {
 		return "", ErrState
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+func validateCompiled(path string, metadata packageInfo) error {
+	info, e := buildinfo.ReadFile(path)
+	if e != nil || info.Path != "github.com/AChWorks/rixa/cmd/rixa" || info.Main.Path != "github.com/AChWorks/rixa" || info.GoVersion != metadata.Go {
+		return ErrInput
+	}
+	settings := map[string]string{}
+	for _, s := range info.Settings {
+		settings[s.Key] = s.Value
+	}
+	if settings["GOOS"] != "linux" || settings["GOARCH"] != "amd64" || settings["CGO_ENABLED"] != "0" {
+		return ErrInput
+	}
+	observed := map[string]string{}
+	for _, dep := range info.Deps {
+		if dep.Replace != nil {
+			return ErrInput
+		}
+		if _, wanted := metadata.Components[dep.Path]; wanted {
+			if _, duplicate := observed[dep.Path]; duplicate {
+				return ErrInput
+			}
+			observed[dep.Path] = dep.Version
+		}
+	}
+	if !reflect.DeepEqual(observed, metadata.Components) {
+		return ErrInput
+	}
+	return nil
 }

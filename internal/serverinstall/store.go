@@ -19,6 +19,9 @@ import (
 const maxStateBytes = 64 << 10
 
 type journal struct {
+	TransportEnv         map[string]string `json:"transport_env,omitempty"`
+	HelperPath           string            `json:"helper_path,omitempty"`
+	HelperSHA256         string            `json:"helper_sha256,omitempty"`
 	ReviewToken          string            `json:"review_token,omitempty"`
 	ExecutorGeneration   int               `json:"executor_generation,omitempty"`
 	ExecutorAcknowledged bool              `json:"executor_acknowledged,omitempty"`

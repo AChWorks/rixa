@@ -332,6 +332,9 @@ func (m *Manager) installService(ctx context.Context, j *journal) error {
 	if _, e := m.run(ctx, "/usr/bin/systemctl", "daemon-reload"); e != nil {
 		return e
 	}
+	if e := m.loadedServiceOwned(ctx, j, false); e != nil {
+		return e
+	}
 	if _, e := m.run(ctx, "/usr/bin/systemctl", "enable", "--now", "rixa.service"); e != nil {
 		return e
 	}
@@ -365,6 +368,9 @@ func (m *Manager) Remove(ctx context.Context, id string) (Result, error) {
 		return result(j), ErrState
 	}
 	if e = m.checkOwnedService(j); e != nil {
+		return result(j), e
+	}
+	if e = m.loadedServiceOwned(ctx, j, false); e != nil {
 		return result(j), e
 	}
 	j.Stage = "remove"

@@ -28,7 +28,7 @@ func (m *Manager) checkOwnedService(j *journal) error {
 		return e
 	}
 	info, e := os.Lstat(unitPath)
-	if e != nil || !info.Mode().IsRegular() || info.Mode().Perm() != 0644 || fileUID(info) != 0 {
+	if e != nil || !info.Mode().IsRegular() || info.Mode().Perm() != 0644 || info.Size() != int64(len(m.serviceBytes(j))) || fileUID(info) != 0 {
 		return ErrState
 	}
 	b, e := os.ReadFile(unitPath)
@@ -55,35 +55,10 @@ func (m *Manager) validateInstalled(ctx context.Context, j *journal) error {
 	if e := m.checkOwnedService(j); e != nil {
 		return e
 	}
-	b, e := m.run(ctx, "/usr/bin/systemctl", "show", "--property=FragmentPath", "--property=DropInPaths", "--property=ActiveState", "--property=MainPID", "rixa.service")
-	if e != nil {
+	if e := m.loadedServiceOwned(ctx, j, true); e != nil {
 		return e
 	}
-	p := properties(b)
-	if p["FragmentPath"] != unitPath || p["DropInPaths"] != "" || p["ActiveState"] != "active" {
-		return ErrPrerequisite
-	}
-	pid, e := strconv.ParseUint(p["MainPID"], 10, 32)
-	if e != nil || pid == 0 {
-		return ErrState
-	}
-	proc := "/proc/" + strconv.FormatUint(pid, 10)
-	target, e := os.Readlink(proc + "/exe")
-	if e != nil || target != m.binaryPath(j) {
-		return ErrState
-	}
-	pi, e := os.Stat(proc)
-	if e != nil || fileUID(pi) != j.UID {
-		return ErrState
-	}
-	actual, e := os.Stat(proc + "/exe")
-	if e != nil {
-		return ErrState
-	}
-	expected, e := os.Stat(m.binaryPath(j))
-	if e != nil || !os.SameFile(actual, expected) {
-		return ErrState
-	}
+
 	config, e := readPrivate(runtimeConfigPath, int(j.UID), 1<<20)
 	if e != nil || !bytes.Equal(config, configBytes(j.Draft, j.ControlPrincipal, j.SitePrincipal)) {
 		return ErrState
@@ -215,6 +190,25 @@ func verifyLogin(ctx context.Context, client *http.Client, origin, login, passwo
 		_ = r.Body.Close()
 		if r.StatusCode != http.StatusNoContent {
 			err = errors.Join(err, ErrState)
+		} else {
+			probe, e := http.NewRequestWithContext(revokeCtx, http.MethodGet, origin+"/auth/csrf", nil)
+			if e != nil {
+				err = errors.Join(err, ErrState)
+			} else {
+				probe.Header.Set("Origin", origin)
+				probe.Header.Set("X-Identity-Request", "1")
+				probe.AddCookie(cookie)
+				proof, e := client.Do(probe)
+				if e != nil {
+					err = errors.Join(err, ErrState)
+				} else {
+					_, _ = io.Copy(io.Discard, io.LimitReader(proof.Body, 64<<10))
+					_ = proof.Body.Close()
+					if proof.StatusCode != http.StatusUnauthorized {
+						err = errors.Join(err, ErrState)
+					}
+				}
+			}
 		}
 		cookie.Value = ""
 		session.CSRF = ""
@@ -234,6 +228,52 @@ func verifyLogin(ctx context.Context, client *http.Client, origin, login, passwo
 	_, e = io.Copy(io.Discard, io.LimitReader(r.Body, 2<<20))
 	_ = r.Body.Close()
 	if e != nil || r.StatusCode != http.StatusOK {
+		return ErrPrerequisite
+	}
+	return nil
+}
+
+func (m *Manager) loadedServiceOwned(ctx context.Context, j *journal, requireActive bool) error {
+	b, e := m.run(ctx, "/usr/bin/systemctl", "show", "--property=FragmentPath", "--property=DropInPaths", "--property=ActiveState", "--property=MainPID", "rixa.service")
+	if e != nil {
+		return e
+	}
+	p := properties(b)
+	if p["FragmentPath"] != unitPath || p["DropInPaths"] != "" {
+		return ErrState
+	}
+	state := p["ActiveState"]
+	if state != "active" && state != "inactive" && state != "failed" {
+		return ErrState
+	}
+	pid, e := strconv.ParseUint(p["MainPID"], 10, 32)
+	if e != nil {
+		return ErrState
+	}
+	if pid == 0 {
+		if requireActive || state == "active" {
+			return ErrPrerequisite
+		}
+		return nil
+	}
+	proc := "/proc/" + strconv.FormatUint(pid, 10)
+	target, e := os.Readlink(proc + "/exe")
+	if e != nil || target != m.binaryPath(j) {
+		return ErrState
+	}
+	pi, e := os.Stat(proc)
+	if e != nil || fileUID(pi) != j.UID {
+		return ErrState
+	}
+	actual, e := os.Stat(proc + "/exe")
+	if e != nil {
+		return ErrState
+	}
+	expected, e := os.Stat(m.binaryPath(j))
+	if e != nil || !os.SameFile(actual, expected) {
+		return ErrState
+	}
+	if requireActive && state != "active" {
 		return ErrPrerequisite
 	}
 	return nil
