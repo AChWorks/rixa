@@ -198,6 +198,18 @@ def verify_bundle(package):
             raise PublishError("trusted provenance verifier unavailable or timed out; no release created") from None
         if result.returncode != 0:
             detail = result.stderr.decode(errors="replace")[-4096:]
+            if len(result.stdout) <= 262144:
+                try:
+                    failure = json.loads(result.stdout)
+                    if isinstance(failure, dict) and failure.get("schema") == "rixa.artifact-verification.v1":
+                        diagnostic = {key: failure[key][:4096] for key in ("code", "field", "detail") if isinstance(failure.get(key), str)}
+                        detail = json.dumps(diagnostic, ensure_ascii=True) + " " + detail
+                except ValueError:
+                    pass
+            for key in ("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"):
+                token = os.environ.get(key)
+                if token:
+                    detail = detail.replace(token, "[redacted]")
             detail = "".join(c if c.isprintable() or c == "\n" else " " for c in detail)
             raise PublishError("attestation verification failed; no release created: " + detail)
         if len(result.stdout) > 65536:

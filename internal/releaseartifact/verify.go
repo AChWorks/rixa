@@ -172,7 +172,11 @@ func verify(parent context.Context, request Request, discover func() (string, er
 	claim, err := checkPolicy(output, request, archive.digest)
 	if err != nil {
 		result.Code = "policy-mismatch"
-		result.Detail = "Rixa release policy rejected the authenticated certificate or payload identity. " + result.Detail
+		var field policyField
+		if errors.As(err, &field) {
+			result.Field = string(field)
+		}
+		result.Detail = "Rixa release policy rejected authenticated field " + result.Field + ". Inspect the selected release and source; do not bypass verification. " + result.Detail
 		return result, ErrPolicy
 	}
 	result.Status, result.Code = "verified", "ok"

@@ -51,34 +51,66 @@ type verifiedClaim struct {
 // These values are read only from gh's cryptographically verified certificate
 // result. Statement predicates are workflow-controlled and cannot establish
 // repository ownership, source, trigger, runner or signer authority.
+type policyField string
+
+func (field policyField) Error() string { return ErrPolicy.Error() + ": " + string(field) }
+func (field policyField) Unwrap() error { return ErrPolicy }
+
 func checkPolicy(data []byte, request Request, digest string) (string, error) {
 	if len(data) == 0 || len(data) > maxOutputBytes || uniqueJSON(data) != nil {
-		return "", ErrPolicy
+		return "", policyField("verificationResult")
 	}
 	var claims []verifiedClaim
 	if json.Unmarshal(data, &claims) != nil || len(claims) != 1 {
-		return "", ErrPolicy
+		return "", policyField("verificationResult")
 	}
 	verified := claims[0].VerificationResult
 	c := verified.Signature.Certificate
 	ref := "refs/tags/" + request.ReleaseTag
 	workflowURI := "https://github.com/" + Workflow + "@" + ref
-	if c.Issuer != "https://token.actions.githubusercontent.com" || c.SAN != workflowURI || c.SignerURI != workflowURI || c.SignerDigest != request.SourceCommit || c.ConfigURI != workflowURI || c.ConfigDigest != request.SourceCommit || c.Runner != "github-hosted" || c.Trigger != "push" {
-		return "", ErrPolicy
+	checks := []struct{ field, actual, expected string }{
+		{"issuer", c.Issuer, "https://token.actions.githubusercontent.com"},
+		{"subjectAlternativeName", c.SAN, workflowURI},
+		{"buildSignerURI", c.SignerURI, workflowURI},
+		{"buildSignerDigest", c.SignerDigest, request.SourceCommit},
+		{"buildConfigURI", c.ConfigURI, workflowURI},
+		{"buildConfigDigest", c.ConfigDigest, request.SourceCommit},
+		{"runnerEnvironment", c.Runner, "github-hosted"},
+		{"buildTrigger", c.Trigger, "push"},
+		{"sourceRepositoryURI", c.RepositoryURI, "https://github.com/" + Repository},
+		{"sourceRepositoryOwnerURI", c.OwnerURI, "https://github.com/AChWorks"},
+		{"sourceRepositoryIdentifier", c.RepositoryID, "1403734531"},
+		{"sourceRepositoryOwnerIdentifier", c.OwnerID, "80599060"},
+		{"sourceRepositoryDigest", c.RepositoryDigest, request.SourceCommit},
+		{"sourceRepositoryRef", c.RepositoryRef, ref},
 	}
-	if c.RepositoryURI != "https://github.com/"+Repository || c.OwnerURI != "https://github.com/AChWorks" || c.RepositoryID != "1403734531" || c.OwnerID != "80599060" || c.RepositoryDigest != request.SourceCommit || c.RepositoryRef != ref {
-		return "", ErrPolicy
+	for _, check := range checks {
+		if check.actual != check.expected {
+			return "", policyField("certificate." + check.field)
+		}
 	}
-	if len(verified.Timestamps) == 0 || len(verified.Timestamps) > 16 || verified.Statement.Type != "https://in-toto.io/Statement/v1" || verified.Statement.PredicateType != "https://slsa.dev/provenance/v1" || len(verified.Statement.Subject) != 1 {
-		return "", ErrPolicy
+	if len(verified.Timestamps) == 0 || len(verified.Timestamps) > 16 {
+		return "", policyField("verifiedTimestamps")
+	}
+	if verified.Statement.Type != "https://in-toto.io/Statement/v1" {
+		return "", policyField("statement._type")
+	}
+	if verified.Statement.PredicateType != "https://slsa.dev/provenance/v1" {
+		return "", policyField("statement.predicateType")
+	}
+	if len(verified.Statement.Subject) != 1 {
+		return "", policyField("statement.subject")
 	}
 	subject := verified.Statement.Subject[0]
-	if subject.Name != "rixa-"+request.ReleaseTag+"-linux-amd64.tar.gz" || len(subject.Digest) != 1 || subject.Digest["sha256"] != digest {
-		return "", ErrPolicy
+	if subject.Name != "rixa-"+request.ReleaseTag+"-linux-amd64.tar.gz" {
+		return "", policyField("statement.subject.name")
+	}
+	if len(subject.Digest) != 1 || subject.Digest["sha256"] != digest {
+		return "", policyField("statement.subject.digest")
 	}
 	u, err := url.Parse(c.RunURI)
 	if err != nil || u.Scheme != "https" || u.Host != "github.com" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.RawPath != "" || !runPathSyntax.MatchString(u.Path) {
-		return "", ErrPolicy
+		return "", policyField("certificate.runInvocationURI")
 	}
 	return c.RunURI, nil
 }

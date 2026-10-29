@@ -63,8 +63,10 @@ func TestVerifiedClaimPolicy(t *testing.T) {
 		t.Run(field, func(t *testing.T) {
 			claim := claimFixture(r, digest)
 			certOf(claim)[field] = "unexpected"
-			if _, err := checkPolicy(claimJSON(t, claim), r, digest); !errors.Is(err, ErrPolicy) {
-				t.Fatal("mismatched authenticated certificate claim accepted")
+			_, err := checkPolicy(claimJSON(t, claim), r, digest)
+			var rejected policyField
+			if !errors.Is(err, ErrPolicy) || !errors.As(err, &rejected) || string(rejected) != "certificate."+field {
+				t.Fatalf("certificate mismatch lost its diagnostic field: %v", err)
 			}
 		})
 	}

@@ -325,6 +325,19 @@ class VerifierReceiptTests(PackageFixture, unittest.TestCase):
                 with self.assertRaises(publish.PublishError):
                     self.run_receipt(bad)
 
+    def test_failed_policy_receipt_preserves_reason_without_job_token(self):
+        receipt = self.receipt()
+        receipt.update(status="not-verified", code="policy-mismatch",
+            field="certificate.sourceRepositoryIdentifier",
+            detail="Inspect the publisher identity; private-job-token must stay private.")
+        with self.assertRaises(publish.PublishError) as caught:
+            self.run_receipt(receipt, exit_code=1)
+        message = str(caught.exception)
+        self.assertIn("policy-mismatch", message)
+        self.assertIn("certificate.sourceRepositoryIdentifier", message)
+        self.assertIn("Inspect the publisher identity", message)
+        self.assertNotIn("private-job-token", message)
+
     def test_valid_requested_identity_with_nonzero_exit_is_rejected(self):
         with self.assertRaisesRegex(publish.PublishError, "attestation verification failed"):
             self.run_receipt(self.receipt(), exit_code=1)
