@@ -27,17 +27,22 @@ type key struct {
 }
 
 type session struct {
-	input     *os.File
-	output    io.Writer
-	full      bool
-	color     bool
-	width     int
-	height    int
-	old       *term.State
-	pending   []byte
-	escape    []byte
-	inEscape  bool
-	lastPaint string
+	input         *os.File
+	output        io.Writer
+	full          bool
+	color         bool
+	width         int
+	height        int
+	old           *term.State
+	pending       []byte
+	escape        []byte
+	inEscape      bool
+	inPaste       bool
+	pasteDiscard  bool
+	paste         []byte
+	pasteMatch    int
+	pasteDeadline time.Time
+	lastPaint     string
 }
 
 // SafeText makes untrusted values inert in the terminal. Bidi controls are
@@ -118,6 +123,9 @@ func (s *session) readKey(ctx context.Context) (key, error) {
 	for {
 		if err := ctx.Err(); err != nil {
 			return key{}, err
+		}
+		if s.inPaste {
+			return s.readPaste(ctx)
 		}
 		if s.inEscape {
 			return s.readEscape(ctx)
@@ -279,6 +287,11 @@ func (s *session) readEscape(ctx context.Context) (key, error) {
 			s.inEscape = false
 			switch sequence {
 			case "\x1b[200~":
+				s.inPaste = true
+				s.pasteDiscard = false
+				s.pasteMatch = 0
+				s.paste = make([]byte, 0, 8192+len(pasteEnd))
+				s.pasteDeadline = time.Now().Add(3 * time.Second)
 				return s.readPaste(ctx)
 			case "\x1b[A":
 				return key{name: "up"}, nil
@@ -373,53 +386,82 @@ func (s *session) wait(ctx context.Context) error {
 	}
 }
 
-// Bracketed paste is one bounded input event; embedded newlines cannot submit
-// passwords or silently advance the wizard.
+// Bracketed paste is atomic until its closing marker. After timeout/overflow,
+// retain only delimiter matching state: every remaining byte of that same paste
+// stays quarantined, including newlines, across subsequent polling ticks.
+const pasteEnd = "\x1b[201~"
+
+func (s *session) rejectPaste() {
+	clear(s.paste)
+	s.paste = nil
+	s.pasteDiscard = true
+}
+func (s *session) finishPaste() {
+	clear(s.paste)
+	s.paste = nil
+	s.inPaste = false
+	s.pasteDiscard = false
+	s.pasteMatch = 0
+	s.pasteDeadline = time.Time{}
+}
 func (s *session) readPaste(ctx context.Context) (key, error) {
-	b := append([]byte(nil), s.pending...)
-	s.pending = nil
-	deadline := time.Now().Add(3 * time.Second)
-	overflow := false
+	deadline := time.Now().Add(150 * time.Millisecond)
 	for {
-		if i := strings.Index(string(b), "\x1b[201~"); i >= 0 {
-			s.pending = append(s.pending, b[i+6:]...)
-			if overflow || i > 8192 {
-				return key{name: "paste-invalid"}, nil
-			}
-			return key{name: "paste", text: string(b[:i])}, nil
-		}
-		if len(b) > 8192 {
-			overflow = true
-			b = append([]byte(nil), b[len(b)-6:]...)
-		}
 		if err := ctx.Err(); err != nil {
+			s.rejectPaste()
 			return key{}, err
 		}
-		if time.Now().After(deadline) {
+		now := time.Now()
+		if !s.pasteDiscard && !now.Before(s.pasteDeadline) {
+			s.rejectPaste()
 			return key{name: "paste-invalid"}, nil
 		}
-		p := []unix.PollFd{{Fd: int32(s.input.Fd()), Events: unix.POLLIN}}
-		n, err := unix.Poll(p, 100)
-		if err == unix.EINTR {
-			continue
+		if !now.Before(deadline) {
+			return key{name: "tick"}, nil
 		}
-		if err != nil {
-			return key{}, err
+		if len(s.pending) == 0 {
+			wait := time.Until(deadline)
+			if !s.pasteDiscard {
+				wait = min(wait, time.Until(s.pasteDeadline))
+			}
+			available, err := s.readMore(ctx, wait)
+			if err != nil {
+				s.rejectPaste()
+				return key{}, err
+			}
+			if !available {
+				continue
+			}
 		}
-		if n == 0 {
-			continue
+		b := s.pending[0]
+		s.pending = s.pending[1:]
+		if s.pasteDiscard && (b == 3 || b == 4) {
+			return key{name: "quit"}, nil
 		}
-		more := make([]byte, 1024)
-		n, err = unix.Read(int(s.input.Fd()), more)
-		if err == unix.EINTR {
-			continue
+		if b == pasteEnd[s.pasteMatch] {
+			s.pasteMatch++
+		} else if b == pasteEnd[0] {
+			s.pasteMatch = 1
+		} else {
+			s.pasteMatch = 0
 		}
-		if err != nil {
-			return key{}, err
+		if !s.pasteDiscard {
+			s.paste = append(s.paste, b)
 		}
-		if n == 0 {
-			return key{}, io.EOF
+		if s.pasteMatch == len(pasteEnd) {
+			if s.pasteDiscard {
+				s.finishPaste()
+				return key{name: "tick"}, nil
+			}
+			text := string(s.paste[:len(s.paste)-len(pasteEnd)])
+			s.finishPaste()
+			return key{name: "paste", text: text}, nil
 		}
-		b = append(b, more[:n]...)
+		// A possible delimiter prefix is not payload. This admits exactly 8192
+		// payload bytes even when the closing marker arrives in separate reads.
+		if !s.pasteDiscard && len(s.paste)-s.pasteMatch > 8192 {
+			s.rejectPaste()
+			return key{name: "paste-invalid"}, nil
+		}
 	}
 }

@@ -440,3 +440,56 @@ func TestTerminalPTYUnsupportedKeysDoNotEditTextOrSecrets(t *testing.T) {
 		t.Fatalf("unsupported key modified retained inputs: %#v", receipt)
 	}
 }
+
+func TestTerminalPTYDelayedPasteCannotLeaveMaskedPassword(t *testing.T) {
+	p := startPTY(t, "full")
+	position := p.await(t, 0, "1. Configure installation")
+	p.send(t, "\r")
+	position = p.await(t, position, "Control URL")
+	p.send(t, strings.Repeat("\r", 8))
+	position = p.await(t, position, "Control administrator password")
+	started := time.Now()
+	p.send(t, "\x1b[200~PRIVATE-PASTE-START-CANARY")
+	position = p.await(t, position, "Paste rejected")
+	if time.Since(started) < 3*time.Second {
+		t.Fatal("PTY regression did not cross the actual paste timeout")
+	}
+	p.send(t, "LATE-PRIVATE-PASSWORD-CANARY\nVISIBLE-TAIL-CANARY\x1b[20")
+	// Allow a bounded discard poll before the split closing marker arrives.
+	timer := time.NewTimer(200 * time.Millisecond)
+	<-timer.C
+	if !strings.Contains(lastScreen(p.text()), "Control administrator password") {
+		t.Fatal("timed-out paste advanced out of the masked field")
+	}
+	for _, secret := range []string{"PRIVATE-PASTE-START-CANARY", "LATE-PRIVATE-PASSWORD-CANARY", "VISIBLE-TAIL-CANARY"} {
+		if strings.Contains(p.text(), secret) {
+			t.Fatalf("delayed paste exposed %s", secret)
+		}
+	}
+	p.send(t, "1~FRESH-INDEPENDENT-SECRET-123\r")
+	p.await(t, position, "Site administrator login")
+	p.send(t, "\x03")
+	receipt := p.finish(t)
+	if receipt["saves"] != float64(0) || receipt["applies"] != float64(0) {
+		t.Fatal("delayed paste caused a persisted effect")
+	}
+	if strings.Contains(p.text(), "FRESH-INDEPENDENT-SECRET-123") {
+		t.Fatal("fresh input was not kept masked")
+	}
+}
+
+func TestTerminalPTYCanCancelWhileDiscardingOversizePaste(t *testing.T) {
+	p := startPTY(t, "full")
+	position := p.await(t, 0, "1. Configure installation")
+	p.send(t, "\r")
+	position = p.await(t, position, "Control URL")
+	p.send(t, strings.Repeat("\r", 8))
+	position = p.await(t, position, "Control administrator password")
+	p.send(t, "\x1b[200~"+strings.Repeat("a", 8193))
+	p.await(t, position, "Paste rejected")
+	p.send(t, "\x03")
+	receipt := p.finish(t)
+	if receipt["saves"] != float64(0) || receipt["applies"] != float64(0) {
+		t.Fatal("discard cancellation caused a persisted effect")
+	}
+}

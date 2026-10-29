@@ -95,7 +95,7 @@ func fetchRelease(ctx context.Context, s *session, fetch func(context.Context, s
 				}
 			}
 		case "paste-invalid":
-			notice = "Paste was incomplete or too long. No value changed."
+			notice = "Paste rejected. Ctrl-C exits. Discarding late input until paste ends; nothing changed."
 			firstRender = true
 		case "next", "enter":
 			if values[index] == "" {

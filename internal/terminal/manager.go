@@ -437,7 +437,7 @@ func configure(ctx context.Context, s *session, backend serverinstall.Facade, d 
 				first = true
 				continue
 			case "paste-invalid":
-				notice = "Paste was incomplete or exceeded 8192 bytes; no field was changed."
+				notice = "Paste rejected. Ctrl-C exits. Discarding late input until paste ends; nothing changed."
 				first = true
 				continue
 			case "text", "paste":
