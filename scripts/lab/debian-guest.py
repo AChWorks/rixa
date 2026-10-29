@@ -198,8 +198,8 @@ def boot(args):
     data = load(lab)
     with launch_lock(lab) as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        if (lab / "qmp.sock").exists() or (lab / "qmp.sock").is_symlink():
-            raise ValueError("QMP socket exists; reconcile the prior guest before another launch")
+        if any((lab / name).exists() or (lab / name).is_symlink() for name in ("qmp.sock", "console.sock")):
+            raise ValueError("console/QMP socket exists; reconcile the prior guest before another launch")
         if args.action == "install":
             iso = regular(lab / data["iso"])
             if digest(iso, "sha512") != data["iso_sha512"]:
@@ -210,8 +210,9 @@ def boot(args):
         print("serial_log=" + str(serial), flush=True)
         command = ["qemu-system-x86_64", "-name", "rixa-disposable-lab",
                    "-machine", "pc,accel=tcg", "-cpu", "max", "-m", "1024",
-                   "-smp", "1", "-display", "none", "-serial",
-                   "file:" + str(serial),
+                   "-smp", "1", "-display", "none", "-chardev",
+                   "socket,id=labserial,path=" + str(lab / "console.sock") + ",server=on,wait=off,logfile=" + str(serial) + ",logappend=on",
+                   "-serial", "chardev:labserial",
                    "-monitor", "none", "-drive",
                    "file=" + str(lab / "guest.qcow2") + ",format=qcow2,if=virtio",
                    "-netdev", "user,id=net0,hostfwd=tcp:127.0.0.1:" +
@@ -222,14 +223,15 @@ def boot(args):
             command += ["-no-reboot", "-cdrom", str(lab / data["iso"]),
                         "-kernel", str(lab / "vmlinuz"),
                         "-initrd", str(lab / "initrd-preseed.gz"), "-append",
-                        "auto=true priority=critical console=ttyS0,115200n8 DEBIAN_FRONTEND=text net.ifnames=0"]
+                        "auto=true priority=critical console=ttyS0,115200n8 DEBIAN_FRONTEND=text net.ifnames=0 --- console=ttyS0,115200n8 net.ifnames=0"]
         try:
             run(command)
         finally:
             # QEMU has exited and this instance still holds its launch lock.
-            sock = lab / "qmp.sock"
-            if sock.exists() and stat.S_ISSOCK(sock.lstat().st_mode) and sock.lstat().st_uid == os.getuid():
-                sock.unlink()
+            for name in ("qmp.sock", "console.sock"):
+                sock = lab / name
+                if sock.exists() and stat.S_ISSOCK(sock.lstat().st_mode) and sock.lstat().st_uid == os.getuid():
+                    sock.unlink()
 
 
 def main():

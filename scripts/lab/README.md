@@ -47,7 +47,7 @@ The installer exits on its first reboot. Inspect the printed private serial-log 
 python3 scripts/lab/debian-guest.py boot --lab /private/rixa-lab
 ```
 
-Only host loopback TCP ports `22291` (guest SSH 22) and `22443` (guest HTTPS 443) are forwarded. Existing listeners cause launch failure, not replacement. There is no shared host directory. A live launch holds a private lock; an existing QMP socket requires reconciliation before another launch.
+Only host loopback TCP ports `22291` (guest SSH 22) and `22443` (guest HTTPS 443) are forwarded. Existing listeners cause launch failure, not replacement. There is no shared host directory. A live launch holds a private lock; an existing console/QMP socket requires reconciliation before another launch. The private `console.sock` keeps the serial console available for explicit diagnosis while each boot retains a separate logfile. Installer arguments after `---` preserve the serial console and `net.ifnames=0` in the installed kernel so its declared `eth0` remains consistent across reboot.
 
 Use a private laboratory host-key file and key-only login:
 
@@ -59,11 +59,23 @@ ssh -p 22291 -i /private/rixa-lab/id_ed25519 \
   root@127.0.0.1
 ```
 
+For automated SSH commands, use `ssh -n` unless an explicitly supplied input stream is intended; otherwise SSH can consume a surrounding shell script.
+
 First-use host-key acceptance here is limited to the local owned VM forward; retain that file so a subsequent unexpected host-key change fails. Do not use this setting as general remote-host identity proof.
 
 ## Product evidence and cleanup
 
 Provision PostgreSQL 18 and laboratory certificates inside the guest as explicit fixtures. The optional `provision-postgres.sh` fixture is guarded by the explicit private guest marker, QEMU/Debian13 identity, reviewed PGDG key digest and a one-attempt record. It requires root-private `/root/lab/pgdg.asc` and an explicitly prepared `databases.sql` with two independent roles/databases; an interrupted fixture is inspected rather than silently recreated. Generated credentials and SQL stay outside Git. Use a laboratory CA and appropriate server certificate chain for the declared hostnames; never claim public trust from it. This does not prove Rixa provisions PostgreSQL or obtains public certificates. Transfer the independently trusted source-built manager separately from the exact published runtime archive/bundle. The manager must authenticate that signed archive before staging or executing it; a locally built unsigned archive is not a signature bypass.
+
+After installing the exact manager/runtime candidate, the guarded `content-smoke.py` fixture can run inside the marked guest using the original root-private draft and laboratory CA. It uses normal HTTPS login/CSRF and content routes to create/save/select/publish one test document, read its private preview and anonymous public page, then revoke both scope sessions. A private durable receipt retains attempted mutation IDs before requests; an existing or unresolved attempt is never silently recreated. Its `check` action verifies identical public bytes and authenticated preview after restart without creating new content. This is HTTP/persistence evidence, not browser or accessibility conformance.
+
+```bash
+python3 /root/lab/content-smoke.py publish --draft /root/lab/draft.json \
+  --ca /root/lab/ca.pem --receipt /root/lab/content-receipt.json
+# After the real guest/service restart:
+python3 /root/lab/content-smoke.py check --draft /root/lab/draft.json \
+  --ca /root/lab/ca.pem --receipt /root/lab/content-receipt.json
+```
 
 Prove real installation, protected configuration, service restart, TLS and administrator login, interrupted-operation reconciliation and ordinary removal/data preservation against the exact candidate. Record source/artifact identities, real exits, checks and remaining limits in the owning Issue/PR; mock checks or an SSH-ready guest do not establish product acceptance.
 
