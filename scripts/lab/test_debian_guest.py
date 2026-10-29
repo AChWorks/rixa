@@ -48,6 +48,28 @@ class LaboratoryBoundaryTests(unittest.TestCase):
                 labtool.launch_lock(root)
             self.assertEqual(sentinel.read_text(), "retain")
 
+    def test_refuses_a_fifo_launch_lock_without_hanging(self):
+        import subprocess
+        import sys
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            os.mkfifo(root / "qemu.lock")
+            code = ("import importlib.util,pathlib; s=importlib.util.spec_from_file_location('guest',"
+                    + repr(str(Path(__file__).with_name("debian-guest.py")))
+                    + "); m=importlib.util.module_from_spec(s); s.loader.exec_module(m); "
+                    + "m.launch_lock(pathlib.Path(" + repr(raw) + "))")
+            result = subprocess.run([sys.executable, "-B", "-c", code],
+                                    timeout=2, capture_output=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertTrue((root / "qemu.lock").is_fifo())
+
+    def test_refuses_oversized_metadata(self):
+        with tempfile.TemporaryDirectory() as raw:
+            path = Path(raw) / "lab.json"
+            path.write_bytes(b"x" * 65537)
+            with self.assertRaises(ValueError):
+                labtool.small_text(path, 65536)
+
     def test_refuses_changed_boot_inputs(self):
         with tempfile.TemporaryDirectory() as raw:
             import hashlib

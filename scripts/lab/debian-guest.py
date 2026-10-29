@@ -48,8 +48,20 @@ def regular(path):
     return path
 
 
+def small_text(path, limit=1 << 20):
+    fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
+    with os.fdopen(fd, "rb") as stream:
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_size > limit:
+            raise ValueError("unexpected metadata type, owner or size: " + path.name)
+        data = stream.read(limit + 1)
+        if len(data) > limit:
+            raise ValueError("metadata exceeds its bound: " + path.name)
+        return data.decode("utf-8")
+
+
 def download(url, target, limit):
-    run(["curl", "--proto", "=https", "--tlsv1.2", "--fail", "--silent",
+    run(["curl", "--proto", "=https", "--proto-redir", "=https", "--tlsv1.2", "--fail", "--silent",
          "--show-error", "--location", "--max-time", "600", "--max-filesize",
          str(limit), url, "--output", str(target)])
     regular(target)
@@ -68,7 +80,7 @@ def authenticate(lab, iso, keyring):
     if valid != [SIGNER]:
         raise ValueError("checksum signer is not the reviewed Debian CD signer")
     matches = []
-    for line in (lab / "SHA512SUMS").read_text().splitlines():
+    for line in small_text(lab / "SHA512SUMS").splitlines():
         parts = line.split()
         if len(parts) == 2 and parts[1] == iso.name:
             matches.append(parts[0])
@@ -100,7 +112,7 @@ def prepare(args):
             raise ValueError("installer kernel/initrd extraction failed")
     run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C",
          "rixa-disposable-lab", "-f", str(lab / "id_ed25519")])
-    key = (lab / "id_ed25519.pub").read_text().strip()
+    key = small_text(lab / "id_ed25519.pub", 4096).strip()
     password_hash = run(["openssl", "passwd", "-6", "-stdin"],
                         input=secrets.token_urlsafe(40) + "\n", text=True,
                         capture_output=True).stdout.strip()
@@ -158,7 +170,7 @@ d-i finish-install/reboot_in_progress note
 
 
 def load(lab):
-    data = json.loads(regular(lab / "lab.json").read_text())
+    data = json.loads(small_text(lab / "lab.json", 65536))
     if data.get("schema") != SCHEMA or data.get("uid") != os.getuid():
         raise ValueError("laboratory receipt ownership/schema mismatch")
     if data.get("signer") != SIGNER or not re.fullmatch(
@@ -173,7 +185,7 @@ def load(lab):
 
 
 def launch_lock(lab):
-    fd = os.open(lab / "qemu.lock", os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    fd = os.open(lab / "qemu.lock", os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
     info = os.fstat(fd)
     if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid():
         os.close(fd)
