@@ -11,11 +11,12 @@ import (
 )
 
 var (
-	ErrInput        = errors.New("invalid native installation input")
-	ErrAuthority    = errors.New("native management requires the infrastructure operator")
-	ErrBusy         = errors.New("another native management operation is active")
-	ErrState        = errors.New("native operation state requires inspection")
-	ErrPrerequisite = errors.New("native installation prerequisite is unavailable")
+	ErrInput          = errors.New("invalid native installation input")
+	ErrAuthority      = errors.New("native management requires the infrastructure operator")
+	ErrManagerChanged = errors.New("the executing manager image or its trusted pathname changed; restart the retained trusted manager")
+	ErrBusy           = errors.New("another native management operation is active")
+	ErrState          = errors.New("native operation state requires inspection")
+	ErrPrerequisite   = errors.New("native installation prerequisite is unavailable")
 )
 
 type Draft struct {

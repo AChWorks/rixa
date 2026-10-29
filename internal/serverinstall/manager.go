@@ -138,6 +138,9 @@ func (m *Manager) review(ctx context.Context, j *journal) []Problem {
 	d := j.Draft
 	p := ValidateDraft(d)
 	add := func(f, c, s string) { p = append(p, Problem{f, c, s}) }
+	if _, e := currentManagerImage(); e != nil {
+		add("host", "manager-path", "Install this trusted management executable under root-owned non-writable ancestors and restart that exact image before applying.")
+	}
 	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
 		add("host", "unsupported", "This native profile requires Linux amd64.")
 	}

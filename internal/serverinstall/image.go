@@ -15,7 +15,10 @@ func currentManagerImage() ([]byte, error) {
 		return nil, ErrState
 	}
 	path, e = filepath.EvalSymlinks(path)
-	if e != nil || !trustedExecutable(path) {
+	if e != nil {
+		return nil, ErrManagerChanged
+	}
+	if !trustedExecutable(path) {
 		return nil, ErrAuthority
 	}
 	f, e := os.Open("/proc/self/exe")
@@ -32,7 +35,7 @@ func readBoundImage(image *os.File, path string) ([]byte, error) {
 	}
 	named, e := os.Lstat(path)
 	if e != nil || !named.Mode().IsRegular() || !os.SameFile(actual, named) {
-		return nil, ErrState
+		return nil, ErrManagerChanged
 	}
 	data, e := io.ReadAll(io.LimitReader(image, (64<<20)+1))
 	after, ae := os.Lstat(path)
