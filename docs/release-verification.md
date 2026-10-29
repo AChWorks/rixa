@@ -32,6 +32,22 @@ The normal CMS runtime does not depend on GitHub CLI. Use the helper's [official
 
 A local bundle permits verification without logging into GitHub. Initial refresh of trusted signing metadata may still need network access; this is not a fully air-gapped verification profile. A future one-line bootstrap must independently establish its trusted helper before it executes elevated product code.
 
+## Fetch and verify a selected release
+
+A trusted Rixa build containing `artifact fetch` can resolve and download the three assets without manually transcribing their source commit or URLs. It checks the fixed official repository identities and actual tag, bounds network and file operations, and delegates publisher authentication to the same verifier above.
+
+Choose an existing trusted private parent and a new output directory:
+
+```bash
+rixa artifact fetch --channel stable --output /private/download/selected-release
+```
+
+Stable is the default and never falls back to a prerelease. When intentionally testing development packages, select `--channel development` instead. An exact `--release <version>` is also available and is mutually exclusive with `--channel`. Development discovery examines at most twenty published releases; select an exact tag when the intended version is outside that window.
+
+Accept only exit zero with `rixa.artifact-fetch.v1`, `status: verified`, `code: ok` and its nested successful verification receipt. The result supplies the selected tag/source and archive/checksum/bundle paths. Existing output directories are never adopted, cleared or overwritten. A failed fetch may leave bounded private partial files; they are unverified evidence, and another fetch needs a new directory.
+
+Fetch still requires the independently trusted Rixa executable and supported official `gh` helper. It does not establish the initial bootstrap trust root, extract a payload, install a service or authorize privileged execution. Activation must freeze and reverify the exact returned bytes under its own protected operation boundary.
+
 ## Meaning and limits of success
 
 Success identifies the bytes that were actually checked. It does not make an ordinary download pathname immutable. Installation must stage those exact bytes in protected storage, recheck the recorded digest and bind the intended candidate before replacement or privileged execution. The package's compiled component metadata, licenses, supported platform and schema compatibility need their own checks.
