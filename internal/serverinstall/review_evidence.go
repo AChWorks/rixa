@@ -4,16 +4,19 @@ package serverinstall
 import "maps"
 
 type reviewedEvidence struct {
-	archive, cert, key, helper string
-	databases, transport       map[string]string
+	archive, cert, key, helper, manager string
+	databases, transport                map[string]string
 }
 
 func captureReviewedEvidence(j *journal) reviewedEvidence {
-	return reviewedEvidence{j.ArchiveSHA256, j.CertSHA256, j.KeySHA256, j.HelperSHA256, maps.Clone(j.DatabaseTargets), maps.Clone(j.TransportEnv)}
+	return reviewedEvidence{j.ArchiveSHA256, j.CertSHA256, j.KeySHA256, j.HelperSHA256, j.ReviewedManagerSHA256, maps.Clone(j.DatabaseTargets), maps.Clone(j.TransportEnv)}
 }
 func changedReviewedEvidence(before reviewedEvidence, j *journal) []Problem {
 	var problems []Problem
 	add := func(field, message string) { problems = append(problems, Problem{field, "evidence-changed", message}) }
+	if before.manager != j.ReviewedManagerSHA256 {
+		add("host", "The executing management image changed after review. Review this exact trusted manager again before applying.")
+	}
 	if before.archive != j.ArchiveSHA256 {
 		add("archive", "The authenticated archive bytes changed. Review the exact selected release again.")
 	}

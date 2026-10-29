@@ -138,6 +138,10 @@ func TestUmaskCreationChild(t *testing.T) {
 	for _, n := range []string{"BUILDINFO.json", "config/rixa.example.json", "licenses/dep-1234/LICENSE"} {
 		assertOwnedMode(t, filepath.Join(out, n), 0644)
 	}
+	// Destination-local private staging and public activation preserve exact
+	// modes under the restrictive umask as well.
+	t.Run("destination-local-payload", TestPayloadStageIsPrivateOnDestinationFilesystem)
+	t.Run("no-replace-activation", TestPayloadActivationNeverReplacesExistingDestination)
 	// When supplied by the test operator, authenticate and extract a genuine
 	// published payload under the same isolated restrictive umask too.
 	if os.Getenv("RIXA_NATIVE_SIGNED_ARCHIVE") != "" {

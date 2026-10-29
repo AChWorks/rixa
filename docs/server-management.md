@@ -58,13 +58,13 @@ sudo rixa manage apply --operation first-install --review-token <token-from-that
 sudo rixa manage status --operation first-install
 ```
 
-A successful Review returns an opaque `review_token`. Apply requires that exact token under the installation lock. Saving the draft or issuing a new Review invalidates the previous confirmation; Status never supplies a replacement token. If the reviewed bytes, TLS material or physical database identities change, review the intended inputs again rather than forcing the previous token.
+A successful Review returns an opaque `review_token`. Apply requires that exact token under the installation lock. Saving the draft or issuing a new Review invalidates the previous confirmation; Status never supplies a replacement token. If the executing management image, reviewed bytes, TLS material or physical database identities change, review the intended inputs again rather than forcing the previous token.
 
 `manage menu --prefill /root/private/partial.json` can begin with private partial input. The caller's source/prefill file is not automatically deleted; manage that file's credential retention separately.
 
 ## Effects, supervision and retained identity
 
-Apply authenticates protected archive bytes before tar parsing or execution. Extraction rejects traversal, links, devices, duplicate names, unsupported sparse/PAX entries and additional gzip members. The adapter checks package completeness, legal notices and actual compiled Go dependency/target metadata; a text `BUILDINFO.json` cannot substitute for compiled component identity.
+Apply authenticates protected archive bytes before tar parsing or execution. Extraction rejects traversal, links, devices, duplicate names, unsupported sparse/PAX entries and additional gzip members. The adapter checks package completeness, legal notices and actual compiled Go dependency/target metadata; a text `BUILDINFO.json` cannot substitute for compiled component identity. Protected archive verification stays in management storage; extraction uses a private staging directory on the destination release filesystem and activates through an atomic no-replace rename. Separate `/var` and `/opt` filesystems do not require moving an extracted tree between mounts.
 
 The manager freezes its own executable and trusted helper identities separately from the selected serving payload. Standard verifier proxy/CA transport settings are retained in a private environment source. No arbitrary shell or runtime-selected privileged command is accepted.
 

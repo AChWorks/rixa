@@ -52,6 +52,7 @@ func TestReviewedEvidenceDriftInvalidatesPersistedConfirmation(t *testing.T) {
 		name, field string
 		change      func(*journal)
 	}{
+		{"manager", "host", func(j *journal) { j.ReviewedManagerSHA256 = strings.Repeat("f", 64) }},
 		{"archive", "archive", func(j *journal) { j.ArchiveSHA256 = strings.Repeat("f", 64) }},
 		{"certificate", "tls_cert", func(j *journal) { j.CertSHA256 = strings.Repeat("f", 64) }},
 		{"key", "tls_key", func(j *journal) { j.KeySHA256 = strings.Repeat("f", 64) }},
@@ -93,5 +94,39 @@ func TestReviewedEvidenceDriftInvalidatesPersistedConfirmation(t *testing.T) {
 				t.Fatalf("rejected token reused: %+v %v", r, e)
 			}
 		})
+	}
+}
+
+func TestReviewedExecutingImagePersistsExactConfirmation(t *testing.T) {
+	m := testManager(t)
+	j := reviewedJournal(validDraft())
+	imageA, imageB := []byte("executing trusted manager A"), []byte("executing trusted manager B")
+	j.ReviewedManagerSHA256 = digest(imageA)
+	if e := m.save(j); e != nil {
+		t.Fatal(e)
+	}
+	loaded, e := m.load(j.Draft.OperationID)
+	if e != nil {
+		t.Fatal(e)
+	}
+	before := captureReviewedEvidence(loaded)
+	loaded.ReviewedManagerSHA256 = digest(imageA)
+	if p := changedReviewedEvidence(before, loaded); len(p) != 0 {
+		t.Fatalf("same executing image rejected: %+v", p)
+	}
+	if loaded.ManagerSHA256 != "" {
+		t.Fatal("review falsely froze the manager")
+	}
+	loaded.ReviewedManagerSHA256 = digest(imageB)
+	p := changedReviewedEvidence(before, loaded)
+	if len(p) != 1 || p[0].Field != "host" {
+		t.Fatalf("changed executing image accepted: %+v", p)
+	}
+	r, e := m.rejectReview(loaded, "review-evidence-changed", p)
+	if !errors.Is(e, ErrPrerequisite) || r.State != "blocked" || r.ReviewToken != "" {
+		t.Fatalf("changed image retained permission: %+v %v", r, e)
+	}
+	if _, e = os.Lstat(filepath.Join(m.stateRoot, "installation")); !os.IsNotExist(e) {
+		t.Fatal("changed manager produced owner/freeze effects")
 	}
 }

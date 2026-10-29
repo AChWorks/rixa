@@ -189,10 +189,16 @@ func (m *Manager) installPayload(ctx context.Context, j *journal) error {
 		m.retainDiagnostic(j, fmt.Sprintf("publisher code=%s field=%s detail=%s", v.Code, v.Field, v.Detail))
 		return fmt.Errorf("%w: publisher code=%s field=%s", ErrPrerequisite, v.Code, v.Field)
 	}
-	out := filepath.Join(dir, "release")
-	if e = mkdirOwnedNew(out, 0755, os.Geteuid(), os.Getegid()); e != nil {
-		return ErrState
+	for _, path := range []string{"/opt/rixa", releaseRoot} {
+		if e = ownedPublicDir(path); e != nil {
+			return e
+		}
 	}
+	out, e := newPayloadStage(releaseRoot)
+	if e != nil {
+		return e
+	}
+	defer os.RemoveAll(filepath.Dir(out))
 	binary, e := extractAuthenticated(filepath.Join(dir, "archive.tar.gz"), out, j.Draft)
 	if e != nil {
 		return e
@@ -201,25 +207,8 @@ func (m *Manager) installPayload(ctx context.Context, j *journal) error {
 	if e = m.save(j); e != nil {
 		return e
 	}
-	for _, path := range []string{"/opt/rixa", releaseRoot} {
-		if e = ownedPublicDir(path); e != nil {
-			return e
-		}
-	}
-	dest := filepath.Join(releaseRoot, j.ArchiveSHA256)
-	if _, e = os.Lstat(dest); !errors.Is(e, os.ErrNotExist) {
-		return ErrState
-	}
-	if e = os.Rename(out, dest); e != nil {
-		return ErrState
-	}
-	p, e := os.Open(releaseRoot)
-	if e != nil {
-		return ErrState
-	}
-	defer p.Close()
-	if e = p.Sync(); e != nil {
-		return ErrState
+	if e = activatePayloadStage(out, releaseRoot, j.ArchiveSHA256); e != nil {
+		return e
 	}
 	return m.checkPayload(j)
 }

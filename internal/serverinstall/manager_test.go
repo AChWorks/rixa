@@ -165,7 +165,7 @@ func TestTwoClientReviewTokenCannotApplyChangedDraft(t *testing.T) {
 	}
 }
 func TestJournalRejectsAmbiguityUnknownStagesAndUnsafeFiles(t *testing.T) {
-	for _, kind := range []string{"duplicate", "unknown-stage", "bad-digest", "unsafe-mode", "symlink"} {
+	for _, kind := range []string{"duplicate", "unknown-stage", "bad-digest", "bad-reviewed-manager-digest", "unsafe-mode", "symlink"} {
 		t.Run(kind, func(t *testing.T) {
 			m := testManager(t)
 			d := validDraft()
@@ -173,6 +173,8 @@ func TestJournalRejectsAmbiguityUnknownStagesAndUnsafeFiles(t *testing.T) {
 			switch kind {
 			case "unknown-stage":
 				j.Attempts["shell"] = "attempted"
+			case "bad-reviewed-manager-digest":
+				j.ReviewedManagerSHA256 = strings.Repeat("z", 64)
 			case "bad-digest":
 				j.ArchiveSHA256 = strings.Repeat("z", 64)
 			}
