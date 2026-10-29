@@ -12,6 +12,7 @@ import ssl
 import stat
 import sys
 from urllib.error import HTTPError
+from urllib.parse import urljoin, urlsplit
 from urllib.request import build_opener, HTTPCookieProcessor, HTTPRedirectHandler, HTTPSHandler, ProxyHandler, Request
 import uuid
 
@@ -82,10 +83,14 @@ class NoRedirect(HTTPRedirectHandler):
         return None
 
 
-def check_preview_denial(status, body):
+def check_preview_denial(status, body, origin="", location=""):
     # An HTTP/server/transport failure is not privacy evidence. The known real
     # preview must explicitly reject this credential-free identity request.
-    if status not in (401, 403) or len(body) > 65536:
+    target, expected = urlsplit(urljoin(origin + "/", location)), urlsplit(origin)
+    login_redirect = (status == 303 and expected.scheme == "https" and bool(expected.netloc)
+                      and target.scheme == expected.scheme and target.netloc == expected.netloc
+                      and target.path == "/admin/login" and not target.query and not target.fragment)
+    if (status not in (401, 403) and not login_redirect) or len(body) > 65536:
         raise ValueError("anonymous private preview did not return bounded authentication denial")
     if b"Retained native guest publication proof." in body or b"Native guest published proof" in body:
         raise ValueError("anonymous denial leaked private preview bytes")
@@ -94,16 +99,18 @@ def check_preview_denial(status, body):
 def anonymous_preview_denial(origin, ca, path):
     # No cookie processor or credentials; refuse redirects rather than mistake a
     # followed login page for proof that this exact private request was denied.
+    # The actual surface uses an exact same-origin /admin/login 303 redirect.
     http = build_opener(ProxyHandler({}), NoRedirect(),
                         HTTPSHandler(context=ssl.create_default_context(cafile=str(ca))))
     request = Request(origin + path, headers={"Origin": origin,
                       "X-Identity-Request": "1", "Sec-Fetch-Site": "same-origin"})
     try:
         with http.open(request, timeout=25) as response:
-            status, body = response.status, response.read(65537)
+            status, body, location = response.status, response.read(65537), response.headers.get("Location", "")
     except HTTPError as error:
-        status, body = error.code, error.read(65537)
-    check_preview_denial(status, body)
+        status, body, location = error.code, error.read(65537), error.headers.get("Location", "")
+        error.close()
+    check_preview_denial(status, body, origin, location)
     return status
 
 

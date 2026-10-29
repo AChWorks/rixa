@@ -13,6 +13,16 @@ class PreviewDenialTests(unittest.TestCase):
         for status in (401, 403):
             smoke.check_preview_denial(status, b'{"code":"unauthorized"}')
 
+    def test_only_exact_https_same_origin_admin_login_redirect_is_denial(self):
+        origin = "https://site.rixa.test"
+        smoke.check_preview_denial(303, b"", origin, "/admin/login")
+        smoke.check_preview_denial(303, b"", origin, origin + "/admin/login")
+        for location in ("https://control.rixa.test/admin/login", "https://evil.test/admin/login",
+                         "http://site.rixa.test/admin/login", "/admin", "/admin/login?next=private",
+                         "/admin/login#private", "//site.rixa.test.evil/admin/login"):
+            with self.subTest(location=location), self.assertRaises(ValueError):
+                smoke.check_preview_denial(303, b"", origin, location)
+
     def test_success_redirect_missing_and_server_errors_are_not_denial(self):
         for status in (200, 302, 303, 404, 500, 503):
             with self.subTest(status=status), self.assertRaises(ValueError):
