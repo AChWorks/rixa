@@ -69,7 +69,52 @@ fi
 install -m 0644 .env.example "$root/.env.example"
 install -m 0644 config/rixa.example.json "$root/config/rixa.example.json"
 install -m 0644 LICENSE "$root/LICENSE"
-install -m 0644 docs/release-install.md "$root/INSTALL.md"
+# Keep operator guides beside the binary; links to unbundled source documents
+# follow this exact packaged commit rather than a later default-branch version.
+python3 - "$root" "$source_commit" <<'PY'
+import pathlib
+import posixpath
+import re
+import sys
+from urllib.parse import urlsplit
+
+output = pathlib.Path(sys.argv[1])
+commit = sys.argv[2]
+exports = {
+    "docs/release-install.md": "INSTALL.md",
+    "docs/release-verification.md": "VERIFY.md",
+    "docs/server-management.md": "MANAGE.md",
+}
+aliases = dict(exports, **{"LICENSE": "LICENSE"})
+current = "https://github.com/AChWorks/rixa/blob/HEAD/"
+pinned = "https://github.com/AChWorks/rixa/blob/" + commit + "/"
+for source, destination in exports.items():
+    def rewrite(match):
+        target = match.group(1)
+        if target.startswith("#"):
+            return match.group(0)
+        if target.startswith(current):
+            relative = target[len(current):]
+            parts = urlsplit(relative)
+            path = posixpath.normpath(parts.path)
+        else:
+            parts = urlsplit(target)
+            if parts.scheme or parts.netloc:
+                return match.group(0)
+            path = posixpath.normpath(posixpath.join(posixpath.dirname(source), parts.path))
+        entry = pathlib.Path(path)
+        if path.startswith(("/", "../")) or path == ".." or entry.is_symlink() or not entry.is_file():
+            raise SystemExit("invalid packaged guide source link: " + source + " -> " + target)
+        address = aliases.get(path, pinned + path)
+        if parts.query:
+            address += "?" + parts.query
+        if parts.fragment:
+            address += "#" + parts.fragment
+        return "](" + address + ")"
+    text = re.sub(r"\]\(([^)\s]+)\)", rewrite, pathlib.Path(source).read_text(encoding="utf-8"))
+    (output / destination).write_text(text, encoding="utf-8")
+    (output / destination).chmod(0o644)
+PY
 
 cat > "$root/BUILDINFO.json" <<EOF
 {

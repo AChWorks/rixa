@@ -53,6 +53,11 @@ jobs:
       - name: Verify module manifests
         run: go mod tidy -diff
 
+      - name: Check disposable laboratory boundaries
+        run: |
+          python3 -B -m unittest discover -s scripts/lab -p 'test_*.py' -v
+          bash -n scripts/lab/provision-postgres.sh
+
       - name: Vet
         run: go vet ./...
 

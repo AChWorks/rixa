@@ -58,7 +58,7 @@ sudo rixa manage apply --operation first-install --review-token <token-from-that
 sudo rixa manage status --operation first-install
 ```
 
-A successful Review returns an opaque `review_token`. Apply requires that exact token under the installation lock. Saving or reviewing another draft invalidates an older confirmation; Status never supplies a replacement token. If the reviewed bytes, TLS material or physical database identities change, review the intended inputs again rather than forcing the previous token.
+A successful Review returns an opaque `review_token`. Apply requires that exact token under the installation lock. Saving the draft or issuing a new Review invalidates the previous confirmation; Status never supplies a replacement token. If the reviewed bytes, TLS material or physical database identities change, review the intended inputs again rather than forcing the previous token.
 
 `manage menu --prefill /root/private/partial.json` can begin with private partial input. The caller's source/prefill file is not automatically deleted; manage that file's credential retention separately.
 

@@ -40,6 +40,8 @@ for required in \
   "$base/.env.example" \
   "$base/BUILDINFO.json" \
   "$base/INSTALL.md" \
+  "$base/MANAGE.md" \
+  "$base/VERIFY.md" \
   "$base/LICENSE" \
   "$base/THIRD_PARTY_MODULES.txt" \
   "$base/config" \
@@ -54,7 +56,7 @@ done
 
 while IFS= read -r entry; do
   case "$entry" in
-    "$base"|"$base/.env.example"|"$base/BUILDINFO.json"|"$base/INSTALL.md"|"$base/LICENSE"|"$base/THIRD_PARTY_MODULES.txt"|"$base/config"|"$base/config/rixa.example.json"|"$base/licenses"|"$base/rixa")
+    "$base"|"$base/.env.example"|"$base/BUILDINFO.json"|"$base/INSTALL.md"|"$base/MANAGE.md"|"$base/VERIFY.md"|"$base/LICENSE"|"$base/THIRD_PARTY_MODULES.txt"|"$base/config"|"$base/config/rixa.example.json"|"$base/licenses"|"$base/rixa")
       ;;
     "$base/licenses/"*)
       ;;
@@ -88,6 +90,17 @@ unsafe="$(find "$root" \( -type l -o -type b -o -type c -o -type p -o -type s \)
   echo "unexpected nested third-party license directory" >&2
   exit 1
 }
+
+for guide in INSTALL.md MANAGE.md VERIFY.md; do
+  [[ -s "$root/$guide" ]] || {
+    echo "packaged operator guide is empty: $guide" >&2
+    exit 1
+  }
+  if grep -Fq 'https://github.com/AChWorks/rixa/blob/HEAD/' "$root/$guide"; then
+    echo "packaged operator guide follows mutable Rixa source: $guide" >&2
+    exit 1
+  fi
+done
 
 version_output="$("$root/rixa" version)"
 grep -Fq "\"rixa\":\"$version\"" <<<"$version_output"

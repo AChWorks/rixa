@@ -1,6 +1,6 @@
 # Installation and management experience
 
-This is the accepted experience contract for supported Rixa installation and management paths. It guides implementation; it does not make a one-line installer, TUI, web setup, updater or panel adapter available. The [release installation guide](release-install.md) owns runnable package instructions, the [architecture](architecture.md) owns technical boundaries, and Issues/PRs/CI/releases own implementation and support evidence.
+This is the accepted experience contract for supported Rixa installation and management paths. It guides implementation; it does not make a one-line installer, TUI, web setup, updater or panel adapter available. The [release installation guide](release-install.md) owns runnable package instructions, the [native operator guide](server-management.md) owns the implemented development subset, the [architecture](architecture.md) owns technical boundaries, and Issues/PRs/CI/releases own implementation and support evidence.
 
 ## Users and scope
 

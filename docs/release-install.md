@@ -12,7 +12,8 @@ The initial package target is Linux amd64 and contains:
 - `BUILDINFO.json` — Rixa version, pinned AChrix Core version, complete `achrix_components` map, source commit, Go toolchain and target;
 - `THIRD_PARTY_MODULES.txt` plus `licenses/` — the packaged Go dependency inventory and discovered root license/notice files;
 - `LICENSE`;
-- `INSTALL.md` — this guide.
+- `INSTALL.md` — this guide;
+- `MANAGE.md` and `VERIFY.md` — the native operator and release-authentication guides for this exact package source.
 
 PostgreSQL, TLS certificates/keys and operator secrets are deployment inputs and are not bundled. Site transfer additionally requires compatible maintained PostgreSQL `pg_dump`/`pg_restore` tooling; consult `docs/site-transfer.md` in the source tree for the exact release tag when using that development-profile feature.
 
@@ -20,7 +21,7 @@ The default runtime profile is loopback development. An explicit `hosting_profil
 
 ## Verify and unpack
 
-For releases with a provenance bundle, follow the [publisher verification guide](https://github.com/AChWorks/rixa/blob/HEAD/docs/release-verification.md) before executing the payload. The archive, checksum and `.sigstore.json` are adjacent release assets; the bundle is outside the signed archive. Historical releases retain the evidence and instructions they originally supplied. A checksum detects corruption; it does not independently identify the producer.
+For releases with a provenance bundle, follow the [publisher verification guide](release-verification.md) before executing the payload. The archive, checksum and `.sigstore.json` are adjacent release assets; the bundle is outside the signed archive. Historical releases retain the evidence and instructions they originally supplied. A checksum detects corruption; it does not independently identify the producer.
 
 Download both the package and its adjacent `.sha256` file from the same GitHub Release, then verify before extraction:
 
@@ -33,6 +34,12 @@ cat BUILDINFO.json
 ```
 
 The reported Rixa version must match the release tag and `BUILDINFO.json`; the Core `achrix` value and complete `achrix_components` map must match the selected pinned dependency set recorded for that release. Older published packages retain their original metadata format; use the guide shipped with the selected package.
+
+## Choose the operation profile
+
+A trusted build containing `rixa manage` provides the [native operator path](server-management.md) on its explicitly supported Debian/systemd profile. It guides configuration, supervises installation independently of SSH, and provides retained status, supported reconciliation and ordinary runtime/service removal. PostgreSQL databases, TLS material and a trusted supported verifier remain explicit prerequisites; this is not automatic host provisioning, a one-line bootstrap, a managed updater or panel installation.
+
+Use that guide for native management. The following steps are the separate manual foreground development path. Do not pre-create the manual layout below and then ask the native manager to adopt it; native installation refuses unrelated existing material.
 
 ## Install the development binary
 
