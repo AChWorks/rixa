@@ -9,7 +9,7 @@ The initial package target is Linux amd64 and contains:
 - `rixa` — the runnable product binary;
 - `.env.example` — secret-name/value examples only;
 - `config/rixa.example.json` — development-profile configuration example;
-- `BUILDINFO.json` — Rixa version, pinned AChrix version, source commit, Go toolchain and target;
+- `BUILDINFO.json` — Rixa version, pinned AChrix Core version, complete `achrix_components` map, source commit, Go toolchain and target;
 - `THIRD_PARTY_MODULES.txt` plus `licenses/` — the packaged Go dependency inventory and discovered root license/notice files;
 - `LICENSE`;
 - `INSTALL.md` — this guide.
@@ -30,7 +30,7 @@ cd rixa-<version>-linux-amd64
 cat BUILDINFO.json
 ```
 
-The reported Rixa version must match the release tag and `BUILDINFO.json`; the AChrix version must match the pinned dependency recorded for that release.
+The reported Rixa version must match the release tag and `BUILDINFO.json`; the Core `achrix` value and complete `achrix_components` map must match the selected pinned dependency set recorded for that release. Older published packages retain their original metadata format; use the guide shipped with the selected package.
 
 ## Install the development binary
 
@@ -85,6 +85,8 @@ Graceful SIGINT/SIGTERM triggers bounded ingress drain and runtime shutdown.
 
 ## Upgrade boundary
 
-A Rixa release is one coherent product artifact with one pinned AChrix version for all sites. Do not mix Foundation versions per site.
+A Rixa release is one coherent product artifact with one selected compatible Core/component set for all sites. Independent components may have different version numbers; no site in the shared installation uses a different version of the same module.
 
-When a later genuine compatible reviewed AChrix release exists, Rixa #24 owns the retained-state compatibility proof before that newer dependency is accepted for a subsequent Rixa release. The first Rixa release is intentionally allowed to use the current reviewed baseline without fabricating a future update.
+Accept a dependency update only after genuine prior-release retained-state proof covers accounts/credentials and fixed grants, content/references, original Media, appearance/configuration, publication, exact migration ledgers, sessions, readiness and site isolation. New source or an upstream fixture is not that product proof. Ordinary upgrades and controlled transfer have different session/compatibility semantics; consult the source-version `docs/site-transfer.md` before restoring a bundle.
+
+The accepted future CLI/TUI/web management experience is documented in source as `docs/installation-and-management.md`. This manual development-package procedure does not provide that installer/updater or establish production support.

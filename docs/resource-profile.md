@@ -2,6 +2,8 @@
 
 Rixa's development profile distinguishes **configured ceilings**, **warm reserve**, **observed demand**, and **capacity claims**. They are not interchangeable.
 
+The documented v0.3.0 defaults and original observation profile below retain their historical identity. Independent Core/component packaging does not turn those observations into new measured support. Exact selected versions and any current observation belong to the candidate manifests and CI evidence; review the selected component contracts before carrying a resource claim across an update.
+
 ## Configuration
 
 The top-level `resources` object passes typed limits into the released AChrix Identity, Audit and Media constructors and owns one Rixa-specific Editorial admission limit. Zero preserves the selected AChrix v0.3.0 defaults rather than meaning unlimited.

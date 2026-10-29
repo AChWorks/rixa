@@ -11,7 +11,7 @@ A completed capture contains one enabled site's:
 - Rixa content/revisions/media references/appearance/theme/operation state;
 - exact private Media originals;
 - the private Rixa public artifact tree when publication is enabled, preserving active generation, route/withdrawal history and source relationships;
-- the exact site ID, public origin, site administrator principal, public policy, transfer-schema identity, Rixa build-version string, exact AChrix version and bounded data/ledger summary.
+- the exact site ID, public origin, site administrator principal, public policy, transfer-schema identity, Rixa build-version string, exact AChrix Core and selected component identities and bounded data/ledger summary.
 
 The bundle deliberately excludes deployment DSNs/credentials, TLS material, the control database/control administrator, deployment-specific root paths and **all Identity session rows**. Restored browser/API sessions therefore do not remain valid. A new compatible target control administrator is separately bootstrapped and its site operator identity is derived again; historical audit actors remain historical evidence, not active grants.
 
@@ -37,7 +37,7 @@ Restore accepts only:
 
 - a canonical private completed bundle directory that is disjoint from every enabled site's private Media/Public storage as well as the selected target roots;
 - selected target Media/Public roots that remain exclusive from every other enabled site's canonical/physical private-root boundary before any staging or database mutation;
-- a completed hash-valid bundle for the current transfer schema, Rixa build-version string and exact AChrix identity;
+- a completed hash-valid bundle for the current transfer schema, Rixa build-version string, exact AChrix Core identity and complete selected component map;
 - a separate empty local PostgreSQL target database whose physical PostgreSQL identity is distinct from the configured control and every other enabled site target; the selected validated target is retained for restore execution without a second environment lookup;
 - nonexistent target Media/public roots under canonical existing parents;
 - the same site identity/origin/admin/public policy.
@@ -66,4 +66,11 @@ rixa restore-site --config /etc/rixa/target.json --site site-a --input /private/
 
 ## Identity interpretation
 
-The bundle is a compatibility record, not a source-control attestation. Release packaging may set the Rixa build version; development builds deliberately report `development`, so that string alone is not an exact commit identity. Transfer compatibility is therefore fail-closed on the versioned transfer schema, exact AChrix version, exact Identity/Audit/Media/Rixa migration ledgers, captured site/public-policy identity, artifact hashes and successful current-composition readiness before activation. The exact Rixa candidate SHA used for repository acceptance remains CI/PR evidence rather than being invented inside a development bundle.
+The bundle is a compatibility record, not a source-control attestation. Release packaging may set the Rixa build version; development builds deliberately report `development`, so that string alone is not an exact commit identity. The `rixa.site-transfer.v2` manifest records `achrix_components` as the complete selected full-module-path/version map as well as the Core `achrix_version`. Transfer compatibility is therefore fail-closed on the versioned transfer schema, exact Rixa/Core identities and complete component map, exact Identity/Audit/Media/Rixa migration ledgers, captured site/public-policy identity, artifact hashes and successful current-composition readiness before activation. The exact Rixa candidate SHA used for repository acceptance remains CI/PR evidence rather than being invented inside a development bundle.
+
+
+## Transfer versus dependency upgrade
+
+The current transfer schema is `rixa.site-transfer.v2`; it does not accept a historical v1 bundle or a different selected component set merely because the Core version matches. Keep the executable that matches a captured bundle. To use an older bundle as an upgrade baseline, restore it with its compatible old executable into isolated targets first, then apply the new product to that retained state through the ordinary explicit upgrade path. Do not weaken transfer identity checks to manufacture upgrade proof.
+
+Transfer deliberately drops sessions. An ordinary compatible product update instead checks retained valid and revoked sessions/credentials against its supported Identity contract on the same owned database/origin. That evidence must preserve actual prior session state; a session-free transfer round trip cannot establish it. Neither path creates a generic cross-version restore or production recovery guarantee.
