@@ -37,3 +37,9 @@ A local bundle permits verification without logging into GitHub. Initial refresh
 Success identifies the bytes that were actually checked. It does not make an ordinary download pathname immutable. Installation must stage those exact bytes in protected storage, recheck the recorded digest and bind the intended candidate before replacement or privileged execution. The package's compiled component metadata, licenses, supported platform and schema compatibility need their own checks.
 
 A valid attestation is neither a successful installation nor permission to deploy, migrate, overwrite or delete data. The [installation and management experience](installation-and-management.md) owns those operation/recovery boundaries; [release installation](release-install.md) owns the supported package procedure. Actual clean-server, full-screen terminal and panel delivery require their own executable evidence.
+
+## Publication failure and re-entry
+
+The tag-triggered publisher signs and publishes only on the first workflow attempt. Package-only manual runs and Pull Requests never publish or sign a release. The writer verifies all three assets in a draft before its single final publication transition; existing releases are not overwritten.
+
+An uncertain write acknowledgement is inspected without repeating the write. If the outcome remains unknown, the draft and original run remain evidence for operator reconciliation. A workflow rerun is not a resume mechanism, and deleting/recreating the same tag is not a retry mechanism. Inspect the original run, authoritative tag and release/asset state before choosing recovery; do not infer non-application from a missing read or force an overwrite.
