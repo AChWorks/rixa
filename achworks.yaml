@@ -19,7 +19,10 @@ spec:
     runtimes: []
 
   capabilities:
-    provides: []
+    provides:
+      - content-management
+      - semantic-static-publication
+      - isolated-site-runtime
     consumes:
       - versioned-application-base
       - application-module-composition
