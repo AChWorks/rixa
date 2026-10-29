@@ -69,6 +69,15 @@ jobs:
           RIXA_SITE_TRANSFER_OBSERVATION: "1"
         run: go test -race ./internal/product -run '^TestSiteTransferRoundTrip$' -count=1 -v
 
+      - name: Prove retained published-release upgrade
+        shell: bash
+        run: |
+          set -euo pipefail
+          baseline="$(./scripts/fetch-upgrade-baseline.sh "$RUNNER_TEMP/rixa-upgrade-baseline")"
+          RIXA_RETAINED_UPGRADE_OBSERVATION=1 \
+          RIXA_UPGRADE_BASELINE_BINARY="$baseline" \
+          go test -race ./internal/product -run '^TestRetainedReleaseUpgrade$' -count=1 -v
+
       - name: Measure static HTTPS path
         run: go test ./internal/product -run '^$' -bench '^BenchmarkStaticPublicationHTTPSRead$' -benchtime=250ms -count=1 -benchmem
 
