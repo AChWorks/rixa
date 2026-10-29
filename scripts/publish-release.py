@@ -7,6 +7,7 @@ and local cryptographic verification happen in the workflow before publish.
 """
 
 import hashlib
+import http.client
 import io
 import json
 import os
@@ -70,16 +71,16 @@ class GitHub:
             try:
                 value = json.loads(exc.read(4096))
                 detail = json.dumps({"message": value.get("message"), "errors": value.get("errors")}, ensure_ascii=True)
-            except (ValueError, AttributeError):
+            except (ValueError, AttributeError, OSError, http.client.HTTPException):
                 detail = "request rejected"
             detail = str(detail).replace(self.token, "[redacted]")[:512]
             detail = "".join(c if c.isprintable() else " " for c in detail)
-            request_id = str(exc.headers.get("X-GitHub-Request-Id", "unavailable"))
+            request_id = str((exc.headers or {}).get("X-GitHub-Request-Id", "unavailable"))
             if not re.fullmatch(r"[A-Za-z0-9:_-]{1,128}", request_id):
                 request_id = "unavailable"
             diagnostic = f"GitHub HTTP {exc.code} (request {request_id}): {detail}".replace(self.token, "[redacted]")
             raise APIError(diagnostic) from None
-        except (error.URLError, TimeoutError, OSError):
+        except (error.URLError, TimeoutError, OSError, http.client.HTTPException):
             raise APIError("GitHub acknowledgement unavailable") from None
         if len(raw) > MAX_RESPONSE:
             raise APIError("GitHub response exceeds the release metadata bound")

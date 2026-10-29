@@ -330,6 +330,29 @@ class VerifierReceiptTests(PackageFixture, unittest.TestCase):
             self.run_receipt(self.receipt(), exit_code=1)
 
 
+class HTTPTransportTests(unittest.TestCase):
+    def test_truncated_response_is_an_unknown_acknowledgement(self):
+        api = publish.GitHub("private-job-token")
+        response = mock.MagicMock()
+        response.__enter__.return_value.read.side_effect = publish.http.client.IncompleteRead(b"partial")
+        api.opener = mock.Mock()
+        api.opener.open.return_value = response
+        with self.assertRaisesRegex(publish.APIError, "acknowledgement unavailable"):
+            api.call("POST", "/releases", {"draft": True})
+
+    def test_incomplete_error_body_retains_status_without_token_or_traceback(self):
+        api = publish.GitHub("private-job-token")
+        body = mock.Mock()
+        body.read.side_effect = publish.http.client.IncompleteRead(b"partial")
+        failure = publish.error.HTTPError("https://api.github.com", 502, "Bad Gateway", None, body)
+        api.opener = mock.Mock()
+        api.opener.open.side_effect = failure
+        with self.assertRaises(publish.APIError) as result:
+            api.call("POST", "/releases", {"draft": True})
+        self.assertIn("HTTP 502", str(result.exception))
+        self.assertNotIn("private-job-token", str(result.exception))
+
+
 class HelperPreparationTests(unittest.TestCase):
     def test_corrupt_download_never_reaches_archive_parser(self):
         with tempfile.TemporaryDirectory() as temporary:
