@@ -326,15 +326,7 @@ func (m *Manager) Apply(ctx context.Context, id, expectedReviewToken string) (Re
 	return m.queue(ctx, j)
 }
 func (m *Manager) snapshotManager() (string, error) {
-	exe, e := os.Executable()
-	if e != nil {
-		return "", ErrState
-	}
-	exe, e = filepath.EvalSymlinks(exe)
-	if e != nil || !trustedExecutable(exe) {
-		return "", ErrAuthority
-	}
-	b, e := readRegular(exe, 64<<20)
+	b, e := currentManagerImage()
 	if e != nil {
 		return "", e
 	}

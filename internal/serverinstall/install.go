@@ -44,6 +44,10 @@ func (m *Manager) RunOperation(ctx context.Context, id string) (Result, error) {
 	if j.State != "applying" || j.Frozen == "" || !m.inExecutor(j) {
 		return result(j), ErrAuthority
 	}
+	image, e := currentManagerImage()
+	if e != nil || digest(image) != j.ManagerSHA256 {
+		return m.fail(j, "manager-drift", "The actual executing manager no longer matches the frozen image.", e)
+	}
 	actual, e := hashFile(filepath.Join(managerRoot, j.ManagerSHA256))
 	if e != nil || actual != j.ManagerSHA256 {
 		return m.fail(j, "manager-drift", "The retained trusted manager executable changed.")

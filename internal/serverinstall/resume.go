@@ -3,6 +3,7 @@ package serverinstall
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -19,8 +20,11 @@ func (m *Manager) executorFenced(ctx context.Context, j *journal) bool {
 		return false
 	}
 	unit := executorName(j)
-	b, _ := m.run(ctx, "/usr/bin/systemctl", "show", "--property=LoadState", "--property=ActiveState", "--property=MainPID", "--property=ControlGroup", unit)
+	b, commandErr := m.run(ctx, "/usr/bin/systemctl", "show", "--property=LoadState", "--property=ActiveState", "--property=MainPID", "--property=ControlGroup", unit)
 	p := properties(b)
+	if commandErr != nil && !(p["LoadState"] == "not-found" && errors.Is(commandErr, ErrPrerequisite)) {
+		return false
+	}
 	if p["ActiveState"] != "inactive" && p["ActiveState"] != "failed" {
 		return false
 	}
@@ -80,14 +84,15 @@ func (m *Manager) Resume(ctx context.Context, id string) (Result, error) {
 	if !m.resumable(ctx, j) {
 		return result(j), ErrState
 	}
-	exe, e := os.Executable()
-	if e != nil {
-		return result(j), ErrAuthority
+	image, e := currentManagerImage()
+	if e != nil || digest(image) != j.ManagerSHA256 {
+		r := result(j)
+		r.Code = "manager-changed"
+		r.Message = "Resume with the retained trusted manager image at " + filepath.Join(managerRoot, j.ManagerSHA256) + "; the executing manager changed."
+		r.Actions = []string{"status"}
+		return r, ErrState
 	}
-	h, e := hashFile(exe)
-	if e != nil || h != j.ManagerSHA256 {
-		return result(j), ErrAuthority
-	}
+
 	return m.queue(ctx, j)
 }
 func (m *Manager) queue(ctx context.Context, j *journal) (Result, error) {
