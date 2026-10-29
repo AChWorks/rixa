@@ -244,6 +244,9 @@ func (m *Manager) createAccount(ctx context.Context, j *journal) error {
 	if _, e := user.Lookup("rixa"); e == nil {
 		return ErrState
 	}
+	if problem := unusedRuntimeGroup(user.LookupGroup); problem != nil {
+		return fmt.Errorf("%w: %s", ErrState, problem.Message)
+	}
 	if _, e := m.run(ctx, "/usr/sbin/useradd", "--system", "--user-group", "--home-dir", "/var/lib/rixa", "--shell", "/usr/sbin/nologin", "--comment", "Rixa installation "+j.Draft.OperationID, "rixa"); e != nil {
 		return e
 	}
@@ -261,6 +264,14 @@ func (m *Manager) observeAccount(j *journal) error {
 	gid, e := intID(u.Gid)
 	if e != nil {
 		return e
+	}
+	namedGroup, e := user.LookupGroup("rixa")
+	if e != nil {
+		return ErrState
+	}
+	memberships, e := u.GroupIds()
+	if e != nil || !accountGroupMatches(namedGroup, u.Gid, j.GID, memberships) {
+		return ErrState
 	}
 	b, e := os.ReadFile("/etc/passwd")
 	if e != nil {
@@ -321,6 +332,9 @@ func environmentFile(d Draft) []byte {
 	return []byte("RIXA_CONTROL_DSN=" + quote(d.ControlDSN) + "\nRIXA_SITE_DSN=" + quote(d.SiteDSN) + "\n")
 }
 func (m *Manager) installService(ctx context.Context, j *journal) error {
+	if e := m.observeAccount(j); e != nil {
+		return e
+	}
 	if e := m.checkPayload(j); e != nil {
 		return e
 	}

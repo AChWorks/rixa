@@ -14,7 +14,7 @@ The initial native profile requires:
 - existing PostgreSQL 18 databases, one for control and a different physical database for the initial site, with their own explicit password credentials, migration authority and permission to inspect `pg_control_system()`;
 - explicit **loopback TCP PostgreSQL URLs**, including user, password, IP, port, database and only `sslmode=disable`, for example `postgres://user:URL_ENCODED_PASSWORD@127.0.0.1:5432/database?sslmode=disable`;
 - distinct control/site HTTPS hostnames, matching the selected listener port, and bounded regular certificate/key files covering both hostnames;
-- positively available installation paths and an unused `rixa` account/service name.
+- positively available installation paths and unused `rixa` account/group/service names.
 
 The loopback database restriction makes the reviewed credential source identical under root and the non-login runtime user. Implicit environment/password-file credentials, Unix peer authentication, remote database profiles, service-file options and silent database major upgrades are not supported by this adapter. A missing prerequisite produces a field-specific result; the operator supplies or corrects it before applying.
 
@@ -103,6 +103,6 @@ Inspect the affected installation, then explicitly confirm retained-data removal
 sudo rixa manage remove --operation first-install --confirm-remove
 ```
 
-Removal verifies the static and loaded service definition, drop-ins and any live executable/user before stopping the service. It removes the positively owned runtime executable and service unit, while retaining databases, configuration, Media, published site state, service credentials, the account, legal notices and management/recovery evidence. It does not recursively erase directories, remove PostgreSQL or alter an unrelated service. Changed or unknown ownership blocks removal.
+Removal verifies the static and loaded service definition, drop-ins and any live executable/user before stopping the service. It removes the positively owned runtime executable and service unit, while retaining databases, configuration, Media, published site state, service credentials, the account/group, legal notices and management/recovery evidence. It does not recursively erase directories, remove PostgreSQL or alter an unrelated service. Changed or unknown ownership blocks removal.
 
 There is no automatic executable updater or destructive purge command in this profile. A binary reversal does not undo schema/data changes; those broader lifecycle paths need their own implementation, recovery evidence and applicable approval.

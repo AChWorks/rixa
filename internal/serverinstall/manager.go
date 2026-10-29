@@ -157,6 +157,11 @@ func (m *Manager) review(ctx context.Context, j *journal) []Problem {
 	if _, e = user.Lookup("rixa"); e == nil && j.UID == 0 {
 		add("runtime_user", "ownership", "An existing rixa account is not owned by this operation; inspect it instead of replacing it.")
 	}
+	if j.UID == 0 {
+		if problem := unusedRuntimeGroup(user.LookupGroup); problem != nil {
+			p = append(p, *problem)
+		}
+	}
 	loaded, _ := m.run(ctx, "/usr/bin/systemctl", "show", "--property=LoadState", "--value", "rixa.service")
 	if strings.TrimSpace(string(loaded)) != "not-found" {
 		add("service", "existing-unit", "The rixa service name is already loaded or cannot be proven absent; inspect its owner.")

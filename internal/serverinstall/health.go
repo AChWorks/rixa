@@ -265,6 +265,15 @@ func (m *Manager) loadedServiceOwned(ctx context.Context, j *journal, requireAct
 	if e != nil || fileUID(pi) != j.UID {
 		return ErrState
 	}
+	statusFile, e := os.Open(proc + "/status")
+	if e != nil {
+		return ErrState
+	}
+	status, e := io.ReadAll(io.LimitReader(statusFile, (64<<10)+1))
+	closeErr := statusFile.Close()
+	if e != nil || closeErr != nil || len(status) > 64<<10 || !runtimeCredentialsMatch(status, j.UID, j.GID) {
+		return ErrState
+	}
 	actual, e := os.Stat(proc + "/exe")
 	if e != nil {
 		return ErrState
