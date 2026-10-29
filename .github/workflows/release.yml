@@ -11,6 +11,8 @@ on:
       - "scripts/fetch-verification-helper.sh"
       - "scripts/tests/test_publish_release.py"
       - "docs/release-install.md"
+      - "docs/release-verification.md"
+      - "docs/server-management.md"
       - "internal/product/version.go"
       - "cmd/rixa/**"
       - "internal/releaseartifact/**"

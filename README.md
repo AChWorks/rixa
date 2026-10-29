@@ -11,17 +11,19 @@
 - Use separate control and site logins. The current control interface lists declared sites and can create a site account.
 - Capture one quiesced site and restore it into a separate compatible empty target in the documented development profile.
 
-The current runnable profiles are for **development**: Linux amd64, PostgreSQL and private local storage, with default loopback HTTPS or an explicit direct TLS runtime profile. Shared setup assessment can prepare a new protected configuration when the provider has supplied the prerequisites; it does not provision a host or persistent service. Production hosting, a one-line installer, a full-screen terminal menu, panel/web setup and an in-product updater are accepted development directions, not capabilities supplied by the current package.
+The runnable profiles are for **development** on Linux amd64 with PostgreSQL and private local storage. The manual runtime offers loopback HTTPS or explicit direct TLS. Builds containing `rixa manage` also provide a guided terminal and JSON CLI for a prepared Debian 13/systemd server: authenticate a selected release, configure and install its service, inspect progress, continue safely fenced operations and remove the owned runtime while retaining data. The [native operator guide](docs/server-management.md) defines its required local PostgreSQL 18 databases, TLS material, trusted verifier and infrastructure authority.
+
+Production hosting, a complete trusted one-line bootstrap, automatic prerequisite provisioning, panel/web setup, executable updates and destructive purge remain separate development work.
 
 ## Get started
 
-Download a versioned package and its adjacent checksum from [Releases](https://github.com/AChWorks/rixa/releases). Follow the included `INSTALL.md`, or read the [development installation guide](docs/release-install.md) for this source version. Verify the checksum before unpacking; releases with provenance bundles also support [publisher verification](docs/release-verification.md) before payload execution. Follow the evidence supplied by the exact selected release.
+Download a versioned package and its adjacent checksum from [Releases](https://github.com/AChWorks/rixa/releases). Follow the included `INSTALL.md` and, when supplied, `MANAGE.md` / `VERIFY.md`, or read the [development installation guide](docs/release-install.md) for this source version. Verify the checksum before unpacking; releases with provenance bundles also support [publisher verification](docs/release-verification.md) before payload execution. Follow the evidence supplied by the exact selected release.
 
 You supply:
 
 - distinct HTTPS hostnames for control and each enabled site, with suitable TLS certificate/key material;
 - a PostgreSQL database for control and a separate database for each enabled site;
-- exclusive private Media roots and, when publication is enabled, private publication roots;
+- exclusive private Media/Public roots for a manual runtime; native management creates its documented fixed private roots;
 - database secrets from protected environment sources, outside the JSON configuration and repository.
 
 The [example configuration](config/rixa.example.json) names those inputs. The installation guide walks through explicit migration, initial administrator creation, configuration of the returned principals, readiness checking and foreground startup. Disabled declared sites retain configuration and acquire no site runtime resources.
@@ -49,6 +51,7 @@ Source builds report `development`; release builds embed their Rixa version. Bot
 | Composition, permissions, site isolation and component ownership | [Architecture](docs/architecture.md), [two-site contract](docs/two-site-contract.md) |
 | Publication and controlled site transfer | [Static publication](docs/static-publication.md), [site transfer](docs/site-transfer.md) |
 | Release publisher and artifact verification | [Release verification](docs/release-verification.md) |
+| Guided native server management and recovery | [Native operator guide](docs/server-management.md), [bootstrap recovery](docs/bootstrap-operations.md) |
 | Shared assessment and protected configuration preparation | [Setup operations](docs/setup-operations.md) |
 | Intended server/CLI/web installation and management experience | [Installation and management](docs/installation-and-management.md) |
 | Development and contribution | [Contributing](CONTRIBUTING.md), [AGENTS](AGENTS.md), [roadmap](docs/roadmap.md) |

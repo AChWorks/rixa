@@ -1,6 +1,6 @@
 # Shared setup assessment and configuration preparation
 
-Rixa's `setup` commands assess supplied runtime prerequisites and prepare one private configuration file. They are the shared backend for future terminal and web setup surfaces. They do not install PostgreSQL, obtain certificates, migrate schemas, create administrators, register a persistent service, update an executable or open ingress. The [installation and management experience](installation-and-management.md) describes the complete intended journey; server and panel delivery need their own evidence.
+Rixa's `setup` commands assess supplied runtime prerequisites and prepare one private configuration file. They own the configuration-preparation step used by [native management](server-management.md) and future web setup surfaces. They do not install PostgreSQL, obtain certificates, migrate schemas, create administrators, register a persistent service, update an executable or open ingress. The [installation and management experience](installation-and-management.md) describes the complete intended journey; server and panel delivery need their own evidence.
 
 ## Required inputs
 
