@@ -438,7 +438,7 @@ func validateDirectTLSOrigins(c Config, listenPort string) error {
 			return err
 		}
 		u, err := url.Parse(raw)
-		if err != nil || u == nil {
+		if err != nil || u == nil || strings.HasSuffix(u.Host, ":") {
 			return ErrConfiguration
 		}
 		if listenPort == "443" {
