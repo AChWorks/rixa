@@ -26,7 +26,31 @@ var (
 	ErrBootstrapOperationStale = errors.New("bootstrap operation binding changed")
 	ErrBootstrapReconciliation = errors.New("bootstrap requires inspection and reconciliation")
 	bootstrapLoginSyntax       = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
+	errBootstrapLogin          = errors.New("use 1 to 64 lowercase ASCII letters, digits, dots, underscores or hyphens; start with a letter or digit")
+	errBootstrapPassword       = errors.New("use 15 to 256 Unicode characters and at most 1024 UTF-8 bytes; password contents are not normalized")
 )
+
+// ValidateBootstrapLogin is the pure field validator used before installation
+// effects and by the bootstrap operation itself. It never normalizes input.
+func ValidateBootstrapLogin(login string) error {
+	if !bootstrapLoginSyntax.MatchString(login) {
+		return errBootstrapLogin
+	}
+	return nil
+}
+
+// ValidateBootstrapPassword validates an initial password without retaining it
+// or performing a hash/database operation. It preserves every input character.
+func ValidateBootstrapPassword(password string) error {
+	if !validBootstrapPasswordBounds(password) || utf8.RuneCountInString(password) < 15 {
+		return errBootstrapPassword
+	}
+	return nil
+}
+
+func validBootstrapPasswordBounds(password string) bool {
+	return len(password) <= 1024 && utf8.ValidString(password) && utf8.RuneCountInString(password) <= 256
+}
 
 type BootstrapOperationState string
 
@@ -87,7 +111,7 @@ type bootstrapOperationJournal struct {
 
 func (j *bootstrapOperationJournal) valid() bool {
 	if j.Schema != "rixa.bootstrap-operation.v1" || !setupOperationSyntax.MatchString(j.OperationID) ||
-		!bootstrapLoginSyntax.MatchString(j.Login) || !setupHash(j.ConfigurationSHA256) ||
+		ValidateBootstrapLogin(j.Login) != nil || !setupHash(j.ConfigurationSHA256) ||
 		!setupHash(j.TargetSHA256) || !setupHash(j.CandidateSHA256) ||
 		!setupDatabaseSyntax.MatchString(j.DatabaseIdentity) || !validBootstrapScope(j.Scope) {
 		return false
@@ -141,12 +165,12 @@ func bootstrapOperation(ctx context.Context, r BootstrapOperationRequest, lookup
 	if !apply {
 		r.Password = ""
 	}
-	if !setupOperationSyntax.MatchString(r.OperationID) || !validBootstrapScope(r.Scope) || !bootstrapLoginSyntax.MatchString(r.Login) {
+	if !setupOperationSyntax.MatchString(r.OperationID) || !validBootstrapScope(r.Scope) || ValidateBootstrapLogin(r.Login) != nil {
 		return bootstrapOperationFailure(result, "invalid-input", ErrBootstrapOperationInput)
 	}
 	result.OperationID, result.Scope = r.OperationID, r.Scope
 	c, parseErr := ParseConfig(r.Configuration)
-	if parseErr != nil || !bootstrapScopeDeclared(c, r.Scope) || len(r.Password) > 1024 || !utf8.ValidString(r.Password) || utf8.RuneCountInString(r.Password) > 256 {
+	if parseErr != nil || !bootstrapScopeDeclared(c, r.Scope) || !validBootstrapPasswordBounds(r.Password) {
 		return bootstrapOperationFailure(result, "invalid-input", ErrBootstrapOperationInput)
 	}
 	d, openErr := openSetupDirectory(r.StatePath)
@@ -184,7 +208,7 @@ func bootstrapOperation(ctx context.Context, r BootstrapOperationRequest, lookup
 	if j == nil && r.Password == "" {
 		return bootstrapOperationFailure(result, "password-required", ErrBootstrapOperationInput)
 	}
-	if j == nil && utf8.RuneCountInString(r.Password) < 15 {
+	if j == nil && ValidateBootstrapPassword(r.Password) != nil {
 		return bootstrapOperationFailure(result, "password-invalid", ErrBootstrapOperationInput)
 	}
 	dsn, physical, probeErr := probe(ctx, c, r.Scope, lookup)

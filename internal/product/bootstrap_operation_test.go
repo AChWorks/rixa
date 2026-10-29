@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/AChWorks/achrix"
 	"github.com/AChWorks/achrix/identity"
@@ -452,5 +453,32 @@ func TestBootstrapOperationUnknownCreateObservationHasIndependentDeadline(t *tes
 	got, err := runBootstrapOperationTest(r, true, p)
 	if err != nil || got.State != BootstrapVerified || !p.observationDeadlineSeen {
 		t.Fatalf("unbounded reconciliation observation: %+v %v", got, err)
+	}
+}
+
+func TestBootstrapCredentialFieldValidation(t *testing.T) {
+	for _, login := range []string{"a", "0", "admin.name_2-last", strings.Repeat("a", 64)} {
+		if err := ValidateBootstrapLogin(login); err != nil {
+			t.Errorf("valid login rejected: %v", err)
+		}
+	}
+	for _, login := range []string{"", "A", "has space", ".admin", "_admin", "-admin", "مدیر", strings.Repeat("a", 65), "admin\x00"} {
+		if err := ValidateBootstrapLogin(login); err == nil {
+			t.Error("invalid login accepted")
+		}
+	}
+	for _, password := range []string{strings.Repeat("a", 15), strings.Repeat("a", 256), strings.Repeat("ی", 15), strings.Repeat("🧬", 256), strings.Repeat(" ", 15), "first\u200csecond-password"} {
+		if err := ValidateBootstrapPassword(password); err != nil {
+			t.Errorf("valid password rejected: bytes=%d runes=%d err=%v", len(password), utf8.RuneCountInString(password), err)
+		}
+	}
+	for _, password := range []string{"", strings.Repeat("a", 14), strings.Repeat("ی", 14), strings.Repeat("a", 257), strings.Repeat("🧬", 257), string([]byte{0xff})} {
+		if err := ValidateBootstrapPassword(password); err == nil {
+			t.Error("invalid password accepted")
+		}
+	}
+	const marker = "PRIVATE-PASSWORD-CANARY"
+	if err := ValidateBootstrapPassword(strings.Repeat(marker, 100)); err == nil || strings.Contains(err.Error(), marker) {
+		t.Fatal("password validation error leaked input")
 	}
 }
