@@ -4,38 +4,58 @@ package product
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"log/slog"
 	"net"
 	"net/http"
+	"time"
 
 	shell "github.com/AChWorks/achrix/admin"
 )
 
 func Serve(parent context.Context, runtime *Runtime, logger *slog.Logger) error {
-	if runtime == nil {
+	if runtime == nil || runtime.Handler == nil {
 		return ErrConfiguration
 	}
 	if logger == nil {
 		logger = slog.Default()
 	}
-	listener, err := net.Listen("tcp", runtime.Config.Listen)
+	pair, err := runtime.Config.Config.loadRuntimeTLS()
 	if err != nil {
 		return err
 	}
 	if err = runtime.Start(parent); err != nil {
-		return errors.Join(err, listener.Close())
+		return err
+	}
+	stopRuntime := func(cause error) error {
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), runtime.Config.ShutdownTimeout)
+		defer cancel()
+		return errors.Join(cause, runtime.Shutdown(ctx))
+	}
+	if err = parent.Err(); err != nil {
+		return stopRuntime(err)
+	}
+	if runtime.Config.hostingProfile() == HostingProfileDirectTLS {
+		if err = validateDirectTLSCertificate(runtime.Config.Config, pair, time.Now()); err != nil {
+			return stopRuntime(err)
+		}
+	}
+	listener, err := net.Listen("tcp", runtime.Config.Listen)
+	if err != nil {
+		return stopRuntime(err)
 	}
 
 	server := &http.Server{
-		Addr:    runtime.Config.Listen,
-		Handler: runtime.Handler,
+		Addr:      runtime.Config.Listen,
+		Handler:   runtime.Handler,
+		TLSConfig: &tls.Config{Certificates: []tls.Certificate{pair}, MinVersion: tls.VersionTLS12},
 	}
 	shell.ConfigureServer(server)
 
 	result := make(chan error, 1)
 	go func() {
-		result <- server.ServeTLS(listener, runtime.Config.TLS.CertFile, runtime.Config.TLS.KeyFile)
+		result <- server.ServeTLS(listener, "", "")
 	}()
 
 	var serveErr error
@@ -50,7 +70,10 @@ func Serve(parent context.Context, runtime *Runtime, logger *slog.Logger) error 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.WithoutCancel(parent), runtime.Config.ShutdownTimeout)
 	defer shutdownCancel()
 	httpErr := server.Shutdown(shutdownCtx)
-	moduleErr := runtime.Shutdown(shutdownCtx)
+	if httpErr != nil {
+		httpErr = errors.Join(httpErr, server.Close())
+	}
+	moduleErr := stopRuntime(nil)
 
 	if serveErr != nil {
 		logger.Error("ingress stopped", "component", "rixa.ingress", "reason", "serve_failed")

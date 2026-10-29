@@ -11,7 +11,7 @@
 - Use separate control and site logins. The current control interface lists declared sites and can create a site account.
 - Capture one quiesced site and restore it into a separate compatible empty target in the documented development profile.
 
-The current runnable profile is for **development**: Linux amd64 packages, PostgreSQL, private local storage and loopback HTTPS. Production hosting, a one-line installer, a full-screen terminal menu, panel/web setup and an in-product updater are accepted development directions, not capabilities supplied by the current package.
+The current runnable profiles are for **development**: Linux amd64, PostgreSQL and private local storage, with default loopback HTTPS or an explicit direct TLS runtime profile. Shared setup assessment can prepare a new protected configuration when the provider has supplied the prerequisites; it does not provision a host or persistent service. Production hosting, a one-line installer, a full-screen terminal menu, panel/web setup and an in-product updater are accepted development directions, not capabilities supplied by the current package.
 
 ## Get started
 
@@ -48,6 +48,7 @@ Source builds report `development`; release builds embed their Rixa version. Bot
 | Purpose, supported direction and product constraints | [Product specification](docs/PROJECT-SPEC.md) |
 | Composition, permissions, site isolation and component ownership | [Architecture](docs/architecture.md), [two-site contract](docs/two-site-contract.md) |
 | Publication and controlled site transfer | [Static publication](docs/static-publication.md), [site transfer](docs/site-transfer.md) |
+| Shared assessment and protected configuration preparation | [Setup operations](docs/setup-operations.md) |
 | Intended server/CLI/web installation and management experience | [Installation and management](docs/installation-and-management.md) |
 | Development and contribution | [Contributing](CONTRIBUTING.md), [AGENTS](AGENTS.md), [roadmap](docs/roadmap.md) |
 

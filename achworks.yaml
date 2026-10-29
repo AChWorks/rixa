@@ -47,6 +47,7 @@ spec:
         github.com/AChWorks/achrix/admin: v0.1.0
         github.com/AChWorks/achrix/audit: v0.1.0
         github.com/AChWorks/achrix/identity: v0.1.0
+        github.com/AChWorks/achrix/installation: v0.1.0
         github.com/AChWorks/achrix/media: v0.1.0
         github.com/AChWorks/achrix/multisite: v0.1.0
       consumption: versioned-go-dependency

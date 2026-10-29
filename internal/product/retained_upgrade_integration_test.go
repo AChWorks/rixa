@@ -72,12 +72,13 @@ func TestRetainedReleaseUpgrade(t *testing.T) {
 	}
 	verifyRetainedBaseline(t, binary)
 	for module, expected := range map[string]string{
-		"github.com/AChWorks/achrix":           "v0.4.0",
-		"github.com/AChWorks/achrix/admin":     "v0.1.0",
-		"github.com/AChWorks/achrix/audit":     "v0.1.0",
-		"github.com/AChWorks/achrix/identity":  "v0.1.0",
-		"github.com/AChWorks/achrix/media":     "v0.1.0",
-		"github.com/AChWorks/achrix/multisite": "v0.1.0",
+		"github.com/AChWorks/achrix":              "v0.4.0",
+		"github.com/AChWorks/achrix/admin":        "v0.1.0",
+		"github.com/AChWorks/achrix/audit":        "v0.1.0",
+		"github.com/AChWorks/achrix/identity":     "v0.1.0",
+		"github.com/AChWorks/achrix/installation": "v0.1.0",
+		"github.com/AChWorks/achrix/media":        "v0.1.0",
+		"github.com/AChWorks/achrix/multisite":    "v0.1.0",
 	} {
 		if achrix.DependencyVersion(module) != expected {
 			t.Fatalf("retained-upgrade candidate component identity mismatch: %s", module)
