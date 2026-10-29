@@ -411,10 +411,20 @@ func (m *Manager) Status(ctx context.Context, id string) (Result, error) {
 		}
 	}
 	if j.State == "installed" {
-		if e = m.validateInstalled(ctx, j); e != nil {
+		if e = m.validateInstalled(ctx, j); e == nil {
+			var observed map[string]string
+			observed, e = databaseIdentities(ctx, j.Draft)
+			if e == nil && !reflect.DeepEqual(observed, j.DatabaseTargets) {
+				e = ErrState
+			}
+		}
+		if e != nil {
 			r.Code = "installed-unhealthy"
 			r.Message = "Retained installation exists, but current service/configuration/identity checks did not pass. Inspect systemctl status rixa.service and its journal."
 			r.Actions = []string{"status"}
+			if m.checkOwnedService(j) == nil && m.loadedServiceOwned(ctx, j, false) == nil {
+				r.Actions = []string{"status", "remove"}
+			}
 			return r, ErrPrerequisite
 		}
 		r.Code = "healthy"

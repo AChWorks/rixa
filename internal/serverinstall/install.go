@@ -4,6 +4,7 @@ package serverinstall
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -185,7 +186,8 @@ func (m *Manager) installPayload(ctx context.Context, j *journal) error {
 	defer os.RemoveAll(dir)
 	v, e := frozenInputs(ctx, j.Draft, dir)
 	if e != nil || v.Status != "verified" || v.SHA256 != j.ArchiveSHA256 {
-		return ErrPrerequisite
+		m.retainDiagnostic(j, fmt.Sprintf("publisher code=%s field=%s detail=%s", v.Code, v.Field, v.Detail))
+		return fmt.Errorf("%w: publisher code=%s field=%s", ErrPrerequisite, v.Code, v.Field)
 	}
 	out := filepath.Join(dir, "release")
 	if e = os.Mkdir(out, 0755); e != nil {

@@ -118,8 +118,11 @@ func RuntimeStage(parent context.Context, args []string) error {
 	case "setup":
 		data := configBytes(task.Draft, task.ControlPrincipal, task.SitePrincipal)
 		r, e := product.ApplySetup(ctx, product.SetupRequest{OperationID: task.OperationID + "-config", TargetPath: runtimeConfigPath, Configuration: data}, databaseLookup(task.Draft))
-		if e != nil || r.State != product.SetupVerified {
+		if e != nil {
 			return fmt.Errorf("runtime stage %s failed: %w", args[0], e)
+		}
+		if r.State != product.SetupVerified {
+			return fmt.Errorf("%w: setup state=%s code=%s", ErrPrerequisite, r.State, r.Code)
 		}
 	case "check":
 		c, e := product.ParseConfig(configBytes(task.Draft, task.ControlPrincipal, task.SitePrincipal))
