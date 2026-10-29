@@ -89,6 +89,17 @@ jobs:
           set -euo pipefail
           ./scripts/fetch-verification-helper.sh "$RUNNER_TEMP/rixa-verifier"
 
+      - name: Prove genuine isolated verification and foreign-publisher rejection
+        shell: bash
+        run: |
+          set -euo pipefail
+          fixture="$RUNNER_TEMP/rixa-attestation-proof"
+          mkdir -m 0700 "$fixture"
+          cp "$RUNNER_TEMP/rixa-verifier/gh.tar.gz" "$fixture/gh_2.103.3_linux_amd64.tar.gz"
+          cp internal/releaseartifact/testdata/cli-v2.103.3.bundle.json "$fixture/gh.bundle.json"
+          PATH="$RUNNER_TEMP/rixa-verifier:$PATH" RIXA_ATTESTATION_PROOF_DIR="$fixture" \
+            go test -race ./internal/releaseartifact -run '^TestGenuineHelperTransportAndForeignPolicy$' -count=1 -v
+
       - name: Build release package
         shell: bash
         run: |
