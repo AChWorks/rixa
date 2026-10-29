@@ -505,7 +505,9 @@ func probeSetup(parent context.Context, c Config, lookup func(string) (string, b
 		dsn, ok := lookup(ref)
 		if !ok || dsn == "" {
 			secrets = installation.Missing
-			database = installation.Unknown
+			if database != installation.Unsupported {
+				database = installation.Unknown
+			}
 			identities = append(identities, "")
 			continue
 		}

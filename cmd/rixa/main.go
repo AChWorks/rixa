@@ -27,10 +27,12 @@ func main() {
 
 func run(args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: rixa <migrate|bootstrap-admin|capture-site|restore-site|check|run|version>")
+		return errors.New("usage: rixa <setup|migrate|bootstrap-admin|capture-site|restore-site|check|run|version>")
 	}
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	switch args[0] {
+	case "setup":
+		return runSetup(context.Background(), args[1:], os.LookupEnv, os.Stdout)
 	case "version":
 		return json.NewEncoder(os.Stdout).Encode(map[string]any{"rixa": product.Version, "achrix": achrix.Version(), "achrix_components": product.FoundationVersions()})
 	case "migrate":

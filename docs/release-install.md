@@ -16,7 +16,7 @@ The initial package target is Linux amd64 and contains:
 
 PostgreSQL, TLS certificates/keys and operator secrets are deployment inputs and are not bundled. Site transfer additionally requires compatible maintained PostgreSQL `pg_dump`/`pg_restore` tooling; consult `docs/site-transfer.md` in the source tree for the exact release tag when using that development-profile feature.
 
-The current runtime is deliberately loopback-only. Use it as the proven development profile; do not infer public exposure or production support from the existence of a release asset.
+The default runtime profile is loopback development. An explicit `hosting_profile: "direct_tls"` enables the validated direct TLS listener boundary in versions that contain it; it does not establish a production hosting or persistent-service profile. Use the guide included with the exact selected release; older published binaries do not gain new commands or profiles from source documentation.
 
 ## Verify and unpack
 
@@ -38,8 +38,8 @@ A root-owned system location is optional; running from the unpacked directory is
 
 ```bash
 sudo install -m 0755 rixa /usr/local/bin/rixa
-sudo install -d -m 0755 /etc/rixa
-sudo install -m 0644 config/rixa.example.json /etc/rixa/rixa.json
+sudo install -d -m 0700 /etc/rixa
+sudo install -m 0600 config/rixa.example.json /etc/rixa/rixa.json
 ```
 
 Create the configured Media/Public parent directories and TLS files with deployment-appropriate ownership. Private Media/Public roots used by Rixa must satisfy the runtime's validated private-root permissions and isolation rules.
@@ -48,7 +48,9 @@ Keep database DSNs and bootstrap passwords outside the JSON configuration. Expor
 
 ## Initialize and verify
 
-Edit `/etc/rixa/rixa.json` for the intended loopback listener, exact HTTPS origins, database environment names, TLS paths and private roots.
+Edit `/etc/rixa/rixa.json` for the selected listener profile, exact HTTPS origins, database environment names, TLS paths and private roots. Direct TLS requires an explicit profile, matching listener/origin ports, a currently valid server certificate covering control and every enabled site, and a protected private key. Rixa serves the validated keypair without trusting forwarded headers.
+
+Where supplied by the selected binary, [shared setup commands in the source guide](https://github.com/AChWorks/rixa/blob/HEAD/docs/setup-operations.md) assess prerequisites and create a new protected configuration without overwriting an existing target. This bounded preparation precedes the explicit steps below; it is not the complete installer or an existing-configuration updater.
 
 Run explicit migrations:
 
