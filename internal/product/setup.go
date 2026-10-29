@@ -29,6 +29,7 @@ var (
 	ErrSetupStale        = errors.New("setup binding changed; inspect the retained operation")
 	ErrSetupState        = errors.New("setup state unavailable or unsafe; inspect before continuing")
 	setupOperationSyntax = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
+	setupDatabaseSyntax  = regexp.MustCompile(`^[0-9]+:[0-9]+$`)
 )
 
 // SetupRequest prepares one private configuration file. It does not install a
@@ -69,6 +70,7 @@ type setupJournal struct {
 	TargetSHA256        string
 	Configuration       []byte
 	ConfigurationSHA256 string
+	DatabaseTargets     []string
 	Binding             installation.Binding
 	PlanID              string
 	State               SetupState
@@ -80,8 +82,25 @@ func (j *setupJournal) valid() bool {
 	if j.Schema != setupJournalSchema || !setupOperationSyntax.MatchString(j.OperationID) || len(j.Configuration) == 0 || len(j.Configuration) > 1<<20 || setupDigest(j.Configuration) != j.ConfigurationSHA256 || !setupHash(j.TargetSHA256) || !setupHash(j.PlanID) || j.Binding.OperationID != j.OperationID || j.Progress.PlanID != j.PlanID || !setupHash(j.Binding.CandidateSHA256) || !setupHash(j.Binding.PreconditionsSHA256) {
 		return false
 	}
-	if _, err := ParseConfig(j.Configuration); err != nil {
+	c, err := ParseConfig(j.Configuration)
+	if err != nil {
 		return false
+	}
+	count := 1
+	for _, site := range c.Sites {
+		if !site.Disabled {
+			count++
+		}
+	}
+	if len(j.DatabaseTargets) != count {
+		return false
+	}
+	seen := map[string]bool{}
+	for _, target := range j.DatabaseTargets {
+		if !setupDatabaseSyntax.MatchString(target) || seen[target] {
+			return false
+		}
+		seen[target] = true
 	}
 	switch j.State {
 	case SetupPlanned, SetupAttempted, SetupVerified, SetupFailed, SetupReconciliation:
@@ -206,6 +225,7 @@ type setupAssessment struct {
 	profile      installation.Profile
 	observations []installation.Observation
 	support      []installation.Support
+	databases    []string
 }
 
 func assessSetupOpen(ctx context.Context, d *setupDirectory, c Config, r SetupRequest, lookup func(string) (string, bool), probe setupProbe, j *setupJournal) (SetupResult, *setupAssessment, error) {
@@ -240,9 +260,43 @@ func assessSetupOpen(ctx context.Context, d *setupDirectory, c Config, r SetupRe
 	if profileID == "" {
 		profileID = HostingProfileDevelopment
 	}
-	preconditions, _ := json.Marshal(struct{ Config, Target, Databases string }{configHash, target, databases})
+	databaseBytes, _ := json.Marshal(databases)
+	preconditions, _ := json.Marshal(struct{ Config, Target, Databases string }{configHash, target, setupDigest(databaseBytes)})
 	profile := installation.Profile{Binding: installation.Binding{ProfileID: "rixa-config-" + strings.ReplaceAll(profileID, "_", "-"), OperationID: r.OperationID, CandidateSHA256: candidate, PreconditionsSHA256: setupDigest(preconditions)}, Requirements: []installation.Requirement{{ID: "configuration-target", Required: true}, {ID: "runtime-platform", Required: true}, {ID: "runtime-tls", Required: true}, {ID: "database-secrets", Required: true}, {ID: "database-targets", Required: true}, {ID: "private-storage", Required: true}}}
 	support := []installation.Support{{RequirementID: "configuration-target", AdapterID: "rixa-private-config-create", Authorized: true}}
+	if j != nil {
+		if len(databases) != len(j.DatabaseTargets) {
+			v, e := setupError(result, ErrSetupState)
+			return v, nil, e
+		}
+		inconclusive := false
+		for i, current := range databases {
+			if current == "" {
+				inconclusive = true
+				continue
+			}
+			if current != j.DatabaseTargets[i] {
+				v, e := setupError(result, ErrSetupStale)
+				return v, nil, e
+			}
+		}
+		if inconclusive {
+			// Unavailable inspection is not evidence of a different physical target.
+			// Preserve the approved binding only while a mandatory DB outcome blocks
+			// every action. Known target changes above still fail stale immediately.
+			blocked := false
+			for _, o := range observations {
+				if o.RequirementID == "database-targets" && o.State != installation.Satisfied {
+					blocked = true
+				}
+			}
+			if !blocked {
+				v, e := setupError(result, ErrSetupState)
+				return v, nil, e
+			}
+			profile.Binding.PreconditionsSHA256 = j.Binding.PreconditionsSHA256
+		}
+	}
 	progress := installation.Progress{}
 	if j != nil {
 		progress = j.Progress
@@ -276,7 +330,7 @@ func assessSetupOpen(ctx context.Context, d *setupDirectory, c Config, r SetupRe
 	if plan.Status() == installation.UnsupportedPlan {
 		result.Code = "unsupported"
 	}
-	return result, &setupAssessment{plan: plan, profile: profile, observations: observations, support: support}, nil
+	return result, &setupAssessment{plan: plan, profile: profile, observations: observations, support: support, databases: databases}, nil
 }
 
 // ApplySetup records an attempt before the sole atomic no-overwrite effect and
@@ -314,7 +368,7 @@ func applySetup(ctx context.Context, r SetupRequest, lookup func(string) (string
 		return setupError(result, ErrSetupState)
 	}
 	if j == nil {
-		j = &setupJournal{Schema: setupJournalSchema, OperationID: r.OperationID, TargetSHA256: targetSetupDigest(r.TargetPath, d), Configuration: append([]byte(nil), r.Configuration...), ConfigurationSHA256: setupDigest(r.Configuration), Binding: plan.Binding(), PlanID: plan.ID(), State: SetupPlanned, Progress: installation.Progress{PlanID: plan.ID()}}
+		j = &setupJournal{Schema: setupJournalSchema, OperationID: r.OperationID, TargetSHA256: targetSetupDigest(r.TargetPath, d), Configuration: append([]byte(nil), r.Configuration...), ConfigurationSHA256: setupDigest(r.Configuration), DatabaseTargets: append([]string(nil), assessed.databases...), Binding: plan.Binding(), PlanID: plan.ID(), State: SetupPlanned, Progress: installation.Progress{PlanID: plan.ID()}}
 	}
 	if len(plan.Actions()) == 0 {
 		result.Reconciled = j.State == SetupAttempted || j.State == SetupFailed || j.State == SetupReconciliation
@@ -403,9 +457,9 @@ func InspectSetup(targetPath, operationID string) (SetupResult, error) {
 	return result, nil
 }
 
-type setupProbe func(context.Context, Config, func(string) (string, bool)) ([]installation.Observation, string)
+type setupProbe func(context.Context, Config, func(string) (string, bool)) ([]installation.Observation, []string)
 
-func probeSetup(parent context.Context, c Config, lookup func(string) (string, bool)) ([]installation.Observation, string) {
+func probeSetup(parent context.Context, c Config, lookup func(string) (string, bool)) ([]installation.Observation, []string) {
 	if lookup == nil {
 		lookup = os.LookupEnv
 	}
@@ -452,7 +506,7 @@ func probeSetup(parent context.Context, c Config, lookup func(string) (string, b
 		if !ok || dsn == "" {
 			secrets = installation.Missing
 			database = installation.Unknown
-			identities = append(identities, "unknown")
+			identities = append(identities, "")
 			continue
 		}
 		identity, state := probeSetupDatabase(ctx, dsn)
@@ -461,18 +515,17 @@ func probeSetup(parent context.Context, c Config, lookup func(string) (string, b
 		} else if state != installation.Satisfied && database != installation.Unsupported {
 			database = installation.Unknown
 		}
-		if state == installation.Satisfied {
+		if identity.systemID != "" && identity.databaseOID != "" {
 			if seen[identity] {
 				database = installation.Unsupported
 			}
 			seen[identity] = true
 			identities = append(identities, identity.systemID+":"+identity.databaseOID)
 		} else {
-			identities = append(identities, "unknown")
+			identities = append(identities, "")
 		}
 	}
-	encoded, _ := json.Marshal(identities)
-	return []installation.Observation{{RequirementID: "runtime-platform", State: platform}, {RequirementID: "runtime-tls", State: tlsState}, {RequirementID: "database-secrets", State: secrets}, {RequirementID: "database-targets", State: database}, {RequirementID: "private-storage", State: storage}}, setupDigest(encoded)
+	return []installation.Observation{{RequirementID: "runtime-platform", State: platform}, {RequirementID: "runtime-tls", State: tlsState}, {RequirementID: "database-secrets", State: secrets}, {RequirementID: "database-targets", State: database}, {RequirementID: "private-storage", State: storage}}, identities
 }
 func probeSetupDatabase(parent context.Context, dsn string) (databaseTargetIdentity, installation.ObservedState) {
 	cfg, err := safeDatabaseConnectionConfig(dsn)
@@ -498,7 +551,7 @@ func probeSetupDatabase(parent context.Context, dsn string) (databaseTargetIdent
 		return databaseTargetIdentity{}, installation.Unknown
 	}
 	if version < 180000 || version >= 190000 || encoding != "UTF8" || fsync != "on" || fullPages != "on" || synchronous != "on" {
-		return databaseTargetIdentity{}, installation.Unsupported
+		return identity, installation.Unsupported
 	}
 	return identity, installation.Satisfied
 }

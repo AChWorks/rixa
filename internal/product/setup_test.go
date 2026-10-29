@@ -28,12 +28,12 @@ func setupFixture(t *testing.T) SetupRequest {
 	data := []byte(`{"listen":"127.0.0.1:19443","tls":{"cert_file":"/private/cert.pem","key_file":"/private/key.pem"},"control":{"origin":"https://control.example.test","database_env":"SETUP_CONTROL","admin_principal":"AAAAAAAAAAAAAAAAAAAAAAAAAA"},"sites":[{"id":"site-a","origin":"https://site-a.example.test","database_env":"SETUP_SITE_A","media_root":"/private/media-a","admin_principal":"BBBBBBBBBBBBBBBBBBBBBBBBBB"}]}`)
 	return SetupRequest{OperationID: "setup-test", TargetPath: filepath.Join(root, "rixa.json"), Configuration: data}
 }
-func satisfiedSetupProbe(context.Context, Config, func(string) (string, bool)) ([]installation.Observation, string) {
+func satisfiedSetupProbe(context.Context, Config, func(string) (string, bool)) ([]installation.Observation, []string) {
 	out := []installation.Observation{}
 	for _, id := range []string{"runtime-platform", "runtime-tls", "database-secrets", "database-targets", "private-storage"} {
 		out = append(out, installation.Observation{RequirementID: id, State: installation.Satisfied})
 	}
-	return out, strings.Repeat("a", 64)
+	return out, []string{"1:100", "1:101"}
 }
 func setupRequestJournal(t *testing.T, r SetupRequest, state SetupState) *setupJournal {
 	t.Helper()
@@ -46,7 +46,7 @@ func setupRequestJournal(t *testing.T, r SetupRequest, state SetupState) *setupJ
 		t.Fatal(err)
 	}
 	defer d.close()
-	j := &setupJournal{Schema: setupJournalSchema, OperationID: r.OperationID, TargetSHA256: targetSetupDigest(r.TargetPath, d), Configuration: append([]byte(nil), r.Configuration...), ConfigurationSHA256: setupDigest(r.Configuration), Binding: result.Plan.Binding(), PlanID: result.Plan.ID(), State: state, Progress: installation.Progress{PlanID: result.Plan.ID()}}
+	j := &setupJournal{Schema: setupJournalSchema, OperationID: r.OperationID, TargetSHA256: targetSetupDigest(r.TargetPath, d), Configuration: append([]byte(nil), r.Configuration...), ConfigurationSHA256: setupDigest(r.Configuration), DatabaseTargets: []string{"1:100", "1:101"}, Binding: result.Plan.Binding(), PlanID: result.Plan.ID(), State: state, Progress: installation.Progress{PlanID: result.Plan.ID()}}
 	if state != SetupPlanned {
 		a := installation.Attempted
 		if state == SetupVerified {
@@ -204,9 +204,9 @@ func TestSetupChangedCandidateOrDatabaseIdentityFailsClosed(t *testing.T) {
 				}
 				d.close()
 			} else {
-				probe = func(ctx context.Context, c Config, l func(string) (string, bool)) ([]installation.Observation, string) {
+				probe = func(ctx context.Context, c Config, l func(string) (string, bool)) ([]installation.Observation, []string) {
 					o, _ := satisfiedSetupProbe(ctx, c, l)
-					return o, strings.Repeat("b", 64)
+					return o, []string{"2:100", "2:101"}
 				}
 			}
 			_, err := applySetup(context.Background(), r, nil, probe, nil)
@@ -221,7 +221,7 @@ func TestSetupChangedCandidateOrDatabaseIdentityFailsClosed(t *testing.T) {
 }
 func TestSetupUnknownPrerequisiteBlocksAllEffects(t *testing.T) {
 	r := setupFixture(t)
-	probe := func(ctx context.Context, c Config, l func(string) (string, bool)) ([]installation.Observation, string) {
+	probe := func(ctx context.Context, c Config, l func(string) (string, bool)) ([]installation.Observation, []string) {
 		o, id := satisfiedSetupProbe(ctx, c, l)
 		o[3].State = installation.Unknown
 		return o, id
@@ -366,5 +366,63 @@ func TestSetupPublicResultsDoNotExposePrivateValues(t *testing.T) {
 	_, err = ApplySetup(context.Background(), invalid, nil)
 	if err == nil || strings.Contains(err.Error(), "secret-canary") {
 		t.Fatal("input error leaked raw data")
+	}
+}
+
+func TestSetupRetainedUnavailableDatabaseBlocksWithoutInventingDrift(t *testing.T) {
+	for _, state := range []SetupState{SetupAttempted, SetupVerified} {
+		t.Run(string(state), func(t *testing.T) {
+			r := setupFixture(t)
+			if state == SetupVerified {
+				if err := os.WriteFile(r.TargetPath, r.Configuration, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			setupRequestJournal(t, r, state)
+			before, _ := os.ReadFile(filepath.Join(filepath.Dir(r.TargetPath), setupJournalName(r.TargetPath)))
+			unavailable := func(ctx context.Context, c Config, l func(string) (string, bool)) ([]installation.Observation, []string) {
+				observations, identities := satisfiedSetupProbe(ctx, c, l)
+				observations[3].State = installation.Unknown
+				identities[1] = ""
+				return observations, identities
+			}
+			result, err := applySetup(context.Background(), r, nil, unavailable, nil)
+			expected := installation.OperatorActionRequired
+			if state == SetupAttempted {
+				expected = installation.ReconciliationRequired
+			}
+			if err != nil || result.Plan.Status() != expected || len(result.Plan.Actions()) != 0 || result.Code == "stale-binding" {
+				t.Fatalf("inconclusive evidence fabricated drift: %+v %v", result, err)
+			}
+			after, _ := os.ReadFile(filepath.Join(filepath.Dir(r.TargetPath), setupJournalName(r.TargetPath)))
+			if !bytes.Equal(before, after) {
+				t.Fatal("blocked operation changed retained state")
+			}
+			if state == SetupAttempted {
+				if _, err = os.Stat(r.TargetPath); !errors.Is(err, os.ErrNotExist) {
+					t.Fatal("unknown evidence replayed configuration")
+				}
+			} else {
+				recovered, err := applySetup(context.Background(), r, nil, satisfiedSetupProbe, nil)
+				if err != nil || recovered.Plan.Status() != installation.Ready {
+					t.Fatal("restored database evidence did not recover original binding")
+				}
+			}
+		})
+	}
+}
+func TestSetupKnownDatabaseDriftStillRejectsDuringPartialOutage(t *testing.T) {
+	r := setupFixture(t)
+	setupRequestJournal(t, r, SetupAttempted)
+	partial := func(ctx context.Context, c Config, l func(string) (string, bool)) ([]installation.Observation, []string) {
+		observations, identities := satisfiedSetupProbe(ctx, c, l)
+		observations[3].State = installation.Unknown
+		identities[0] = "9:999"
+		identities[1] = ""
+		return observations, identities
+	}
+	_, err := applySetup(context.Background(), r, nil, partial, nil)
+	if !errors.Is(err, ErrSetupStale) {
+		t.Fatalf("known target drift hidden by another unavailable target: %v", err)
 	}
 }

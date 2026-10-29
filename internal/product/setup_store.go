@@ -147,12 +147,12 @@ func (d *setupDirectory) createConfig(target string, data []byte) error {
 		return err
 	}
 	defer unix.Unlinkat(d.fd, name, 0)
-	// Atomic no-replace publication: a late unrelated entry is never overwritten.
-	if err = unix.Linkat(d.fd, name, d.fd, filepath.Base(target), 0); err != nil {
+	// Linux no-replace rename publishes one final directory entry atomically.
+	// There is no temporary hard-link window after a lost acknowledgement.
+	if err = unix.Renameat2(d.fd, name, d.fd, filepath.Base(target), unix.RENAME_NOREPLACE); err != nil {
 		return ErrSetupState
 	}
-	// Remove the temporary hard link before readback's single-link ownership check.
-	if unix.Unlinkat(d.fd, name, 0) != nil || unix.Fsync(d.fd) != nil {
+	if unix.Fsync(d.fd) != nil {
 		return ErrSetupState
 	}
 	return nil
