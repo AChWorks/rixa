@@ -15,7 +15,7 @@ The current runnable profiles are for **development**: Linux amd64, PostgreSQL a
 
 ## Get started
 
-Download a versioned package and its adjacent checksum from [Releases](https://github.com/AChWorks/rixa/releases). Follow the included `INSTALL.md`, or read the [development installation guide](docs/release-install.md) for this source version. Verify the checksum before unpacking.
+Download a versioned package and its adjacent checksum from [Releases](https://github.com/AChWorks/rixa/releases). Follow the included `INSTALL.md`, or read the [development installation guide](docs/release-install.md) for this source version. Verify the checksum before unpacking; releases with provenance bundles also support [publisher verification](docs/release-verification.md) before payload execution. Follow the evidence supplied by the exact selected release.
 
 You supply:
 
@@ -48,6 +48,7 @@ Source builds report `development`; release builds embed their Rixa version. Bot
 | Purpose, supported direction and product constraints | [Product specification](docs/PROJECT-SPEC.md) |
 | Composition, permissions, site isolation and component ownership | [Architecture](docs/architecture.md), [two-site contract](docs/two-site-contract.md) |
 | Publication and controlled site transfer | [Static publication](docs/static-publication.md), [site transfer](docs/site-transfer.md) |
+| Release publisher and artifact verification | [Release verification](docs/release-verification.md) |
 | Shared assessment and protected configuration preparation | [Setup operations](docs/setup-operations.md) |
 | Intended server/CLI/web installation and management experience | [Installation and management](docs/installation-and-management.md) |
 | Development and contribution | [Contributing](CONTRIBUTING.md), [AGENTS](AGENTS.md), [roadmap](docs/roadmap.md) |

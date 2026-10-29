@@ -20,6 +20,8 @@ The default runtime profile is loopback development. An explicit `hosting_profil
 
 ## Verify and unpack
 
+For releases with a provenance bundle, follow the [publisher verification guide](https://github.com/AChWorks/rixa/blob/HEAD/docs/release-verification.md) before executing the payload. The archive, checksum and `.sigstore.json` are adjacent release assets; the bundle is outside the signed archive. Historical releases retain the evidence and instructions they originally supplied. A checksum detects corruption; it does not independently identify the producer.
+
 Download both the package and its adjacent `.sha256` file from the same GitHub Release, then verify before extraction:
 
 ```bash
