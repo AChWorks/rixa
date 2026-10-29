@@ -138,6 +138,9 @@ func InspectBootstrapOperation(ctx context.Context, request BootstrapOperationRe
 
 func bootstrapOperation(ctx context.Context, r BootstrapOperationRequest, lookup func(string) (string, bool), logger *slog.Logger, apply bool, probe bootstrapOperationProbe, factory bootstrapOperationFactory) (result BootstrapOperationResult, err error) {
 	result = BootstrapOperationResult{State: BootstrapPlanned, Code: "ok"}
+	if !apply {
+		r.Password = ""
+	}
 	if !setupOperationSyntax.MatchString(r.OperationID) || !validBootstrapScope(r.Scope) || !bootstrapLoginSyntax.MatchString(r.Login) {
 		return bootstrapOperationFailure(result, "invalid-input", ErrBootstrapOperationInput)
 	}
@@ -258,6 +261,7 @@ func bootstrapOperation(ctx context.Context, r BootstrapOperationRequest, lookup
 	account, createErr := accounts.CreateAccount(ctx, bootstrapPrincipal, r.Login, r.Password)
 	if createErr == nil {
 		if !validBootstrapAccount(account, r.Login) {
+			result.State = BootstrapReconciliation
 			return bootstrapOperationFailure(result, "invalid-account-result", ErrBootstrapReconciliation)
 		}
 		return verifyBootstrapOperation(d, r.StatePath, j, account, result, true)
@@ -273,7 +277,9 @@ func bootstrapOperation(ctx context.Context, r BootstrapOperationRequest, lookup
 	// The attempted effect is deliberately retained even when current lookup is
 	// absent: a disconnected backend may still complete its original write.
 	result.State = BootstrapReconciliation
-	account, lookupErr = accounts.LookupAccount(context.WithoutCancel(ctx), bootstrapPrincipal, r.Login)
+	observeCtx, observeCancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
+	account, lookupErr = accounts.LookupAccount(observeCtx, bootstrapPrincipal, r.Login)
+	observeCancel()
 	if lookupErr != nil {
 		return bootstrapOperationFailure(result, "create-outcome-unknown", ErrBootstrapReconciliation)
 	}

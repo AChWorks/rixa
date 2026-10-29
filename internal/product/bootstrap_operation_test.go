@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/AChWorks/achrix"
 	"github.com/AChWorks/achrix/identity"
@@ -26,9 +27,19 @@ type bootstrapOperationAccountProbe struct {
 	principal                            achrix.Principal
 	createCalls, loginCalls, logoutCalls int
 	afterCreate                          func()
+	invalidCreate                        bool
+	requireObservationDeadline           bool
+	observationDeadlineSeen              bool
 }
 
-func (p *bootstrapOperationAccountProbe) LookupAccount(context.Context, achrix.Principal, string) (identity.Account, error) {
+func (p *bootstrapOperationAccountProbe) LookupAccount(ctx context.Context, _ achrix.Principal, _ string) (identity.Account, error) {
+	if p.requireObservationDeadline && p.createCalls > 0 {
+		deadline, ok := ctx.Deadline()
+		if !ok || time.Until(deadline) > time.Second {
+			return identity.Account{}, errors.New("missing bounded reconciliation deadline")
+		}
+		p.observationDeadlineSeen = true
+	}
 	if p.account.ID == "" {
 		return identity.Account{}, identity.ErrNotFound
 	}
@@ -37,6 +48,9 @@ func (p *bootstrapOperationAccountProbe) LookupAccount(context.Context, achrix.P
 func (p *bootstrapOperationAccountProbe) CreateAccount(context.Context, achrix.Principal, string, string) (identity.Account, error) {
 	p.createCalls++
 	p.account = identity.Account{ID: testControlAdmin, Login: "initial-admin", Enabled: true, Revision: 1}
+	if p.invalidCreate {
+		p.account.Enabled = false
+	}
 	if p.afterCreate != nil {
 		p.afterCreate()
 	}
@@ -320,6 +334,7 @@ func TestBootstrapOperationRejectsUnsafeStateAndSharedParentConflict(t *testing.
 
 func TestBootstrapOperationInputAndNoEffectInspection(t *testing.T) {
 	r := bootstrapOperationFixture(t)
+	r.Password = string([]byte{0xff})
 	p := &bootstrapOperationAccountProbe{}
 	called := false
 	probe := func(context.Context, Config, string, func(string) (string, bool)) (string, string, error) {
@@ -333,6 +348,7 @@ func TestBootstrapOperationInputAndNoEffectInspection(t *testing.T) {
 	if _, err = os.Stat(r.StatePath); !os.IsNotExist(err) {
 		t.Fatal("inspection created journal")
 	}
+	r.Password = "private-test-password-value"
 	for _, change := range []func(*BootstrapOperationRequest){
 		func(x *BootstrapOperationRequest) { x.Scope = "site:missing" },
 		func(x *BootstrapOperationRequest) { x.Password = "too-short" },
@@ -418,5 +434,23 @@ func TestBootstrapOperationRequestDiagnosticFormattingIsPrivate(t *testing.T) {
 				t.Fatal("protected request leaked through diagnostic formatting")
 			}
 		}
+	}
+}
+
+func TestBootstrapOperationInvalidCreateMetadataRequiresReconciliation(t *testing.T) {
+	r := bootstrapOperationFixture(t)
+	p := &bootstrapOperationAccountProbe{invalidCreate: true}
+	got, err := runBootstrapOperationTest(r, true, p)
+	if !errors.Is(err, ErrBootstrapReconciliation) || got.State != BootstrapReconciliation || got.Code != "invalid-account-result" || got.Principal != "" {
+		t.Fatalf("malformed account result: %+v %v", got, err)
+	}
+}
+
+func TestBootstrapOperationUnknownCreateObservationHasIndependentDeadline(t *testing.T) {
+	r := bootstrapOperationFixture(t)
+	p := &bootstrapOperationAccountProbe{createErr: identity.ErrUnavailable, requireObservationDeadline: true}
+	got, err := runBootstrapOperationTest(r, true, p)
+	if err != nil || got.State != BootstrapVerified || !p.observationDeadlineSeen {
+		t.Fatalf("unbounded reconciliation observation: %+v %v", got, err)
 	}
 }
