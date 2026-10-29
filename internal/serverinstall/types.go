@@ -62,6 +62,7 @@ type Facade interface {
 	LoadDraft(context.Context, string) (Draft, error)
 	Review(context.Context, string) (Result, error)
 	Apply(context.Context, string) (Result, error)
+	Resume(context.Context, string) (Result, error)
 	Status(context.Context, string) (Result, error)
 	Remove(context.Context, string) (Result, error)
 }

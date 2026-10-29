@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"syscall"
 	"time"
@@ -20,14 +21,15 @@ import (
 )
 
 type runtimeTask struct {
-	OperationID      string `json:"operation_id"`
-	UID              uint32 `json:"uid"`
-	GID              uint32 `json:"gid"`
-	Draft            Draft  `json:"draft"`
-	CertPEM          []byte `json:"cert_pem,omitempty"`
-	KeyPEM           []byte `json:"key_pem,omitempty"`
-	ControlPrincipal string `json:"control_principal,omitempty"`
-	SitePrincipal    string `json:"site_principal,omitempty"`
+	DatabaseTargets  map[string]string `json:"database_targets"`
+	OperationID      string            `json:"operation_id"`
+	UID              uint32            `json:"uid"`
+	GID              uint32            `json:"gid"`
+	Draft            Draft             `json:"draft"`
+	CertPEM          []byte            `json:"cert_pem,omitempty"`
+	KeyPEM           []byte            `json:"key_pem,omitempty"`
+	ControlPrincipal string            `json:"control_principal,omitempty"`
+	SitePrincipal    string            `json:"site_principal,omitempty"`
 }
 type stageReceipt struct {
 	Stage     string `json:"stage"`
@@ -71,6 +73,10 @@ func RuntimeStage(parent context.Context, args []string) error {
 	}
 	ctx, cancel := context.WithTimeout(parent, 90*time.Second)
 	defer cancel()
+	observed, e := databaseIdentities(ctx, task.Draft)
+	if e != nil || !reflect.DeepEqual(observed, task.DatabaseTargets) {
+		return ErrState
+	}
 	receipt := stageReceipt{Stage: args[0], Code: "verified"}
 	switch args[0] {
 	case "prepare":
@@ -82,10 +88,10 @@ func RuntimeStage(parent context.Context, args []string) error {
 		if len(task.CertPEM) == 0 || len(task.KeyPEM) == 0 || len(task.CertPEM) > 1<<20 || len(task.KeyPEM) > 1<<20 {
 			return ErrInput
 		}
-		if e = writeAtomic(runtimeRoot+"/tls/cert.pem", task.CertPEM, 0600); e != nil {
+		if e = writeExpected(runtimeRoot+"/tls/cert.pem", task.CertPEM, 0600, os.Geteuid()); e != nil {
 			return e
 		}
-		if e = writeAtomic(runtimeRoot+"/tls/key.pem", task.KeyPEM, 0600); e != nil {
+		if e = writeExpected(runtimeRoot+"/tls/key.pem", task.KeyPEM, 0600, os.Geteuid()); e != nil {
 			return e
 		}
 	case "migrate":
@@ -136,7 +142,7 @@ func RuntimeStage(parent context.Context, args []string) error {
 	return json.NewEncoder(os.Stdout).Encode(receipt)
 }
 func (m *Manager) childStage(ctx context.Context, j *journal, stage string) (stageReceipt, error) {
-	task := runtimeTask{OperationID: j.Draft.OperationID, UID: j.UID, GID: j.GID, Draft: j.Draft, ControlPrincipal: j.ControlPrincipal, SitePrincipal: j.SitePrincipal}
+	task := runtimeTask{DatabaseTargets: j.DatabaseTargets, OperationID: j.Draft.OperationID, UID: j.UID, GID: j.GID, Draft: j.Draft, ControlPrincipal: j.ControlPrincipal, SitePrincipal: j.SitePrincipal}
 	if stage == "prepare" {
 		var e error
 		task.CertPEM, e = readPrivate(filepath.Join(m.stateRoot, j.Draft.OperationID+".tls-cert"), m.ownerUID, 1<<20)

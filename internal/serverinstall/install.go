@@ -41,7 +41,7 @@ func (m *Manager) RunOperation(ctx context.Context, id string) (Result, error) {
 	if e != nil {
 		return Result{}, e
 	}
-	if j.State != "applying" || j.Frozen == "" || !m.inExecutor(id) {
+	if j.State != "applying" || j.Frozen == "" || !m.inExecutor(j) {
 		return result(j), ErrAuthority
 	}
 	actual, e := hashFile(filepath.Join(managerRoot, j.ManagerSHA256))
@@ -90,12 +90,12 @@ func (m *Manager) RunOperation(ctx context.Context, id string) (Result, error) {
 	}
 	return result(j), nil
 }
-func (m *Manager) inExecutor(id string) bool {
+func (m *Manager) inExecutor(j *journal) bool {
 	b, e := os.ReadFile("/proc/self/cgroup")
 	if e != nil {
 		return false
 	}
-	unit := "/rixa-install-" + id + ".service"
+	unit := "/" + executorName(j)
 	for _, line := range strings.Split(string(b), "\n") {
 		fields := strings.SplitN(line, ":", 3)
 		if len(fields) == 3 && strings.HasSuffix(fields[2], unit) {
@@ -139,15 +139,36 @@ func (m *Manager) execute(ctx context.Context, j *journal, stage string) error {
 func (m *Manager) reconcile(ctx context.Context, j *journal, stage string) error {
 	switch stage {
 	case "payload":
-		return m.checkPayload(j)
+		if e := m.checkPayload(j); e == nil {
+			return nil
+		}
+		if _, e := os.Lstat(m.binaryPath(j)); errors.Is(e, os.ErrNotExist) {
+			return m.installPayload(ctx, j)
+		}
+		return ErrState
 	case "account":
-		return m.observeAccount(j)
+		if e := m.observeAccount(j); e == nil {
+			return nil
+		}
+		if j.UID == 0 {
+			if _, e := user.Lookup("rixa"); e != nil {
+				return m.createAccount(ctx, j)
+			}
+		}
+		return ErrState
+	case "runtime-paths":
+		return m.runtimePaths(j)
+	case "prepare", "migrate", "check":
+		return m.execute(ctx, j, stage)
 	case "bootstrap-control", "bootstrap-site", "setup":
 		// These operations own durable attempted-effect records. The executor cgroup
 		// and parent lock fence prior child work before any operator continuation.
 		return m.execute(ctx, j, stage)
 	case "service":
-		return m.validateInstalled(ctx, j)
+		if e := m.validateInstalled(ctx, j); e == nil {
+			return nil
+		}
+		return m.installService(ctx, j)
 	default:
 		return ErrState
 	}
@@ -253,6 +274,9 @@ func (m *Manager) observeAccount(j *journal) error {
 	return nil
 }
 func ownedDir(path string, uid, gid uint32, mode os.FileMode) error {
+	if !trustedRootParent(path) {
+		return ErrState
+	}
 	e := os.Mkdir(path, mode)
 	if e == nil {
 		if e = os.Chown(path, int(uid), int(gid)); e != nil {
@@ -284,7 +308,7 @@ func (m *Manager) runtimePaths(j *journal) error {
 	return ownedDir("/var/lib/rixa", j.UID, j.GID, 0700)
 }
 func (m *Manager) serviceBytes(j *journal) []byte {
-	return []byte("[Unit]\nDescription=Rixa CMS\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=exec\nUser=rixa\nGroup=rixa\nExecStart=" + m.binaryPath(j) + " run --config " + runtimeConfigPath + "\nEnvironmentFile=/etc/rixa/service.env\nWorkingDirectory=/var/lib/rixa\nUMask=0077\nRestart=on-failure\nRestartSec=5\nTimeoutStartSec=30\nTimeoutStopSec=30\nNoNewPrivileges=yes\nProtectSystem=strict\nProtectHome=yes\nPrivateTmp=yes\nReadWritePaths=/var/lib/rixa\nCapabilityBoundingSet=CAP_NET_BIND_SERVICE\nAmbientCapabilities=CAP_NET_BIND_SERVICE\nRestrictSUIDSGID=yes\nLockPersonality=yes\n\n[Install]\nWantedBy=multi-user.target\n")
+	return []byte("[Unit]\nDescription=Rixa CMS\nStartLimitIntervalSec=60\nStartLimitBurst=3\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=exec\nUser=rixa\nGroup=rixa\nExecStart=" + m.binaryPath(j) + " run --config " + runtimeConfigPath + "\nEnvironmentFile=/etc/rixa/service.env\nWorkingDirectory=/var/lib/rixa\nUMask=0077\nRestart=on-failure\nRestartSec=5\nTimeoutStartSec=30\nTimeoutStopSec=30\nNoNewPrivileges=yes\nProtectSystem=strict\nProtectHome=yes\nPrivateTmp=yes\nReadWritePaths=/var/lib/rixa\nCapabilityBoundingSet=CAP_NET_BIND_SERVICE\nAmbientCapabilities=CAP_NET_BIND_SERVICE\nRestrictSUIDSGID=yes\nLockPersonality=yes\n\n[Install]\nWantedBy=multi-user.target\n")
 }
 func environmentFile(d Draft) []byte {
 	quote := func(s string) string { return "\"" + strings.NewReplacer("\\", "\\\\", "\"", "\\\"").Replace(s) + "\"" }
@@ -294,7 +318,7 @@ func (m *Manager) installService(ctx context.Context, j *journal) error {
 	if e := m.checkPayload(j); e != nil {
 		return e
 	}
-	if e := writeNew("/etc/rixa/service.env", environmentFile(j.Draft), 0600); e != nil {
+	if e := writeExpected("/etc/rixa/service.env", environmentFile(j.Draft), 0600, 0); e != nil {
 		return ErrState
 	}
 	unit := m.serviceBytes(j)
@@ -302,7 +326,7 @@ func (m *Manager) installService(ctx context.Context, j *journal) error {
 	if e := m.save(j); e != nil {
 		return e
 	}
-	if e := writeNew(unitPath, unit, 0644); e != nil {
+	if e := writeExpected(unitPath, unit, 0644, 0); e != nil {
 		return ErrState
 	}
 	if _, e := m.run(ctx, "/usr/bin/systemctl", "daemon-reload"); e != nil {

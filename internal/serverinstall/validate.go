@@ -10,10 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
-	"unicode/utf8"
 
 	"github.com/AChWorks/rixa/internal/product"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 var operationSyntax = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,47}$`)
@@ -74,28 +72,34 @@ func ValidateDraft(d Draft) []Problem {
 		add("language", "language", "Choose en or fa.")
 	}
 	for _, f := range []struct{ name, value string }{{"control_login", d.ControlLogin}, {"site_login", d.SiteLogin}} {
-		if len(f.value) < 1 || len(f.value) > 64 || !utf8.ValidString(f.value) || controlText(f.value) || strings.TrimSpace(f.value) != f.value {
-			add(f.name, "login", "Use a non-empty exact login of at most 64 bytes without surrounding whitespace or control characters.")
+		if e := product.ValidateBootstrapLogin(f.value); e != nil {
+			add(f.name, "login", e.Error())
 		}
 	}
 	for _, f := range []struct{ name, value string }{{"control_password", d.ControlPassword}, {"site_password", d.SitePassword}} {
-		if len(f.value) < 12 || len(f.value) > 1024 || !utf8.ValidString(f.value) {
-			add(f.name, "password", "Use a password of 12–1024 bytes; it is preserved exactly.")
+		if e := product.ValidateBootstrapPassword(f.value); e != nil {
+			add(f.name, "password", e.Error())
 		}
 	}
+
 	for _, f := range []struct{ name, value string }{{"control_dsn", d.ControlDSN}, {"site_dsn", d.SiteDSN}} {
-		cfg, e := pgxpool.ParseConfig(f.value)
-		if e != nil || len(f.value) == 0 || len(f.value) > 4096 || strings.ContainsAny(f.value, "\r\n\x00") || cfg == nil || cfg.ConnConfig == nil || cfg.ConnConfig.User == "" || cfg.ConnConfig.Database == "" {
-			add(f.name, "database", "Supply a bounded PostgreSQL connection string for an existing exclusive database.")
-			continue
+		u, e := url.Parse(f.value)
+		valid := e == nil && u != nil && len(f.value) <= 4096 && !controlText(f.value)
+		if valid {
+			password, hasPassword := "", false
+			if u.User != nil {
+				password, hasPassword = u.User.Password()
+			}
+			ip := net.ParseIP(u.Hostname())
+			port, e := strconv.Atoi(u.Port())
+			q := u.Query()
+			valid = (u.Scheme == "postgres" || u.Scheme == "postgresql") && u.User != nil && u.User.Username() != "" && hasPassword && password != "" && ip != nil && ip.IsLoopback() && e == nil && port > 0 && port <= 65535 && u.Path != "" && u.Path != "/" && u.Fragment == "" && u.RawPath == "" && len(q) == 1 && q.Get("sslmode") == "disable" && len(q["sslmode"]) == 1
 		}
-		c := cfg.ConnConfig
-		ip := net.ParseIP(c.Host)
-		local := strings.HasPrefix(c.Host, "/") || c.Host == "localhost" || ip != nil && ip.IsLoopback()
-		if !local && (c.TLSConfig == nil || c.TLSConfig.InsecureSkipVerify || c.TLSConfig.ServerName == "") {
-			add(f.name, "database_tls", "Remote PostgreSQL requires verified TLS.")
+		if !valid {
+			add(f.name, "database-profile", "This native profile needs an explicit loopback TCP PostgreSQL URL with user, password, port, database and only sslmode=disable; implicit PG environment/passfiles/peer credentials are unsupported.")
 		}
 	}
+
 	if d.ControlDSN != "" && d.ControlDSN == d.SiteDSN {
 		add("site_dsn", "isolation", "Control and site require distinct PostgreSQL databases.")
 	}

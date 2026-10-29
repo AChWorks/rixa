@@ -19,25 +19,28 @@ import (
 const maxStateBytes = 64 << 10
 
 type journal struct {
-	Schema           string            `json:"schema"`
-	Draft            Draft             `json:"draft"`
-	State            string            `json:"state"`
-	Stage            string            `json:"stage"`
-	Code             string            `json:"code"`
-	Message          string            `json:"message"`
-	Frozen           string            `json:"frozen,omitempty"`
-	CertSHA256       string            `json:"cert_sha256,omitempty"`
-	KeySHA256        string            `json:"key_sha256,omitempty"`
-	ArchiveSHA256    string            `json:"archive_sha256,omitempty"`
-	BinarySHA256     string            `json:"binary_sha256,omitempty"`
-	ManagerSHA256    string            `json:"manager_sha256,omitempty"`
-	UID              uint32            `json:"uid,omitempty"`
-	GID              uint32            `json:"gid,omitempty"`
-	ControlPrincipal string            `json:"control_principal,omitempty"`
-	SitePrincipal    string            `json:"site_principal,omitempty"`
-	Attempts         map[string]string `json:"attempts"`
-	UnitSHA256       string            `json:"unit_sha256,omitempty"`
-	Updated          string            `json:"updated"`
+	ExecutorGeneration   int               `json:"executor_generation,omitempty"`
+	ExecutorAcknowledged bool              `json:"executor_acknowledged,omitempty"`
+	DatabaseTargets      map[string]string `json:"database_targets,omitempty"`
+	Schema               string            `json:"schema"`
+	Draft                Draft             `json:"draft"`
+	State                string            `json:"state"`
+	Stage                string            `json:"stage"`
+	Code                 string            `json:"code"`
+	Message              string            `json:"message"`
+	Frozen               string            `json:"frozen,omitempty"`
+	CertSHA256           string            `json:"cert_sha256,omitempty"`
+	KeySHA256            string            `json:"key_sha256,omitempty"`
+	ArchiveSHA256        string            `json:"archive_sha256,omitempty"`
+	BinarySHA256         string            `json:"binary_sha256,omitempty"`
+	ManagerSHA256        string            `json:"manager_sha256,omitempty"`
+	UID                  uint32            `json:"uid,omitempty"`
+	GID                  uint32            `json:"gid,omitempty"`
+	ControlPrincipal     string            `json:"control_principal,omitempty"`
+	SitePrincipal        string            `json:"site_principal,omitempty"`
+	Attempts             map[string]string `json:"attempts"`
+	UnitSHA256           string            `json:"unit_sha256,omitempty"`
+	Updated              string            `json:"updated"`
 }
 
 func digest(b []byte) string { s := sha256.Sum256(b); return hex.EncodeToString(s[:]) }
@@ -68,6 +71,9 @@ func fileGID(i os.FileInfo) uint32 {
 	return s.Gid
 }
 func privateDir(path string, uid int, create bool) error {
+	if uid == 0 && !trustedRootParent(path) {
+		return ErrState
+	}
 	if !safePath(path) {
 		return ErrState
 	}

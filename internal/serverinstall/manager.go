@@ -12,14 +12,13 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/AChWorks/rixa/internal/product"
 	"github.com/AChWorks/rixa/internal/releaseartifact"
-	"github.com/jackc/pgx/v5"
 )
 
 const (
@@ -173,33 +172,13 @@ func (m *Manager) review(ctx context.Context, j *journal) []Problem {
 			}
 		}
 	}
-	c, e := product.ParseConfig(configBytes(d, "", ""))
-	if e == nil {
-		targets, e := c.DatabaseTargets(ctx, databaseLookup(d))
-		if e != nil {
-			add("control_dsn", "database-unavailable", "Provide distinct reachable PostgreSQL databases with schema and physical-identity permissions.")
-		} else {
-			for _, t := range targets {
-				pc, e := pgx.ParseConfig(t.DSN)
-				if e != nil {
-					add("control_dsn", "database-input", "The PostgreSQL connection cannot be parsed.")
-					continue
-				}
-				pc.ConnectTimeout = time.Second
-				conn, e := pgx.ConnectConfig(ctx, pc)
-				if e != nil {
-					add("control_dsn", "database-unavailable", "PostgreSQL cannot be reached.")
-					continue
-				}
-				var version int
-				e = conn.QueryRow(ctx, "SHOW server_version_num").Scan(&version)
-				_ = conn.Close(ctx)
-				if e != nil || version/10000 != 18 {
-					add("control_dsn", "database-version", "This verified native profile requires PostgreSQL 18; no database major upgrade is performed.")
-				}
-			}
-		}
+	identities, e := databaseIdentities(ctx, d)
+	if e != nil {
+		add("control_dsn", "database-prerequisite", "Provide distinct reachable PostgreSQL18 databases, schema authority and pg_control_system() identity permissions.")
+	} else {
+		j.DatabaseTargets = identities
 	}
+
 	if len(p) > 0 {
 		return p
 	}
@@ -248,12 +227,13 @@ func (m *Manager) Apply(ctx context.Context, id string) (Result, error) {
 		return result(j), ErrState
 	}
 	priorArchive, priorCert, priorKey := j.ArchiveSHA256, j.CertSHA256, j.KeySHA256
+	priorTargets := j.DatabaseTargets
 	if p := m.review(ctx, j); len(p) > 0 {
 		r := result(j)
 		r.Problems = p
 		return r, ErrPrerequisite
 	}
-	if priorArchive != j.ArchiveSHA256 || priorCert != j.CertSHA256 || priorKey != j.KeySHA256 {
+	if priorArchive != j.ArchiveSHA256 || priorCert != j.CertSHA256 || priorKey != j.KeySHA256 || !reflect.DeepEqual(priorTargets, j.DatabaseTargets) {
 		return result(j), ErrState
 	}
 	for _, s := range []struct{ source, suffix, hash string }{{j.Draft.TLSCertPath, ".tls-cert", j.CertSHA256}, {j.Draft.TLSKeyPath, ".tls-key", j.KeySHA256}} {
@@ -282,20 +262,8 @@ func (m *Manager) Apply(ctx context.Context, id string) (Result, error) {
 	}
 	j.ManagerSHA256 = filepath.Base(manager)
 	j.Frozen = draftDigest(j.Draft)
-	j.State, j.Stage, j.Code, j.Message = "applying", "executor", "queued", "Installation is supervised independently of this terminal. Refresh status."
-	j.Attempts["executor"] = "attempted"
-	if e = m.save(j); e != nil {
-		return Result{}, e
-	}
-	_, e = m.run(ctx, "/usr/bin/systemd-run", "--unit=rixa-install-"+id, "--property=Type=exec", "--property=RuntimeMaxSec=600", "--property=KillMode=control-group", "--collect", manager, "manage", "internal-apply", id)
-	if e != nil {
-		j.State, j.Code, j.Message = "reconciliation-required", "executor-acknowledgement-unknown", "Inspect the retained operation and rixa-install-"+id+" unit; do not replay the start."
-		_ = m.save(j)
-		return result(j), ErrState
-	}
-	// The worker takes this same lock after systemd-run returns. Acceptance is not
-	// inferred from the enqueue acknowledgement.
-	return result(j), nil
+	j.Stage = "executor"
+	return m.queue(ctx, j)
 }
 func (m *Manager) snapshotManager() (string, error) {
 	exe, e := os.Executable()
@@ -336,6 +304,9 @@ func trustedExecutable(p string) bool {
 	return true
 }
 func ownedPublicDir(p string) error {
+	if !trustedRootParent(p) {
+		return ErrState
+	}
 	if e := os.Mkdir(p, 0755); e != nil && !errors.Is(e, os.ErrExist) {
 		return ErrState
 	}
@@ -372,10 +343,13 @@ func (m *Manager) Status(ctx context.Context, id string) (Result, error) {
 	}
 	r := result(j)
 	if j.State == "applying" || j.State == "reconciliation-required" {
-		out, e := m.run(ctx, "/usr/bin/systemctl", "show", "--property=ActiveState", "--value", "rixa-install-"+id+".service")
+		out, e := m.run(ctx, "/usr/bin/systemctl", "show", "--property=ActiveState", "--value", executorName(j))
 		if e == nil && (strings.TrimSpace(string(out)) == "active" || strings.TrimSpace(string(out)) == "activating") {
 			r.Message = "Installation executor is active; refresh retained progress."
 			return r, nil
+		}
+		if m.resumable(ctx, j) {
+			r.Actions = []string{"resume", "status"}
 		}
 		if j.State == "applying" {
 			r.State = "reconciliation-required"
