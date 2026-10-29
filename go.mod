@@ -7,10 +7,12 @@ require (
 	github.com/AChWorks/achrix/admin v0.1.0
 	github.com/AChWorks/achrix/audit v0.1.0
 	github.com/AChWorks/achrix/identity v0.1.0
+	github.com/AChWorks/achrix/installation v0.1.0
 	github.com/AChWorks/achrix/media v0.1.0
 	github.com/AChWorks/achrix/multisite v0.1.0
 	github.com/jackc/pgx/v5 v5.11.0
 	golang.org/x/net v0.58.0
+	golang.org/x/sys v0.48.0
 )
 
 require (
@@ -21,6 +23,5 @@ require (
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	golang.org/x/crypto v0.57.0 // indirect
 	golang.org/x/sync v0.23.0 // indirect
-	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
 )

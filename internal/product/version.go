@@ -7,6 +7,7 @@ import (
 	"github.com/AChWorks/achrix/admin"
 	"github.com/AChWorks/achrix/audit"
 	"github.com/AChWorks/achrix/identity"
+	"github.com/AChWorks/achrix/installation"
 	"github.com/AChWorks/achrix/media"
 	"github.com/AChWorks/achrix/multisite"
 )
@@ -20,11 +21,12 @@ var Version = "development"
 // Return a new map so callers cannot change later diagnostics or transfer checks.
 func FoundationVersions() map[string]string {
 	return map[string]string{
-		"github.com/AChWorks/achrix":           achrix.Version(),
-		"github.com/AChWorks/achrix/admin":     admin.Version(),
-		"github.com/AChWorks/achrix/audit":     audit.Version(),
-		"github.com/AChWorks/achrix/identity":  identity.Version(),
-		"github.com/AChWorks/achrix/media":     media.Version(),
-		"github.com/AChWorks/achrix/multisite": multisite.Version(),
+		"github.com/AChWorks/achrix":              achrix.Version(),
+		"github.com/AChWorks/achrix/admin":        admin.Version(),
+		"github.com/AChWorks/achrix/audit":        audit.Version(),
+		"github.com/AChWorks/achrix/identity":     identity.Version(),
+		"github.com/AChWorks/achrix/installation": installation.Version(),
+		"github.com/AChWorks/achrix/media":        media.Version(),
+		"github.com/AChWorks/achrix/multisite":    multisite.Version(),
 	}
 }

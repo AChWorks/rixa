@@ -40,6 +40,7 @@ required_paths="$(printf '%s\n' \
   github.com/AChWorks/achrix/admin \
   github.com/AChWorks/achrix/audit \
   github.com/AChWorks/achrix/identity \
+  github.com/AChWorks/achrix/installation \
   github.com/AChWorks/achrix/media \
   github.com/AChWorks/achrix/multisite | LC_ALL=C sort)"
 [[ "$expected_paths" == "$required_paths" ]] || {
