@@ -167,7 +167,12 @@ func fetch(parent context.Context, request FetchRequest, client *http.Client, ve
 		}
 	}
 	archiveName := "rixa-" + release.Tag + "-linux-amd64.tar.gz"
-	checksum, err := root.ReadFile(archiveName + ".sha256")
+	checksumFile, _, err := openFetchedAsset(root, assets[1])
+	var checksum []byte
+	if err == nil {
+		checksum, err = io.ReadAll(io.LimitReader(checksumFile, assets[1].Size+1))
+		err = errors.Join(err, checksumFile.Close())
+	}
 	if err != nil || string(checksum) != strings.TrimPrefix(assets[0].Digest, "sha256:")+"  "+archiveName+"\n" {
 		return fail("checksum-mismatch", "checksum", "The adjacent checksum must describe exactly the selected archive digest and filename.", ErrFetch)
 	}
@@ -199,15 +204,15 @@ func fetch(parent context.Context, request FetchRequest, client *http.Client, ve
 		return fail("output-changed", "output", "Output identity changed; verify the intended bytes again.", ErrChanged)
 	}
 	for _, asset := range assets {
-		f, readErr := root.OpenFile(asset.Name, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+		f, info, readErr := openFetchedAsset(root, asset)
 		if readErr != nil {
 			return fail("output-changed", "assets", "Downloaded files changed after verification.", ErrChanged)
 		}
-		info, statErr := f.Stat()
 		hash := sha256.New()
 		n, readErr := io.Copy(hash, io.LimitReader(f, asset.Size+1))
 		closeErr := f.Close()
-		if statErr != nil || !info.Mode().IsRegular() || info.Size() != asset.Size || readErr != nil || closeErr != nil || n != asset.Size || "sha256:"+hex.EncodeToString(hash.Sum(nil)) != asset.Digest {
+		currentFile, statErr := root.Lstat(asset.Name)
+		if statErr != nil || !safeFetchedInfo(currentFile, asset.Size) || !os.SameFile(info, currentFile) || readErr != nil || closeErr != nil || n != asset.Size || "sha256:"+hex.EncodeToString(hash.Sum(nil)) != asset.Digest {
 			return fail("output-changed", "assets", "Downloaded files changed after verification.", ErrChanged)
 		}
 	}
@@ -403,8 +408,33 @@ func downloadAsset(ctx context.Context, client *http.Client, root *os.Root, asse
 	if readErr != nil || syncErr != nil || closeErr != nil || n != asset.Size || "sha256:"+hex.EncodeToString(hash.Sum(nil)) != asset.Digest {
 		return fmt.Errorf("%w: asset bytes do not match the frozen remote size/digest", ErrFetch)
 	}
-	if err = root.Rename(asset.Name+".partial", asset.Name); err != nil {
-		return fmt.Errorf("%w: private asset finalization failed", ErrFetch)
+	// Link creates the final name exclusively; an unexpected name is never
+	// overwritten. On failure the private partial remains explicitly unverified.
+	if err = root.Link(asset.Name+".partial", asset.Name); err != nil {
+		return fmt.Errorf("%w: private asset finalization refused an unavailable or existing final name", ErrFetch)
+	}
+	if err = root.Remove(asset.Name + ".partial"); err != nil {
+		return fmt.Errorf("%w: private partial finalization is incomplete", ErrFetch)
 	}
 	return nil
+}
+
+// A pathname inside the owned output can still have changed since download.
+// Open without following links or waiting for a FIFO, then reject unsafe metadata
+// before any read. Callers retain the frozen size bound for the actual bytes.
+func openFetchedAsset(root *os.Root, asset releaseAsset) (*os.File, os.FileInfo, error) {
+	f, err := root.OpenFile(asset.Name, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, nil, err
+	}
+	info, err := f.Stat()
+	if err != nil || !safeFetchedInfo(info, asset.Size) {
+		f.Close()
+		return nil, nil, ErrChanged
+	}
+	return f, info, nil
+}
+func safeFetchedInfo(info os.FileInfo, size int64) bool {
+	return info != nil && info.Mode().IsRegular() && info.Mode().Perm() == 0o600 &&
+		info.Mode()&(os.ModeSetuid|os.ModeSetgid|os.ModeSticky) == 0 && trustedOwner(info) && info.Size() == size
 }
