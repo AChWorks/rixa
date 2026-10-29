@@ -413,3 +413,30 @@ func TestTerminalPTYSmallConfirmationKeepsPromptVisible(t *testing.T) {
 		t.Fatal("small-screen correction applied an operation")
 	}
 }
+
+func TestTerminalPTYUnsupportedKeysDoNotEditTextOrSecrets(t *testing.T) {
+	p := startPTY(t, "full")
+	position := p.await(t, 0, "1. Configure installation")
+	p.send(t, "\r")
+	position = p.await(t, position, "Control URL")
+	unsupported := "\x1b[H\x1b[3~\x1bOF"
+	p.send(t, unsupported+"\r")
+	position = p.await(t, position, "Site URL")
+	p.send(t, strings.Repeat("\r", 4))
+	position = p.await(t, position, "Control database connection")
+	p.send(t, unsupported+"\r")
+	position = p.await(t, position, "Site database connection")
+	p.send(t, strings.Repeat("\r", 2))
+	position = p.await(t, position, "Control administrator password")
+	p.send(t, unsupported+"\r")
+	position = p.await(t, position, "Site administrator login")
+	p.send(t, strings.Repeat("\r", 3))
+	position = p.await(t, position, "temporarily unavailable")
+	p.send(t, "\r")
+	p.await(t, position, "Draft saved privately.")
+	p.send(t, "\x03")
+	receipt := p.finish(t)
+	if receipt["saves"] != float64(2) || receipt["control_origin"] != "https://control.rixa.test:8443" {
+		t.Fatalf("unsupported key modified retained inputs: %#v", receipt)
+	}
+}

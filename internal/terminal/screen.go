@@ -35,6 +35,8 @@ type session struct {
 	height    int
 	old       *term.State
 	pending   []byte
+	escape    []byte
+	inEscape  bool
 	lastPaint string
 }
 
@@ -117,33 +119,17 @@ func (s *session) readKey(ctx context.Context) (key, error) {
 		if err := ctx.Err(); err != nil {
 			return key{}, err
 		}
+		if s.inEscape {
+			return s.readEscape(ctx)
+		}
 		if len(s.pending) == 0 {
-			p := []unix.PollFd{{Fd: int32(s.input.Fd()), Events: unix.POLLIN}}
-			n, err := unix.Poll(p, 150)
-			if err == unix.EINTR {
-				continue
-			}
+			available, err := s.readMore(ctx, 150*time.Millisecond)
 			if err != nil {
 				return key{}, err
 			}
-			if n == 0 {
+			if !available {
 				return key{name: "tick"}, nil
 			}
-			if p[0].Revents&(unix.POLLHUP|unix.POLLERR|unix.POLLNVAL) != 0 {
-				return key{}, io.EOF
-			}
-			b := make([]byte, 256)
-			n, err = unix.Read(int(s.input.Fd()), b)
-			if err == unix.EINTR {
-				continue
-			}
-			if err != nil {
-				return key{}, err
-			}
-			if n == 0 {
-				return key{}, io.EOF
-			}
-			s.pending = append(s.pending, b[:n]...)
 		}
 		b := s.pending[0]
 		switch b {
@@ -163,36 +149,22 @@ func (s *session) readKey(ctx context.Context) (key, error) {
 			s.pending = s.pending[1:]
 			return key{name: "backspace"}, nil
 		case 27:
-			// A short bounded poll distinguishes Escape from an ANSI key sequence.
-			if len(s.pending) == 1 {
-				p := []unix.PollFd{{Fd: int32(s.input.Fd()), Events: unix.POLLIN}}
-				if n, _ := unix.Poll(p, 40); n > 0 {
-					b := make([]byte, 16)
-					n, _ := unix.Read(int(s.input.Fd()), b)
-					s.pending = append(s.pending, b[:n]...)
-				}
-			}
-			if strings.HasPrefix(string(s.pending), "\x1b[200~") {
-				s.pending = s.pending[6:]
-				return s.readPaste(ctx)
-			}
-
-			for _, v := range []struct{ seq, name string }{{"\x1b[A", "up"}, {"\x1b[B", "down"}, {"\x1b[Z", "back"}, {"\x1bOP", "help"}, {"\x1b[11~", "help"}, {"\x1b[C", "next"}, {"\x1b[D", "back"}} {
-				if strings.HasPrefix(string(s.pending), v.seq) {
-					s.pending = s.pending[len(v.seq):]
-					return key{name: v.name}, nil
-				}
-			}
 			s.pending = s.pending[1:]
-			// Discard unsupported escape controls rather than treating their bytes as data.
-			if len(s.pending) > 0 && (s.pending[0] == '[' || s.pending[0] == 'O') {
-				for len(s.pending) > 0 {
-					c := s.pending[0]
-					s.pending = s.pending[1:]
-					if c >= 0x40 && c <= 0x7e {
-						break
-					}
+			// Only a standalone Escape has the short ambiguity timeout. Once a
+			// CSI/SS3 introducer arrives, its body remains control data across reads.
+			if len(s.pending) == 0 {
+				available, err := s.readMore(ctx, 40*time.Millisecond)
+				if err != nil {
+					return key{}, err
 				}
+				if !available {
+					return key{name: "back"}, nil
+				}
+			}
+			if s.pending[0] == '[' || s.pending[0] == 'O' {
+				s.escape = []byte{27, s.pending[0]}
+				s.inEscape = true
+				s.pending = s.pending[1:]
 				continue
 			}
 			return key{name: "back"}, nil
@@ -202,18 +174,13 @@ func (s *session) readKey(ctx context.Context) (key, error) {
 			continue
 		}
 		if !utf8.FullRune(s.pending) {
-			// UTF-8 key bytes may arrive in separate reads.
-			p := []unix.PollFd{{Fd: int32(s.input.Fd()), Events: unix.POLLIN}}
-			if n, _ := unix.Poll(p, 100); n == 0 {
-				s.pending = nil
-				return key{name: "tick"}, nil
-			}
-			more := make([]byte, 8)
-			n, err := unix.Read(int(s.input.Fd()), more)
+			available, err := s.readMore(ctx, 100*time.Millisecond)
 			if err != nil {
 				return key{}, err
 			}
-			s.pending = append(s.pending, more[:n]...)
+			if !available {
+				return key{name: "tick"}, nil
+			}
 			continue
 		}
 		r, n := utf8.DecodeRune(s.pending)
@@ -224,6 +191,116 @@ func (s *session) readKey(ctx context.Context) (key, error) {
 		return key{name: "text", text: string(r)}, nil
 	}
 }
+
+// readMore bounds each wait and checks cancellation between short polls. All
+// reads have one owner; no partial control/UTF-8 bytes are discarded on a tick.
+func (s *session) readMore(ctx context.Context, wait time.Duration) (bool, error) {
+	deadline := time.Now().Add(wait)
+	for {
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return false, nil
+		}
+		millis := int((min(remaining, 25*time.Millisecond) + time.Millisecond - 1) / time.Millisecond)
+		p := []unix.PollFd{{Fd: int32(s.input.Fd()), Events: unix.POLLIN}}
+		n, err := unix.Poll(p, millis)
+		if err == unix.EINTR {
+			continue
+		}
+		if err != nil {
+			return false, err
+		}
+		if n == 0 {
+			continue
+		}
+		if p[0].Revents&unix.POLLIN == 0 {
+			return false, io.EOF
+		}
+		b := make([]byte, 256)
+		n, err = unix.Read(int(s.input.Fd()), b)
+		if err == unix.EINTR {
+			continue
+		}
+		if err != nil {
+			return false, err
+		}
+		if n == 0 {
+			return false, io.EOF
+		}
+		s.pending = append(s.pending, b[:n]...)
+		return true, nil
+	}
+}
+
+func (s *session) readEscape(ctx context.Context) (key, error) {
+	deadline := time.Now().Add(150 * time.Millisecond)
+	for {
+		if err := ctx.Err(); err != nil {
+			return key{}, err
+		}
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return key{name: "tick"}, nil
+		}
+		if len(s.pending) == 0 {
+			available, err := s.readMore(ctx, remaining)
+			if err != nil {
+				return key{}, err
+			}
+			if !available {
+				return key{name: "tick"}, nil
+			}
+		}
+		b := s.pending[0]
+		if b == 27 || b >= 0x80 {
+			// A new Escape or ordinary UTF-8 terminates a malformed control without
+			// swallowing the following independent key/text.
+			s.inEscape = false
+			s.escape = nil
+			return key{name: "tick"}, nil
+		}
+		s.pending = s.pending[1:]
+		if b == 3 || b == 4 {
+			return key{name: "quit"}, nil
+		}
+		if s.escape != nil {
+			if len(s.escape) < 64 {
+				s.escape = append(s.escape, b)
+			} else {
+				s.escape = nil
+			}
+		}
+		if b >= 0x40 && b <= 0x7e {
+			sequence := string(s.escape)
+			s.escape = nil
+			s.inEscape = false
+			switch sequence {
+			case "\x1b[200~":
+				return s.readPaste(ctx)
+			case "\x1b[A":
+				return key{name: "up"}, nil
+			case "\x1b[B":
+				return key{name: "down"}, nil
+			case "\x1b[Z", "\x1b[D":
+				return key{name: "back"}, nil
+			case "\x1bOP", "\x1b[11~":
+				return key{name: "help"}, nil
+			case "\x1b[C":
+				return key{name: "next"}, nil
+			}
+			// Unsupported Home/Delete/modifier controls are consumed as a whole;
+			// their parameter/final bytes must never become field or password text.
+			return key{name: "tick"}, nil
+		}
+		if b < 0x20 || b > 0x3f {
+			s.escape = nil
+		}
+	}
+}
+
 func (s *session) paint(title string, lines []string, footer string) error {
 	fingerprint := fmt.Sprint(s.width, "/", s.height, "/", title, "/", strings.Join(lines, "\n"), "/", footer)
 	if fingerprint == s.lastPaint {
@@ -306,7 +383,7 @@ func (s *session) readPaste(ctx context.Context) (key, error) {
 	for {
 		if i := strings.Index(string(b), "\x1b[201~"); i >= 0 {
 			s.pending = append(s.pending, b[i+6:]...)
-			if overflow {
+			if overflow || i > 8192 {
 				return key{name: "paste-invalid"}, nil
 			}
 			return key{name: "paste", text: string(b[:i])}, nil
