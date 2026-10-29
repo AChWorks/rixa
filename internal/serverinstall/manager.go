@@ -286,31 +286,18 @@ func (m *Manager) Apply(ctx context.Context, id, expectedReviewToken string) (Re
 	if j.State != "ready" {
 		return result(j), ErrState
 	}
-	priorArchive, priorCert, priorKey := j.ArchiveSHA256, j.CertSHA256, j.KeySHA256
-	priorTargets := j.DatabaseTargets
-	priorHelper := j.HelperSHA256
-	priorTransport := j.TransportEnv
-	if p := m.review(ctx, j); len(p) > 0 {
-		r := result(j)
-		r.Problems = p
-		return r, ErrPrerequisite
+	before := captureReviewedEvidence(j)
+	if problems := m.review(ctx, j); len(problems) > 0 {
+		return m.rejectReview(j, "review-prerequisite-changed", problems)
 	}
-	if priorArchive != j.ArchiveSHA256 || priorCert != j.CertSHA256 || priorKey != j.KeySHA256 || !reflect.DeepEqual(priorTargets, j.DatabaseTargets) || priorHelper != j.HelperSHA256 || !reflect.DeepEqual(priorTransport, j.TransportEnv) {
-		return result(j), ErrState
+	if problems := changedReviewedEvidence(before, j); len(problems) > 0 {
+		return m.rejectReview(j, "review-evidence-changed", problems)
 	}
-	for _, s := range []struct{ source, suffix, hash string }{{j.Draft.TLSCertPath, ".tls-cert", j.CertSHA256}, {j.Draft.TLSKeyPath, ".tls-key", j.KeySHA256}} {
-		b, e := readRegular(s.source, 1<<20)
-		if e != nil || digest(b) != s.hash {
-			return result(j), ErrState
-		}
-		target := filepath.Join(m.stateRoot, id+s.suffix)
-		if e = writeNew(target, b, 0600); e != nil {
-			old, oe := readPrivate(target, m.ownerUID, 1<<20)
-			if oe != nil || digest(old) != s.hash {
-				return result(j), ErrState
-			}
-		}
+
+	if problems := m.snapshotTLSInputs(j); len(problems) > 0 {
+		return m.rejectReview(j, "review-evidence-changed", problems)
 	}
+
 	ownerPath := filepath.Join(m.stateRoot, "installation")
 	if e = writeNew(ownerPath, []byte(id+"\n"), 0600); e != nil {
 		old, oe := readPrivate(ownerPath, m.ownerUID, 128)
@@ -367,7 +354,7 @@ func ownedPublicDir(p string) error {
 	if !trustedRootParent(p) {
 		return ErrState
 	}
-	if e := os.Mkdir(p, 0755); e != nil && !errors.Is(e, os.ErrExist) {
+	if e := mkdirOwnedNew(p, 0755, 0, 0); e != nil && !errors.Is(e, os.ErrExist) {
 		return ErrState
 	}
 	i, e := os.Lstat(p)

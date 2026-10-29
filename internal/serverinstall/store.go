@@ -82,7 +82,7 @@ func privateDir(path string, uid int, create bool) error {
 		return ErrState
 	}
 	if create {
-		if e := os.Mkdir(path, 0700); e != nil && !errors.Is(e, os.ErrExist) {
+		if e := mkdirOwnedNew(path, 0700, uid, os.Getegid()); e != nil && !errors.Is(e, os.ErrExist) {
 			return ErrState
 		}
 	}
@@ -167,7 +167,16 @@ func (m *Manager) lock(ctx context.Context, create bool) (func(), error) {
 	if e := privateDir(m.stateRoot, m.ownerUID, create); e != nil {
 		return nil, e
 	}
-	f, e := os.OpenFile(filepath.Join(m.stateRoot, ".lock"), os.O_CREATE|os.O_RDWR|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0600)
+	lockPath := filepath.Join(m.stateRoot, ".lock")
+	f, e := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_RDWR|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0600)
+	if e == nil {
+		if e = f.Chmod(0600); e != nil {
+			_ = f.Close()
+			return nil, ErrState
+		}
+	} else if errors.Is(e, os.ErrExist) {
+		f, e = os.OpenFile(lockPath, os.O_RDWR|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0)
+	}
 	if e != nil {
 		return nil, ErrState
 	}

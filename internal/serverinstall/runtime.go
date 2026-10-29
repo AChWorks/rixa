@@ -149,11 +149,11 @@ func (m *Manager) childStage(ctx context.Context, j *journal, stage string) (sta
 	task := runtimeTask{DatabaseTargets: j.DatabaseTargets, OperationID: j.Draft.OperationID, UID: j.UID, GID: j.GID, Draft: j.Draft, ControlPrincipal: j.ControlPrincipal, SitePrincipal: j.SitePrincipal}
 	if stage == "prepare" {
 		var e error
-		task.CertPEM, e = readPrivate(filepath.Join(m.stateRoot, j.Draft.OperationID+".tls-cert"), m.ownerUID, 1<<20)
+		task.CertPEM, e = readPrivate(m.tlsSnapshotPath(j, false), m.ownerUID, 1<<20)
 		if e != nil {
 			return stageReceipt{}, e
 		}
-		task.KeyPEM, e = readPrivate(filepath.Join(m.stateRoot, j.Draft.OperationID+".tls-key"), m.ownerUID, 1<<20)
+		task.KeyPEM, e = readPrivate(m.tlsSnapshotPath(j, true), m.ownerUID, 1<<20)
 		if e != nil {
 			return stageReceipt{}, e
 		}

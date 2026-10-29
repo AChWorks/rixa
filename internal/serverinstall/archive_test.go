@@ -151,9 +151,19 @@ func TestGenuinePublishedPayloadCompatibility(t *testing.T) {
 	if len(hash) != 64 {
 		t.Fatal("missing compiled executable digest")
 	}
+	for _, name := range []string{"rixa", "config", "licenses"} {
+		assertOwnedMode(t, filepath.Join(out, name), 0755)
+	}
+	for _, name := range []string{"BUILDINFO.json", "INSTALL.md", "config/rixa.example.json"} {
+		assertOwnedMode(t, filepath.Join(out, name), 0644)
+	}
 	// A source mismatch remains a hard rejection even for genuine signed bytes.
 	d.SourceCommit = "ffffffffffffffffffffffffffffffffffffffff"
-	if _, e = extractAuthenticated(d.ArchivePath, filepath.Join(t.TempDir(), "wrong"), d); e == nil || errors.Is(e, os.ErrNotExist) {
-		t.Fatal("wrong source accepted")
+	wrong := filepath.Join(t.TempDir(), "wrong")
+	if e = mkdirOwnedNew(wrong, 0755, os.Geteuid(), os.Getegid()); e != nil {
+		t.Fatal(e)
+	}
+	if _, e = extractAuthenticated(d.ArchivePath, wrong, d); !errors.Is(e, ErrInput) {
+		t.Fatalf("wrong source did not fail compatibility: %v", e)
 	}
 }

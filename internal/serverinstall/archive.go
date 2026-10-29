@@ -65,11 +65,13 @@ func frozenInputs(ctx context.Context, d Draft, dir string) (releaseartifact.Res
 	return releaseartifact.Verify(ctx, releaseartifact.Request{ArchivePath: ap, BundlePath: bp, ReleaseTag: d.Release, SourceCommit: d.SourceCommit})
 }
 func writeNew(path string, b []byte, mode os.FileMode) error {
-	f, e := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, mode)
+	f, e := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY|unix.O_NOFOLLOW, 0600)
 	if e != nil {
 		return ErrState
 	}
-	_, e = f.Write(b)
+	if e = f.Chmod(mode); e == nil {
+		_, e = f.Write(b)
+	}
 	if e == nil {
 		e = f.Sync()
 	}
@@ -134,7 +136,7 @@ func extractAuthenticated(archive, output string, d Draft) (string, error) {
 			if h.Size != 0 {
 				return "", ErrInput
 			}
-			if e = os.MkdirAll(target, 0755); e != nil {
+			if e = archiveDirectories(output, target); e != nil {
 				return "", ErrState
 			}
 		case tar.TypeReg, tar.TypeRegA:
@@ -142,15 +144,19 @@ func extractAuthenticated(archive, output string, d Draft) (string, error) {
 			if total > 256<<20 {
 				return "", ErrInput
 			}
-			if e = os.MkdirAll(filepath.Dir(target), 0755); e != nil {
+			if e = archiveDirectories(output, filepath.Dir(target)); e != nil {
 				return "", ErrState
 			}
 			mode := os.FileMode(0644)
 			if rel == "rixa" {
 				mode = 0755
 			}
-			out, e := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, mode)
+			out, e := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY|unix.O_NOFOLLOW, 0600)
 			if e != nil {
+				return "", ErrState
+			}
+			if e = out.Chmod(mode); e != nil {
+				_ = out.Close()
 				return "", ErrState
 			}
 			n, ce := io.CopyN(out, tr, h.Size)

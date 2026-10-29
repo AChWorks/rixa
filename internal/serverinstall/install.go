@@ -190,7 +190,7 @@ func (m *Manager) installPayload(ctx context.Context, j *journal) error {
 		return fmt.Errorf("%w: publisher code=%s field=%s", ErrPrerequisite, v.Code, v.Field)
 	}
 	out := filepath.Join(dir, "release")
-	if e = os.Mkdir(out, 0755); e != nil {
+	if e = mkdirOwnedNew(out, 0755, os.Geteuid(), os.Getegid()); e != nil {
 		return ErrState
 	}
 	binary, e := extractAuthenticated(filepath.Join(dir, "archive.tar.gz"), out, j.Draft)
@@ -294,14 +294,11 @@ func ownedDir(path string, uid, gid uint32, mode os.FileMode) error {
 	if !trustedRootParent(path) {
 		return ErrState
 	}
-	e := os.Mkdir(path, mode)
-	if e == nil {
-		if e = os.Chown(path, int(uid), int(gid)); e != nil {
-			return ErrState
-		}
-	} else if !errors.Is(e, os.ErrExist) {
+	e := mkdirOwnedNew(path, mode, int(uid), int(gid))
+	if e != nil && !errors.Is(e, os.ErrExist) {
 		return ErrState
 	}
+
 	i, e := os.Lstat(path)
 	if e != nil || !i.IsDir() || i.Mode().Perm() != mode || fileUID(i) != uid || fileGID(i) != gid {
 		return ErrState

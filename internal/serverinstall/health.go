@@ -12,7 +12,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -86,7 +85,7 @@ func (m *Manager) validateInstalled(ctx context.Context, j *journal) error {
 	return nil
 }
 func (m *Manager) localClient(j *journal) (*http.Client, error) {
-	cert, e := readPrivate(filepath.Join(m.stateRoot, j.Draft.OperationID+".tls-cert"), m.ownerUID, 1<<20)
+	cert, e := readPrivate(m.tlsSnapshotPath(j, false), m.ownerUID, 1<<20)
 	if e != nil || digest(cert) != j.CertSHA256 {
 		return nil, ErrState
 	}

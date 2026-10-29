@@ -16,6 +16,9 @@ func transportEnvironment() map[string]string {
 			out[k] = v
 		}
 	}
+	if len(out) == 0 {
+		return nil
+	}
 	return out
 }
 func transportFile(env map[string]string) []byte {
