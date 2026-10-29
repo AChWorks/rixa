@@ -6,6 +6,8 @@ import (
 	"io"
 	"log/slog"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -53,4 +55,17 @@ func redactDiagnostic(s string, d Draft) string {
 		s = s[:32<<10]
 	}
 	return s
+}
+
+func (m *Manager) retainDiagnostic(j *journal, text string) {
+	path := filepath.Join(m.stateRoot, j.Draft.OperationID+".diagnostic")
+	previous, e := readPrivate(path, m.ownerUID, 64<<10)
+	if e != nil && !os.IsNotExist(e) {
+		return
+	}
+	b := []byte(redactDiagnostic(string(previous)+"\n"+text, j.Draft))
+	if len(b) > 64<<10 {
+		b = b[len(b)-(64<<10):]
+	}
+	_ = writeAtomic(path, b, 0600)
 }

@@ -3,6 +3,7 @@ package serverinstall
 
 import (
 	"archive/tar"
+	"bufio"
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
@@ -89,11 +90,13 @@ func extractAuthenticated(archive, output string, d Draft) (string, error) {
 		return "", ErrState
 	}
 	defer f.Close()
-	gz, e := gzip.NewReader(f)
+	buffered := bufio.NewReader(f)
+	gz, e := gzip.NewReader(buffered)
 	if e != nil {
 		return "", ErrInput
 	}
 	defer gz.Close()
+	gz.Multistream(false)
 	tr := tar.NewReader(gz)
 	prefix := "rixa-" + d.Release + "-linux-amd64"
 	seen := map[string]bool{}
@@ -108,6 +111,9 @@ func extractAuthenticated(archive, output string, d Draft) (string, error) {
 		}
 		name := strings.TrimSuffix(h.Name, "/")
 		if name == "" || path.Clean(name) != name || strings.Contains(name, "\\") || name != prefix && !strings.HasPrefix(name, prefix+"/") || seen[name] || h.Size < 0 || h.Size > 64<<20 {
+			return "", ErrInput
+		}
+		if h.Format == tar.FormatPAX || len(h.PAXRecords) != 0 {
 			return "", ErrInput
 		}
 		seen[name] = true
@@ -158,10 +164,20 @@ func extractAuthenticated(archive, output string, d Draft) (string, error) {
 			return "", ErrInput // links, devices, FIFO and sparse entries rejected
 		}
 	}
-	// Force gzip integrity and reject trailing concatenated archives.
-	if _, e = io.Copy(io.Discard, gz); e != nil {
+	// A current package has one gzip member and only zero tar block padding.
+	padding, e := io.ReadAll(io.LimitReader(gz, (1<<20)+1))
+	if e != nil || len(padding) > 1<<20 {
 		return "", ErrInput
 	}
+	for _, b := range padding {
+		if b != 0 {
+			return "", ErrInput
+		}
+	}
+	if _, e = buffered.Peek(1); e != io.EOF {
+		return "", ErrInput
+	}
+
 	data, e := os.ReadFile(filepath.Join(output, "BUILDINFO.json"))
 	if e != nil || len(data) > 64<<10 {
 		return "", ErrInput
@@ -204,17 +220,19 @@ func hashFile(path string) (string, error) {
 		return "", ErrState
 	}
 	defer f.Close()
-	i, e := os.Lstat(path)
-	if e != nil || !i.Mode().IsRegular() {
+	before, e := os.Lstat(path)
+	if e != nil || !before.Mode().IsRegular() {
 		return "", ErrState
 	}
-	fi, e := f.Stat()
-	if e != nil || !os.SameFile(i, fi) || fi.Size() < 1 || fi.Size() > 64<<20 {
+	info, e := f.Stat()
+	if e != nil || !os.SameFile(before, info) || info.Size() < 1 || info.Size() > 64<<20 {
 		return "", ErrState
 	}
 	h := sha256.New()
-	_, e = io.Copy(h, f)
-	if e != nil {
+	n, e := io.Copy(h, io.LimitReader(f, (64<<20)+1))
+	after, ae := os.Lstat(path)
+	current, ce := f.Stat()
+	if e != nil || ae != nil || ce != nil || n != info.Size() || n > 64<<20 || !after.Mode().IsRegular() || !os.SameFile(info, after) || !os.SameFile(info, current) || after.Size() != info.Size() || !after.ModTime().Equal(info.ModTime()) || !current.ModTime().Equal(info.ModTime()) {
 		return "", ErrState
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil

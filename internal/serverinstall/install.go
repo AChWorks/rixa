@@ -64,7 +64,7 @@ func (m *Manager) RunOperation(ctx context.Context, id string) (Result, error) {
 		if j.Attempts[stage] == "attempted" {
 			// Only exact positive observations may reconcile an uncertain effect.
 			if e = m.reconcile(ctx, j, stage); e != nil {
-				return m.fail(j, "stage-outcome-unknown", "The "+stage+" stage needs operator reconciliation; inspect the executor journal and retained state.")
+				return m.fail(j, "stage-outcome-unknown", "The "+stage+" stage needs operator reconciliation; inspect the executor journal and retained state.", e)
 			}
 		} else {
 			j.Attempts[stage] = "attempted"
@@ -74,7 +74,7 @@ func (m *Manager) RunOperation(ctx context.Context, id string) (Result, error) {
 				return Result{}, e
 			}
 			if e = m.execute(ctx, j, stage); e != nil {
-				return m.fail(j, "stage-failed", "The "+stage+" stage did not verify. Inspect journalctl -u rixa-install-"+id+".service and retained diagnostics before another effect.")
+				return m.fail(j, "stage-failed", "The "+stage+" stage did not verify. Inspect journalctl -u rixa-install-"+id+".service and retained diagnostics before another effect.", e)
 			}
 		}
 		j.Attempts[stage] = "verified"

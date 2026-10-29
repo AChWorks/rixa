@@ -19,6 +19,7 @@ import (
 const maxStateBytes = 64 << 10
 
 type journal struct {
+	ReviewToken          string            `json:"review_token,omitempty"`
 	ExecutorGeneration   int               `json:"executor_generation,omitempty"`
 	ExecutorAcknowledged bool              `json:"executor_acknowledged,omitempty"`
 	DatabaseTargets      map[string]string `json:"database_targets,omitempty"`
@@ -109,6 +110,9 @@ func readPrivate(path string, uid int, max int64) ([]byte, error) {
 	return b, nil
 }
 func decode(b []byte, v any) error {
+	if !uniqueJSON(b) {
+		return ErrState
+	}
 	d := json.NewDecoder(bytes.NewReader(b))
 	d.DisallowUnknownFields()
 	if e := d.Decode(v); e != nil {
@@ -193,6 +197,9 @@ func (m *Manager) load(id string) (*journal, error) {
 	default:
 		return nil, ErrState
 	}
+	if !validJournal(&j) {
+		return nil, ErrState
+	}
 	if j.Frozen != "" && j.Frozen != draftDigest(j.Draft) {
 		return nil, ErrState
 	}
@@ -221,6 +228,7 @@ func result(j *journal) Result {
 			r.Actions = []string{"status"}
 		}
 	case "ready":
+		r.ReviewToken = j.ReviewToken
 		r.Actions = []string{"configure", "review", "apply", "status"}
 	case "installed":
 		r.Actions = []string{"status", "remove"}

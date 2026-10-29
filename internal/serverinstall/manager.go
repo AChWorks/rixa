@@ -3,9 +3,13 @@ package serverinstall
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/subtle"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/hex"
 	"errors"
+	"fmt"
 	"net"
 	"net/url"
 	"os"
@@ -50,10 +54,10 @@ func fixedCommand(parent context.Context, name string, args ...string) ([]byte, 
 	cmd.Stderr = &out
 	e := cmd.Run()
 	if ctx.Err() != nil {
-		return nil, ctx.Err()
+		return out.Bytes(), fmt.Errorf("%w: %s: %s", ctx.Err(), filepath.Base(name), strings.TrimSpace(out.String()))
 	}
 	if e != nil {
-		return nil, ErrPrerequisite
+		return out.Bytes(), fmt.Errorf("%w: %s: %s", ErrPrerequisite, filepath.Base(name), strings.TrimSpace(out.String()))
 	}
 	return out.Bytes(), nil
 }
@@ -108,9 +112,17 @@ func (m *Manager) Review(ctx context.Context, id string) (Result, error) {
 		return result(j), ErrState
 	}
 	p := m.review(ctx, j)
+	j.ReviewToken = ""
 	j.State, j.Stage, j.Code, j.Message = "ready", "review", "ready", "Prerequisites verified. Apply performs the displayed native installation."
 	if len(p) > 0 {
 		j.State, j.Code, j.Message = "blocked", "prerequisite-required", "Correct the reported prerequisites and review this same draft again."
+	}
+	if len(p) == 0 {
+		token := make([]byte, 32)
+		if _, e = rand.Read(token); e != nil {
+			return Result{}, ErrState
+		}
+		j.ReviewToken = hex.EncodeToString(token)
 	}
 	if e = m.save(j); e != nil {
 		return Result{}, e
@@ -210,7 +222,7 @@ func databaseLookup(d Draft) func(string) (string, bool) {
 		return "", false
 	}
 }
-func (m *Manager) Apply(ctx context.Context, id string) (Result, error) {
+func (m *Manager) Apply(ctx context.Context, id, expectedReviewToken string) (Result, error) {
 	unlock, e := m.lock(ctx, false)
 	if e != nil {
 		return Result{}, e
@@ -223,6 +235,13 @@ func (m *Manager) Apply(ctx context.Context, id string) (Result, error) {
 	if j.Frozen != "" {
 		return result(j), nil
 	} // never blindly queue an uncertain prior write
+	if !hashSyntax.MatchString(expectedReviewToken) || subtle.ConstantTimeCompare([]byte(expectedReviewToken), []byte(j.ReviewToken)) != 1 {
+		r := result(j)
+		r.ReviewToken = ""
+		r.Code = "review-stale"
+		r.Message = "The reviewed draft changed; review again and confirm that exact result."
+		return r, ErrState
+	}
 	if j.State != "ready" {
 		return result(j), ErrState
 	}
@@ -342,6 +361,7 @@ func (m *Manager) Status(ctx context.Context, id string) (Result, error) {
 		return Result{}, e
 	}
 	r := result(j)
+	r.ReviewToken = ""
 	if j.State == "applying" || j.State == "reconciliation-required" {
 		out, e := m.run(ctx, "/usr/bin/systemctl", "show", "--property=ActiveState", "--value", executorName(j))
 		if e == nil && (strings.TrimSpace(string(out)) == "active" || strings.TrimSpace(string(out)) == "activating") {
@@ -376,7 +396,10 @@ func intID(s string) (uint32, error) {
 	}
 	return uint32(n), nil
 }
-func (m *Manager) fail(j *journal, code, message string) (Result, error) {
+func (m *Manager) fail(j *journal, code, message string, causes ...error) (Result, error) {
+	if len(causes) > 0 {
+		m.retainDiagnostic(j, fmt.Sprintf("stage=%s code=%s cause=%v", j.Stage, code, errors.Join(causes...)))
+	}
 	j.State, j.Code, j.Message = "reconciliation-required", code, message
 	_ = m.save(j)
 	return result(j), ErrState

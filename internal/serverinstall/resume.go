@@ -114,7 +114,7 @@ func writeExpected(path string, b []byte, mode os.FileMode, uid int) error {
 			return ErrState
 		}
 		i, se := os.Lstat(path)
-		if se != nil || !i.Mode().IsRegular() || i.Mode().Perm() != mode || fileUID(i) != uint32(uid) {
+		if se != nil || !i.Mode().IsRegular() || i.Mode().Perm() != mode || i.Size() != int64(len(b)) || fileUID(i) != uint32(uid) {
 			return ErrState
 		}
 		old, e = os.ReadFile(path)

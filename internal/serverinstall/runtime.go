@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -100,7 +101,7 @@ func RuntimeStage(parent context.Context, args []string) error {
 			return e
 		}
 		if e = product.Migrate(ctx, c, databaseLookup(task.Draft)); e != nil {
-			return ErrPrerequisite
+			return fmt.Errorf("runtime stage %s failed: %w", args[0], e)
 		}
 	case "bootstrap-control", "bootstrap-site":
 		scope, login, password, path := "control", task.Draft.ControlLogin, task.Draft.ControlPassword, runtimeRoot+"/bootstrap-control.json"
@@ -111,14 +112,14 @@ func RuntimeStage(parent context.Context, args []string) error {
 			OperationID: task.OperationID + "-" + args[0], StatePath: path, Configuration: configBytes(task.Draft, "", ""), Scope: scope, Login: login, Password: password,
 		}, databaseLookup(task.Draft), slog.New(slog.NewJSONHandler(os.Stderr, nil)))
 		if e != nil {
-			return ErrPrerequisite
+			return fmt.Errorf("runtime stage %s failed: %w", args[0], e)
 		}
 		receipt.Principal = r.Principal
 	case "setup":
 		data := configBytes(task.Draft, task.ControlPrincipal, task.SitePrincipal)
 		r, e := product.ApplySetup(ctx, product.SetupRequest{OperationID: task.OperationID + "-config", TargetPath: runtimeConfigPath, Configuration: data}, databaseLookup(task.Draft))
 		if e != nil || r.State != product.SetupVerified {
-			return ErrPrerequisite
+			return fmt.Errorf("runtime stage %s failed: %w", args[0], e)
 		}
 	case "check":
 		c, e := product.ParseConfig(configBytes(task.Draft, task.ControlPrincipal, task.SitePrincipal))
@@ -127,14 +128,14 @@ func RuntimeStage(parent context.Context, args []string) error {
 		}
 		resolved, e := c.ResolveRuntime(ctx, databaseLookup(task.Draft))
 		if e != nil {
-			return ErrPrerequisite
+			return fmt.Errorf("runtime stage %s failed: %w", args[0], e)
 		}
 		runtime, e := product.BuildRuntime(resolved, slog.New(slog.NewJSONHandler(os.Stderr, nil)))
 		if e != nil {
-			return ErrPrerequisite
+			return fmt.Errorf("runtime stage %s failed: %w", args[0], e)
 		}
 		if e = product.Check(ctx, runtime); e != nil {
-			return ErrPrerequisite
+			return fmt.Errorf("runtime stage %s failed: %w", args[0], e)
 		}
 	default:
 		return ErrInput
@@ -180,10 +181,10 @@ func (m *Manager) childStage(ctx context.Context, j *journal, stage string) (sta
 	cmd.Stderr = &diagnostic
 	e = cmd.Run()
 	if diagnostic.Len() > 0 {
-		_ = writeAtomic(filepath.Join(m.stateRoot, j.Draft.OperationID+".diagnostic"), []byte(redactDiagnostic(diagnostic.String(), j.Draft)), 0600)
+		m.retainDiagnostic(j, diagnostic.String())
 	}
 	if e != nil || out.exceeded || diagnostic.exceeded {
-		return stageReceipt{}, ErrPrerequisite
+		return stageReceipt{}, fmt.Errorf("runtime child %s: %w", stage, e)
 	}
 	var r stageReceipt
 	if decode(out.Bytes(), &r) != nil || r.Stage != stage || r.Code != "verified" {

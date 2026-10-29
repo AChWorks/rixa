@@ -45,6 +45,7 @@ type Problem struct {
 }
 
 type Result struct {
+	ReviewToken string    `json:"review_token,omitempty"`
 	OperationID string    `json:"operation_id"`
 	State       string    `json:"state"`
 	Stage       string    `json:"stage,omitempty"`
@@ -61,7 +62,7 @@ type Facade interface {
 	SaveDraft(context.Context, Draft) (Result, error)
 	LoadDraft(context.Context, string) (Draft, error)
 	Review(context.Context, string) (Result, error)
-	Apply(context.Context, string) (Result, error)
+	Apply(context.Context, string, string) (Result, error)
 	Resume(context.Context, string) (Result, error)
 	Status(context.Context, string) (Result, error)
 	Remove(context.Context, string) (Result, error)
