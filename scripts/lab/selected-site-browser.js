@@ -13,6 +13,7 @@ async function rixaSelectedSiteBrowser({browser, context, page, fixture, private
   }
   check(fixture.sites?.length===2&&fixture.sites[0].id==="site-a"&&fixture.sites[1].id==="site-b"&&fixture.sites[0].origin===fixture.site_a&&fixture.sites[1].origin===fixture.site_b,"two exact seeded sites required");
   const fs=await import("node:fs/promises");
+  const https=await import("node:https");
   const rootInfo=await fs.lstat(privateRoot);
   check(rootInfo.isDirectory()&&!rootInfo.isSymbolicLink()&&(rootInfo.mode&0o077)===0&&await fs.realpath(privateRoot)===privateRoot,"private journal root must be an existing canonical0700 directory");
   const journal=await fs.open(privateRoot+"/selected-site-attempts.jsonl","wx",0o600);
@@ -25,6 +26,41 @@ async function rixaSelectedSiteBrowser({browser, context, page, fixture, private
   page.setDefaultTimeout(15000);
   page.on("pageerror",error=>errors.push(error.message));
   context.on("page",p=>p.on("pageerror",error=>errors.push(error.message)));
+  // Chromium resolves *.localhost itself; Node APIRequest/route.fetch may
+  // not. Dial only the declared loopback endpoint, preserving Host/SNI,
+  // Origin, cookies, CSRF and exact request bytes. No host DNS change is made.
+  async function fixtureRequest(url, options={}, jar=context) {
+    const target=new URL(url);
+    check(Object.keys(origins).some(key=>fixture[key]===target.origin),"fixture HTTP dial left declared origins");
+    const headers={};
+    for(const [name,value] of Object.entries(options.headers||{})) headers[name.toLowerCase()]=value;
+    headers.host=target.host;
+    if(!Object.hasOwn(headers,"cookie")) headers.cookie=(await jar.cookies(target.origin)).map(c=>c.name+"="+c.value).join("; ");
+    let body=options.data===undefined?undefined:typeof options.data==="string"?options.data:JSON.stringify(options.data);
+    if(body!==undefined) {
+      if(!headers["content-type"]) headers["content-type"]="application/json";
+      headers["content-length"]=Buffer.byteLength(body);
+    }
+    return new Promise((resolve,reject)=>{
+      const request=https.request({hostname:"127.0.0.1",port:Number(target.port),servername:target.hostname,rejectUnauthorized:false,
+        method:options.method||"GET",path:target.pathname+target.search,headers},response=>{
+        const chunks=[];let size=0;
+        response.on("data",chunk=>{size+=chunk.length;if(size>2*1024*1024){request.destroy(new Error("fixture response exceeded bound"));return;}chunks.push(chunk);});
+        response.on("error",reject);
+        response.on("end",()=>{
+          const bytes=Buffer.concat(chunks),fulfillHeaders={};
+          for(const [name,value] of Object.entries(response.headers)) {
+            if(typeof value==="string"&&!["content-length","transfer-encoding","connection"].includes(name)) fulfillHeaders[name]=value;
+          }
+          resolve({status:()=>response.statusCode,rawHeaders:response.headers,fulfillHeaders,bytes,
+            text:async()=>bytes.toString("utf8"),json:async()=>JSON.parse(bytes.toString("utf8"))});
+        });
+      });
+      request.setTimeout(10000,()=>request.destroy(new Error("fixture scoped HTTP timeout")));
+      request.on("error",reject);if(body!==undefined) request.write(body);request.end();
+    });
+  }
+  const api={get:(url,options)=>fixtureRequest(url,{...options,method:"GET"}),post:(url,options)=>fixtureRequest(url,{...options,method:"POST"})};
   let fault="none", faults=0, previousUnknownBody="";
   const routePattern=/\/admin\/sites\/site\/(site-a|site-b)\/content\/(create|save)$/;
   const handler=async route=>{
@@ -45,16 +81,17 @@ async function rixaSelectedSiteBrowser({browser, context, page, fixture, private
         return route.abort("failed");
       }
       if(selectedFault==="retry_exact") check(payload===previousUnknownBody,"explicit retry changed frozen serialized payload");
-      const response=await route.fetch();
+      const response=await fixtureRequest(request.url(),{method:request.method(),headers:await request.allHeaders(),data:payload});
       await record({type:"outcome",site_id:match[1],operation_id:value.operation_id,status:response.status()});
       if(selectedFault==="commit_then_abort") {
         check(response.status()===200,"suppressed acknowledgement was not a successful real mutation");
         faults++;
         return route.abort("failed");
       }
-      return route.fulfill({response});
+      return route.fulfill({status:response.status(),headers:response.fulfillHeaders,body:response.bytes});
     } catch(error) {
       routeErrors.push(error.message);
+      await record({type:"transport_error",message:String(error.message).slice(0,500)});
       await route.abort("failed").catch(()=>{});
     }
   };
@@ -96,14 +133,14 @@ async function rixaSelectedSiteBrowser({browser, context, page, fixture, private
     mark(name+"-keyboard-390-wide");
   }
   async function csrf() {
-    const response=await context.request.get(fixture.control+"/auth/csrf",{headers:{"Origin":fixture.control,"X-Identity-Request":"1"}});
+    const response=await api.get(fixture.control+"/auth/csrf",{headers:{"Origin":fixture.control,"X-Identity-Request":"1"}});
     check(response.status()===200,"control CSRF unavailable");
     return (await response.json()).csrf;
   }
   async function apiMutation(site,path,payload,expected=200,type="mutation") {
     const body=JSON.stringify(payload);
     await record({type,site_id:site.id,path,payload:body});
-    const response=await context.request.post(fixture.control+path,{headers:{"Origin":fixture.control,"X-Identity-Request":"1","X-CSRF-Token":await csrf(),"Content-Type":"application/json"},data:body});
+    const response=await api.post(fixture.control+path,{headers:{"Origin":fixture.control,"X-Identity-Request":"1","X-CSRF-Token":await csrf(),"Content-Type":"application/json"},data:body});
     await record({type:"outcome",site_id:site.id,operation_id:payload.operation_id,status:response.status()});
     check(response.status()===expected,"scoped API mutation status="+response.status()+" expected="+expected);
     return response;
@@ -243,7 +280,7 @@ async function rixaSelectedSiteBrowser({browser, context, page, fixture, private
     const retainedTitle="Session-expired DOM text فارسی";
     await page.locator("[data-content-save] input[name=title]").fill(retainedTitle);
     const expectedHead=await page.locator("[data-content-save] input[name=expected_head]").inputValue();
-    const logout=await context.request.post(fixture.control+"/auth/logout",{headers:{"Origin":fixture.control,"X-Identity-Request":"1","X-CSRF-Token":await csrf()}});
+    const logout=await api.post(fixture.control+"/auth/logout",{headers:{"Origin":fixture.control,"X-Identity-Request":"1","X-CSRF-Token":await csrf()}});
     check(logout.status()===204,"could not revoke the fixture control session");
     await page.locator("[data-content-save] button[type=submit]").click();
     await page.locator("[data-session-recovery]:not([hidden])").waitFor();
@@ -260,26 +297,28 @@ async function rixaSelectedSiteBrowser({browser, context, page, fixture, private
       if(tag==="fa") await responsive("site-a-fa");
       if(tag==="ar") await responsive("site-a-installed-ar");
     }
-    const denied=await context.request.get(fixture.control+base(site)+"/edit/"+other.content_id,{maxRedirects:0});
+    const denied=await api.get(fixture.control+base(site)+"/edit/"+other.content_id,{maxRedirects:0});
     check(denied.status()===404,"foreign content ID escaped selected site");
-    const forged=await context.request.get(fixture.control+"/admin/sites/site/not-declared/content/",{maxRedirects:0});
+    const forged=await api.get(fixture.control+"/admin/sites/site/not-declared/content/",{maxRedirects:0});
     check([403,404].includes(forged.status()),"unknown site selection was accepted");
     const token=await csrf();
     const badOriginPayload={operation_id:await page.evaluate(()=>crypto.randomUUID()),id:site.content_id,expected_head:await page.locator("[data-current-revision]").textContent(),title:"denied",body_html:"<p>denied</p>"};
     await record({type:"negative",site_id:site.id,path:base(site)+"/save",payload:JSON.stringify(badOriginPayload)});
-    const wrongOrigin=await context.request.post(fixture.control+base(site)+"/save",{headers:{"Origin":fixture.site_a,"X-Identity-Request":"1","X-CSRF-Token":token},data:badOriginPayload});
+    const wrongOrigin=await api.post(fixture.control+base(site)+"/save",{headers:{"Origin":fixture.site_a,"X-Identity-Request":"1","X-CSRF-Token":token},data:badOriginPayload});
     check([401,403].includes(wrongOrigin.status()),"foreign Origin reached selected mutation");
     const anonymous=await browser.newContext({ignoreHTTPSErrors:true});
+    const anonymousApi={get:(url,options)=>fixtureRequest(url,{...options,method:"GET"},anonymous),post:(url,options)=>fixtureRequest(url,{...options,method:"POST"},anonymous)};
     try {
-      const privateResponse=await anonymous.request.get(fixture.control+base(site)+"/preview/"+site.content_id+"/56",{maxRedirects:0});
+      const privateResponse=await anonymousApi.get(fixture.control+base(site)+"/preview/"+site.content_id+"/56",{maxRedirects:0});
       check([303,401,403].includes(privateResponse.status()),"anonymous selected preview not denied");
       check(!(await privateResponse.text()).includes("Private selected revision"),"anonymous selected preview leaked source");
-      const direct=await context.request.get(fixture.site_a+"/admin/content/",{maxRedirects:0});
+      const direct=await api.get(fixture.site_a+"/admin/content/",{maxRedirects:0});
       check([303,401,403].includes(direct.status()),"control cookie became universal site access");
-      const siteLogin=await anonymous.request.post(fixture.site_a+"/auth/login",{headers:{"Origin":fixture.site_a,"X-Identity-Request":"1"},data:{login:credentials.site_a[0],password:credentials.site_a[1]}});
+      const siteLogin=await anonymousApi.post(fixture.site_a+"/auth/login",{headers:{"Origin":fixture.site_a,"X-Identity-Request":"1"},data:{login:credentials.site_a[0],password:credentials.site_a[1]}});
       check(siteLogin.status()===200,"separate site login failed");
-      const identity=(await anonymous.cookies(fixture.site_a)).find(c=>c.httpOnly&&c.name!=="rixa-ui-language");
-      const foreignCookie=await anonymous.request.post(fixture.control+base(site)+"/save",{headers:{"Cookie":identity.name+"="+identity.value,"Origin":fixture.control,"X-Identity-Request":"1","X-CSRF-Token":(await siteLogin.json()).csrf},data:badOriginPayload});
+      const identity=(siteLogin.rawHeaders["set-cookie"]||[])[0]?.split(";")[0];
+      check(identity&&identity.includes("="),"separate site login cookie missing");
+      const foreignCookie=await anonymousApi.post(fixture.control+base(site)+"/save",{headers:{"Cookie":identity,"Origin":fixture.control,"X-Identity-Request":"1","X-CSRF-Token":(await siteLogin.json()).csrf},data:badOriginPayload});
       check([401,403].includes(foreignCookie.status()),"site cookie became control authority");
     } finally {await anonymous.close();}
     check(await page.evaluate(()=>localStorage.length===0&&sessionStorage.length===0),"draft/session data written to WebStorage");
