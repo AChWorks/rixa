@@ -158,3 +158,11 @@ manager may perform it. Download/payload experiments do not establish recovery
 of partial dpkg configuration, initialization, unmarked SQL ownership or unknown
 authentication. Preserve all receipts and actual outcomes; a queued watcher,
 signal request or unit disappearance alone is insufficient evidence.
+
+A failed provisioned journey is preserved separately from a clean baseline.
+After its explicitly authorized private export, normal poweroff and verified
+QEMU/unit/cgroup/socket quiescence, record its sealed0400 disk identity in
+`failed-journey.json`. The boot driver refuses both clean-baseline and
+failed-journey seals. Never relabel a failed disk as clean, remove its seal to
+continue in place, or use it as backing for a new clean acceptance journey.
+A separately authorized next journey uses the original unchanged clean baseline.

@@ -399,8 +399,8 @@ def owned_qemu():
 
 def boot(args):
     lab, _ = load(args.lab)
-    if (lab / "clean-baseline.json").exists():
-        raise ValueError("sealed clean baseline is immutable; future phases require a new owned overlay")
+    if any((lab / name).exists() for name in ("clean-baseline.json", "failed-journey.json")):
+        raise ValueError("sealed clean baseline or failed journey is immutable; future phases require a new owned overlay")
     if not re.fullmatch("[a-z][a-z0-9-]{0,62}", args.attempt):
         raise ValueError("stable ASCII launch attempt identifier required")
     with _common.launch_lock(lab) as lock:

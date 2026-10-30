@@ -201,6 +201,20 @@ class CloudTrustAndSeedTests(unittest.TestCase):
                 lab.journey(args)
             baseline.assert_not_called()
 
+    def test_boot_refuses_clean_and_failed_sealed_disks_before_launch(self):
+        with tempfile.TemporaryDirectory() as root:
+            target = Path(root)
+            args = argparse.Namespace(lab=str(target), attempt="must-not-reboot")
+            for name in ("clean-baseline.json", "failed-journey.json"):
+                marker = target / name
+                marker.write_text("{}")
+                with patch.object(lab, "load", return_value=(target, {})), \
+                     patch.object(lab.subprocess, "Popen") as launch:
+                    with self.assertRaisesRegex(ValueError, "sealed.*immutable"):
+                        lab.boot(args)
+                    launch.assert_not_called()
+                marker.unlink()
+
 
 if __name__ == "__main__":
     unittest.main()
