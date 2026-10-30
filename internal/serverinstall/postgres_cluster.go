@@ -125,12 +125,24 @@ func (b *postgresBackend) createCluster(ctx context.Context, j *postgresJournal,
 		return ErrState
 	}
 	cluster, _, _ := postgresNames(j)
-	args := []string{"--start-conf=manual", "--port", strconv.Itoa(j.Draft.Port), "--datadir", b.data(j), "--locale=C.UTF-8", "--encoding=UTF8", "--pgoption", "listen_addresses=127.0.0.1", "--pgoption", "password_encryption=scram-sha-256", "--pgoption", "ssl=off", "18", cluster, "--", "--auth-local=peer", "--auth-host=scram-sha-256"}
+	args := []string{"--start-conf=manual", "--port", strconv.Itoa(j.Draft.Port), "--datadir", b.data(j), "--locale=C.UTF-8", "--encoding=UTF8", "--pgoption", "ssl=off", "18", cluster, "--"}
+	args = append(args, postgresInitDBOptions()...)
 	if _, e := b.long(ctx, "/usr/bin/pg_createcluster", args, nil); e != nil {
 		return e
 	}
 	return b.observeCluster(ctx, j)
 }
+
+// Let initdb write the fixed address using PostgreSQL's configuration grammar.
+// PgCommon treats a dotted IPv4 address as an unquoted number; adding quotes to
+// --pgoption would instead make those quotes part of the configured value.
+// pg_createcluster passes these fixed options after its -- delimiter to initdb.
+// Its separate ssl=off option only suppresses wrapper certificate setup.
+func postgresInitDBOptions() []string {
+	return []string{"--auth-local=peer", "--auth-host=scram-sha-256",
+		"--set", "listen_addresses=127.0.0.1", "--set", "password_encryption=scram-sha-256", "--set", "ssl=off"}
+}
+
 func (b *postgresBackend) observeCluster(ctx context.Context, j *postgresJournal) error {
 	if e := b.observePostgresTools(j); e != nil {
 		return e
