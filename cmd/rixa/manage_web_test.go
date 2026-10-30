@@ -4,6 +4,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -42,5 +44,21 @@ func TestManageWebHelpNeverStartsAConsole(t *testing.T) {
 	err := manageWebWithStarter(context.Background(), []string{"--help"}, &out, func(context.Context, manageweb.Options, func(string)) error { called = true; return nil })
 	if err != nil || called || !strings.Contains(out.String(), "single-use") {
 		t.Fatal("help side effect or missing authority")
+	}
+}
+
+func TestRunManageDispatchesWebHelpWithoutStartingConsole(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "help")
+	output, e := os.Create(path)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer output.Close()
+	if e = runManage(context.Background(), []string{"web", "--help"}, os.Stdin, output); e != nil {
+		t.Fatal(e)
+	}
+	data, e := os.ReadFile(path)
+	if e != nil || !strings.Contains(string(data), "Temporary native management browser console") || !strings.Contains(string(data), "single-use") {
+		t.Fatal("web subcommand was not dispatched to its nonmutating help")
 	}
 }
