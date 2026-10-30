@@ -16,7 +16,7 @@ The attestation policy binds the archive digest, Rixa publisher repository and o
 
 ## Verification command
 
-With a trusted Rixa executable that contains this command and a compatible trusted official GitHub CLI:
+With an independently trusted Rixa executable that contains this command and a compatible trusted official GitHub CLI:
 
 ```bash
 rixa artifact verify \
@@ -30,7 +30,7 @@ An optional `--sha256` supplies an additional expected digest; it never replaces
 
 The normal CMS runtime does not depend on GitHub CLI. Use the helper's [official installation guidance](https://github.com/cli/cli/blob/trunk/docs/install_linux.md); an operating-system package named `gh` may be too old to provide the required attestation flags. The verifier reports its supported helper requirements. Never obtain the trusted verifier by executing the unverified Rixa payload itself.
 
-A local bundle permits verification without logging into GitHub. Initial refresh of trusted signing metadata may still need network access; this is not a fully air-gapped verification profile. A future one-line bootstrap must independently establish its trusted helper before it executes elevated product code.
+A local bundle permits verification without logging into GitHub. Initial refresh of trusted signing metadata may still need network access; this is not a fully air-gapped verification profile. A one-line bootstrap must independently establish its trusted helper before it executes elevated product code.
 
 ## Fetch and verify a selected release
 
@@ -47,6 +47,20 @@ Stable is the default and never falls back to a prerelease. When intentionally t
 Accept only exit zero with `rixa.artifact-fetch.v1`, `status: verified`, `code: ok` and its nested successful verification receipt. The result supplies the selected tag/source and archive/checksum/bundle paths. Existing output directories are never adopted, cleared or overwritten. A failed fetch may leave bounded private partial files; they are unverified evidence, and another fetch needs a new directory.
 
 Fetch still requires the independently trusted Rixa executable and supported official `gh` helper. It does not establish the initial bootstrap trust root, extract a payload, install a service or authorize privileged execution. Activation must freeze and reverify the exact returned bytes under its own protected operation boundary.
+
+## Bootstrap starter and generation trust
+
+The starter commands require an independently trusted executable or authenticated package that contains them. A starter package is separate from the initial authenticated one-line entry. Follow [native management](server-management.md#bootstrap-starter-and-postgresql-prerequisites) for command boundaries and the exact package's supplied guides for available behavior.
+
+The accepted trust sequence is:
+
+1. Publish a bootstrap-capable prebuilt starter **S** through the normal three-asset publisher, then independently download and verify its public tag, source, archive digest, provenance and package identity.
+2. Review a subsequent immutable bootstrap generation **B** that pins the already-published S tag/source/archive digest and the official `gh` helper version/archive digest. The documented entry authenticates that generation, and the generation hashes its pinned downloads before parsing or executing them. A digest learned only from the same untrusted download is not an independent anchor. S cannot pin its own final archive hash in its source.
+3. Use the trusted starter's existing `releaseartifact.Fetch` / `Verify` policy to select the explicit product channel or exact tag. Stable remains the default and fails if no suitable stable release exists. Development selection is explicit and never turns a prerelease into a stable or production release.
+4. Freeze and reverify protected copies of the authenticated candidate, then use the shared authenticated package parser to check source, platform, actual compiled components and legal material. Stage the selected manager under protected content-addressed storage with no-replace activation. A prepared manager is not an applied installation or prerequisite plan.
+5. Route existing operations to their recorded frozen managers. Keep original installation/update/prerequisite records and helpers; a newer starter does not silently replace their ownership or resume their effects.
+
+Generation B follows S so the trust chain has no self-reference or unverified payload execution. It does not add a fourth asset to ordinary product releases, copy provenance policy into a shell installer, or require operators to compile Go. This guide supplies no generation script or ready-to-run one-line command. Use only the separately authenticated generation's own instructions for that entry. Published starter/generation identities and actual host acceptance evidence belong to [Releases](https://github.com/AChWorks/rixa/releases), [Issue 29](https://github.com/AChWorks/rixa/issues/29) and their linked CI records; a source fixture is not public delivery evidence.
 
 ## Meaning and limits of success
 

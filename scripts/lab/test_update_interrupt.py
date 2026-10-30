@@ -28,6 +28,22 @@ class ExecutorOwnershipTests(unittest.TestCase):
             with self.subTest(field=field, value=value), self.assertRaises(ValueError):
                 interrupt.validate_owner(record, "lab-update", self.observed)
 
+    def test_bootstrap_profiles_bind_schema_unit_and_internal_verb(self):
+        for kind, schema, verb in (("install", "install", "internal-apply"),
+                                  ("postgres", "postgresql", "internal-postgres-apply")):
+            record = dict(self.record, schema="rixa.native-" + schema + ".v1")
+            unit = "rixa-" + kind + "-lab-update-1.service"
+            observed = dict(self.observed, Id=unit, ControlGroup="/system.slice/" + unit,
+                            ExecStart="/opt/rixa-manager/" + "a" * 64 + " manage " + verb + " lab-update")
+            self.assertEqual(interrupt.validate_owner(record, "lab-update", observed, kind), unit)
+            for changed in (self.observed, dict(observed, ExecStart=self.observed["ExecStart"])):
+                with self.subTest(kind=kind), self.assertRaises(ValueError):
+                    interrupt.validate_owner(record, "lab-update", changed, kind)
+            with self.assertRaises(ValueError):
+                interrupt.validate_owner(self.record, "lab-update", observed, kind)
+        with self.assertRaises(ValueError):
+            interrupt.validate_owner(self.record, "lab-update", self.observed, "arbitrary")
+
     def test_main_pid_alone_cannot_establish_ownership(self):
         for field, value in (("Id", "foreign.service"), ("ControlGroup", "/system.slice/foreign.service"),
                              ("ExecStart", "/tmp/foreign manage internal-update-apply lab-update"),
@@ -46,6 +62,31 @@ class ExecutorOwnershipTests(unittest.TestCase):
         for group in ("/", "/system.slice/other.service", "/system.slice/../rixa-update-lab-1.service"):
             with self.subTest(group=group), self.assertRaises(ValueError):
                 interrupt.cgroup_population(group)
+
+
+    def test_thaw_recovery_only_targets_same_live_invocation(self):
+        with patch.object(interrupt, "observation", return_value=self.observed), \
+             patch.object(interrupt.proof, "save"), patch.object(interrupt, "systemctl") as action:
+            state = {}
+            interrupt.recover_thaw(self.unit, self.observed, state, Path("/private/receipt"))
+            action.assert_called_once_with("thaw", self.unit)
+            self.assertEqual(state["thaw_recovery"], "acknowledged")
+        with patch.object(interrupt, "observation", return_value=dict(self.observed, InvocationID="foreign")), \
+             patch.object(interrupt.proof, "save"), patch.object(interrupt, "systemctl") as action:
+            state = {}
+            with self.assertRaises(ValueError):
+                interrupt.recover_thaw(self.unit, self.observed, state, Path("/private/receipt"))
+            action.assert_not_called()
+            self.assertIn("unresolved", state["thaw_recovery"])
+
+    def test_thaw_recovery_accepts_positive_quiescence_without_replay(self):
+        with patch.object(interrupt, "observation", return_value={"MainPID": "0", "ActiveState": "inactive"}), \
+             patch.object(interrupt, "cgroup_population", return_value="absent"), \
+             patch.object(interrupt.proof, "save"), patch.object(interrupt, "systemctl") as action:
+            state = {}
+            interrupt.recover_thaw(self.unit, self.observed, state, Path("/private/receipt"))
+            action.assert_not_called()
+            self.assertEqual(state["thaw_recovery"], "already-quiesced")
 
 
 if __name__ == "__main__":

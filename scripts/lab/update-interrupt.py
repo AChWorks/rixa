@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MPL-2.0
-"""Interrupt one positively owned update executor inside the disposable guest."""
+"""Interrupt one positively owned native lifecycle executor inside the disposable guest."""
 import argparse
 import hashlib
 import importlib.util
@@ -16,7 +16,7 @@ import time
 spec = importlib.util.spec_from_file_location("update_smoke", Path(__file__).with_name("update-smoke.py"))
 proof = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(proof)
-STAGES = ("payload", "stop", "compatibility", "migrate", "check", "activate", "start", "postflight", "commit")
+STAGES = ("download", "payload", "stop", "compatibility", "migrate", "check", "activate", "start", "postflight", "commit")
 
 
 def systemctl(*arguments):
@@ -41,27 +41,31 @@ def observation(unit):
     return values
 
 
-def validate_owner(record, operation, observed):
+def validate_owner(record, operation, observed, kind="update"):
     generation = record.get("executor_generation", 0)
     manager = record.get("manager_sha256", "")
-    if (record.get("schema") != "rixa.native-update.v1"
+    if kind not in ("update", "install", "postgres"):
+        raise ValueError("exact native executor kind required")
+    schema = "rixa.native-" + ("postgresql" if kind == "postgres" else kind) + ".v1"
+    if (record.get("schema") != schema
             or record.get("draft", {}).get("operation_id") != operation
             or type(generation) is not int or not 1 <= generation <= 16
             or not re.fullmatch("[a-f0-9]{64}", manager)
             or record.get("executor_acknowledged") is not True):
         raise ValueError("protected update executor identity is not positively acknowledged")
-    unit = "rixa-update-" + operation + "-" + str(generation) + ".service"
+    unit = "rixa-" + kind + "-" + operation + "-" + str(generation) + ".service"
+    verb = {"update": "internal-update-apply", "install": "internal-apply", "postgres": "internal-postgres-apply"}[kind]
     if (observed.get("Id") != unit or observed.get("ActiveState") != "active"
             or not observed.get("MainPID", "").isdigit() or int(observed["MainPID"]) < 2
             or not observed.get("InvocationID") or observed.get("ControlGroup") != "/system.slice/" + unit
             or "/opt/rixa-manager/" + manager not in observed.get("ExecStart", "")
-            or " internal-update-apply " + operation not in observed.get("ExecStart", "")):
+            or " " + verb + " " + operation not in observed.get("ExecStart", "")):
         raise ValueError("live unit does not positively match the recorded update executor")
     return unit
 
 
 def cgroup_population(group):
-    if not re.fullmatch(r"/system.slice/rixa-update-[a-z0-9-]+\.service", group):
+    if not re.fullmatch(r"/system.slice/rixa-(?:update|install|postgres)-[a-z0-9-]+\.service", group):
         raise ValueError("unexpected executor cgroup")
     path = Path("/sys/fs/cgroup" + group) / "cgroup.events"
     try:
@@ -73,27 +77,53 @@ def cgroup_population(group):
     return events["populated"]
 
 
+
+def recover_thaw(unit, before, state, receipt):
+    current = observation(unit)
+    if (current.get("Id") == before["Id"] and current.get("InvocationID") == before["InvocationID"]
+            and current.get("ControlGroup") == before["ControlGroup"]
+            and current.get("ActiveState") in ("active", "activating")):
+        state["thaw_recovery"] = "attempted"
+        proof.save(receipt, state)
+        systemctl("thaw", unit)
+        state["thaw_recovery"] = "acknowledged"
+        proof.save(receipt, state)
+    elif (current.get("MainPID") == "0" and current.get("ActiveState") in ("inactive", "failed")
+          and cgroup_population(before["ControlGroup"]) in ("0", "absent")):
+        state["thaw_recovery"] = "already-quiesced"
+        proof.save(receipt, state)
+    else:
+        state["thaw_recovery"] = "unresolved-exact-unit-requires-inspection"
+        proof.save(receipt, state)
+        raise ValueError("exact frozen unit recovery is uncertain; inspect retained unit and receipt")
+
+
 FAILURE_RECEIPT = None
 
 def main():
     global FAILURE_RECEIPT
     os.umask(0o077)
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--kind", choices=("update", "install", "postgres"), default="update")
     parser.add_argument("--operation", required=True)
     parser.add_argument("--stage", choices=STAGES, required=True)
     parser.add_argument("--receipt", type=Path, required=True)
     parser.add_argument("--timeout", type=int, default=180)
     args = parser.parse_args()
     proof.guard(args.receipt.parent)
+    if (args.kind == "update" and args.stage == "download") or (args.kind == "install" and args.stage != "payload") or (args.kind == "postgres" and args.stage != "download"):
+        raise ValueError("bootstrap interruption requires payload/download before authentication/package effects")
     FAILURE_RECEIPT = args.receipt.with_name(args.receipt.name + ".failure.json")
     if not re.fullmatch("[a-z][a-z0-9-]{0,47}", args.operation) or not 1 <= args.timeout <= 600:
         raise ValueError("bounded exact operation and wait required")
     if args.receipt.exists():
         raise ValueError("prior interruption attempt exists; inspect it rather than repeat")
     state = {"schema": "rixa.update-interruption-proof.v1", "operation": args.operation,
-             "requested_stage": args.stage, "state": "watching"}
+             "kind": args.kind, "requested_stage": args.stage, "state": "watching"}
     proof.save(args.receipt, state, initial=True)
-    path = Path("/var/lib/rixa-manager") / (args.operation + ".update.json")
+    root = Path("/var/lib/rixa-manager")
+    path = (root / "postgres" / (args.operation + ".json") if args.kind == "postgres" else
+            root / (args.operation + (".update.json" if args.kind == "update" else ".json")))
     deadline = time.monotonic() + args.timeout
     while time.monotonic() < deadline:
         if not path.exists():
@@ -110,20 +140,45 @@ def main():
     # Stage names and target come from the protected operation; no journal edits,
     # payload wrappers, systemd drop-ins or synthetic success/failure injection.
     generation = record.get("executor_generation", 0)
-    unit = "rixa-update-" + args.operation + "-" + str(generation) + ".service"
+    unit = "rixa-" + args.kind + "-" + args.operation + "-" + str(generation) + ".service"
     before = observation(unit)
-    validate_owner(record, args.operation, before)
+    validate_owner(record, args.operation, before, args.kind)
     pid = int(before["MainPID"])
     executable = Path("/proc") / str(pid) / "exe"
     if hashlib.sha256(executable.read_bytes()).hexdigest() != record["manager_sha256"]:
         raise ValueError("executor process image differs from frozen manager")
     if observation(unit) != before:
         raise ValueError("executor changed during ownership observation")
-    state.update(state="kill-attempted", unit=unit, before=before,
-                 observed_stage=record["stage"], attempts=record["attempts"],
-                 journal_sha256=hashlib.sha256(path.read_bytes()).hexdigest())
-    proof.save(args.receipt, state)
-    systemctl("kill", "--kill-whom=all", "--signal=KILL", unit)
+    freeze_attempted = False
+    try:
+        if args.kind in ("install", "postgres"):
+            # Freeze only this positively bound whole unit before the second stage
+            # read. Slow guest observations cannot move the experiment into package
+            # configuration, SQL or authentication. Record before every effect.
+            state.update(state="freeze-attempted", unit=unit, before=before)
+            proof.save(args.receipt, state)
+            freeze_attempted = True
+            systemctl("freeze", unit)
+            events = dict(line.split() for line in
+                          (Path("/sys/fs/cgroup" + before["ControlGroup"]) / "cgroup.events").read_text().splitlines())
+            if events.get("frozen") != "1" or events.get("populated") != "1" or observation(unit) != before:
+                raise ValueError("exact executor freeze is uncertain; preserve and inspect")
+            frozen = proof.private_json(path)
+            validate_owner(frozen, args.operation, before, args.kind)
+            if frozen.get("stage") != args.stage or frozen.get("attempts", {}).get(args.stage) != "attempted":
+                state.update(state="boundary-missed", frozen_stage=frozen.get("stage"))
+                proof.save(args.receipt, state)
+                raise ValueError("selected boundary advanced before freeze; no kill issued")
+            record = frozen
+            state["kernel_freeze"] = events
+        state.update(state="kill-attempted", unit=unit, before=before,
+                     observed_stage=record["stage"], attempts=record["attempts"],
+                     journal_sha256=hashlib.sha256(path.read_bytes()).hexdigest())
+        proof.save(args.receipt, state)
+        systemctl("kill", "--kill-whom=all", "--signal=KILL", unit)
+    finally:
+        if freeze_attempted:
+            recover_thaw(unit, before, state, args.receipt)
     # A successful signal request is not a fence. Observe systemd and the actual
     # kernel cgroup; do not infer emptiness from only the main PID.
     deadline = time.monotonic() + 20

@@ -5,6 +5,8 @@ import os
 from pathlib import Path
 import struct
 import tempfile
+from types import SimpleNamespace
+from unittest.mock import patch
 import unittest
 import zlib
 
@@ -62,6 +64,69 @@ class UpdateProofTests(unittest.TestCase):
                 pixels += zlib.decompress(chunk[4:])
             position += length + 12
         self.assertEqual(len(pixels), 32 * (1 + 32 * 3))
+
+
+    def test_bootstrap_profile_rejects_every_pin_and_external_target(self):
+        root = smoke.BOOTSTRAP_ROOT
+        args = SimpleNamespace(draft=root / "receipts/install-input.json", ca=root / "tls-cert.pem",
+                               receipt=root / "receipts/retention-j3.json", before=None)
+        smoke.validate_bootstrap_profile(args, dict(smoke.BOOTSTRAP_PINS))
+        for key in smoke.BOOTSTRAP_PINS:
+            changed = dict(smoke.BOOTSTRAP_PINS, **{key: "different"})
+            with self.subTest(pin=key), self.assertRaises(ValueError):
+                smoke.validate_bootstrap_profile(args, changed)
+        for key in ("draft", "ca", "receipt", "before"):
+            changed = SimpleNamespace(**vars(args))
+            setattr(changed, key, Path("/private/unowned-target"))
+            with self.subTest(path=key), self.assertRaises(ValueError):
+                smoke.validate_bootstrap_profile(changed, smoke.BOOTSTRAP_PINS)
+
+    def test_bootstrap_seed_stops_at_media_with_no_account_or_member_effect(self):
+        class Boundary(Exception):
+            pass
+        class FakeClient:
+            calls = []
+            def __init__(self, origin, ca):
+                self.origin, self.csrf, self.cookies = origin, "", []
+            def login(self, login, password):
+                self.calls.append(("login", login))
+                self.csrf = "private-test-token"
+            def post(self, path, body):
+                self.calls.append(("post", path))
+                return {}
+        draft = {"control_origin": "https://control.rixa.test", "site_origin": "https://site.rixa.test",
+                 "control_login": "control", "control_password": "private",
+                 "site_login": "site", "site_password": "private"}
+        for bootstrap in (True, False):
+            with self.subTest(bootstrap=bootstrap), tempfile.TemporaryDirectory() as directory:
+                FakeClient.calls = []
+                args = SimpleNamespace(receipt=Path(directory) / "seed.json", ca=Path(directory) / "ca",
+                                       bootstrap_retention=bootstrap)
+                with patch.object(smoke, "Client", FakeClient), patch.object(smoke, "upload", side_effect=Boundary):
+                    with self.assertRaises(Boundary):
+                        smoke.seed(args, draft)
+                state = json.loads(args.receipt.read_text())
+                self.assertEqual(state["attempts"]["media"]["status"], "attempted")
+                account_effect = ("post", "/admin/sites/account-create") in FakeClient.calls
+                self.assertEqual(account_effect, not bootstrap)
+                self.assertEqual("member_password" in state, not bootstrap)
+                if bootstrap:
+                    self.assertEqual(set(state["attempts"]), {"control-login", "site-login", "media"})
+                    self.assertEqual(state["profile"], "bootstrap-retention-j3")
+
+    def test_loopback_mapping_is_exact_and_restored_after_failure(self):
+        original = smoke.socket.getaddrinfo
+        with self.assertRaises(RuntimeError):
+            with smoke.bootstrap_loopback_origins():
+                for origin in ("control.rixa.test", "site.rixa.test"):
+                    values = smoke.socket.getaddrinfo(origin, 443, type=smoke.socket.SOCK_STREAM)
+                    self.assertTrue(values)
+                    self.assertEqual({v[4][0] for v in values}, {"127.0.0.1"})
+                for host, port in (("other.test", 443), ("127.0.0.1", 443), ("site.rixa.test", 80)):
+                    with self.subTest(host=host, port=port), self.assertRaises(ValueError):
+                        smoke.socket.getaddrinfo(host, port)
+                raise RuntimeError("restore after failed proof")
+        self.assertIs(smoke.socket.getaddrinfo, original)
 
 
 if __name__ == "__main__":

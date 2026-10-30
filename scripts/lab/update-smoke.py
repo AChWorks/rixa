@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MPL-2.0
 """Guest-only retained native update proof; all credentials and cookies stay private."""
 import argparse
+from contextlib import contextmanager
 import hashlib
 import importlib.util
 from http.cookiejar import Cookie
@@ -10,6 +11,7 @@ import os
 from pathlib import Path
 import re
 import secrets
+import socket
 import stat
 import subprocess
 import sys
@@ -33,6 +35,40 @@ def png_fixture():
 
 
 PNG = png_fixture()
+
+BOOTSTRAP_ROOT = Path("/root/rixa-bootstrap-fixture-d97f97f-j3")
+BOOTSTRAP_PINS = {
+    "fixture_source": "d97f97f9302e215d35612ed99de9a015517405f9",
+    "fixture_sha256": "b6cbc8b8cdd217154eb3c36a55659486407f02cc88552e64df26df29924b7f9f",
+    "pg_operation": "rixa29-pg-j3", "installation_operation": "rixa29-install-j3",
+    "runtime_sha256": "93654c386b13e252986e2a264bfdb03b394591f49a00615d2e36574a0e74875a",
+}
+
+
+def validate_bootstrap_profile(args, config):
+    if (args.draft != BOOTSTRAP_ROOT / "receipts/install-input.json"
+            or args.ca != BOOTSTRAP_ROOT / "tls-cert.pem"
+            or args.receipt.parent != BOOTSTRAP_ROOT / "receipts"
+            or args.receipt.name not in ("retention-j3.json", "retention-j3-before.json", "retention-j3-after.json")
+            or (args.before is not None and args.before != BOOTSTRAP_ROOT / "receipts/retention-j3-before.json")
+            or any(config.get(k) != v for k, v in BOOTSTRAP_PINS.items())):
+        raise ValueError("bootstrap retention is restricted to the exact granted journey3 fixture")
+
+
+@contextmanager
+def bootstrap_loopback_origins():
+    # Only this proof process resolves the two declared HTTPS origins locally.
+    # URLs/SNI/CA/hostname verification remain unchanged; no OS DNS/hosts edits.
+    original = socket.getaddrinfo
+    def resolve(host, port, *args, **kwargs):
+        if host not in ("control.rixa.test", "site.rixa.test") or port not in (443, "443"):
+            raise ValueError("only declared journey3 HTTPS origins are allowed")
+        return original("127.0.0.1", 443, *args, **kwargs)
+    socket.getaddrinfo = resolve
+    try:
+        yield
+    finally:
+        socket.getaddrinfo = original
 
 
 def guard(parent):
@@ -117,6 +153,8 @@ def seed(args, draft):
     if args.receipt.exists():
         raise ValueError("prior seed attempt exists; inspect it, never repeat blindly")
     state = {"schema": "rixa.native-update-proof.v1", "state": "prepared", "attempts": {}}
+    if args.bootstrap_retention:
+        state["profile"] = "bootstrap-retention-j3"
     save(args.receipt, state, initial=True)
     control, site = Client(draft["control_origin"], args.ca), Client(draft["site_origin"], args.ca)
     attempt(args.receipt, state, "control-login", lambda _: control.login(draft["control_login"], draft["control_password"]))
@@ -125,14 +163,15 @@ def seed(args, draft):
     attempt(args.receipt, state, "site-login", lambda _: site.login(draft["site_login"], draft["site_password"]))
     state["site_session"] = cookie_state(site)
     save(args.receipt, state)
-    state["member_password"] = secrets.token_urlsafe(28)
-    save(args.receipt, state)
-    attempt(args.receipt, state, "account", lambda _: control.post("/admin/sites/account-create",
-            {"site_id": "site-a", "login": "retained-member", "password": state["member_password"]}))
-    member = Client(draft["site_origin"], args.ca)
-    attempt(args.receipt, state, "member-login", lambda _: member.login("retained-member", state["member_password"]))
-    state["member_session"] = cookie_state(member)
-    save(args.receipt, state)
+    if not args.bootstrap_retention:
+        state["member_password"] = secrets.token_urlsafe(28)
+        save(args.receipt, state)
+        attempt(args.receipt, state, "account", lambda _: control.post("/admin/sites/account-create",
+                {"site_id": "site-a", "login": "retained-member", "password": state["member_password"]}))
+        member = Client(draft["site_origin"], args.ca)
+        attempt(args.receipt, state, "member-login", lambda _: member.login("retained-member", state["member_password"]))
+        state["member_session"] = cookie_state(member)
+        save(args.receipt, state)
     state["asset"] = attempt(args.receipt, state, "media", lambda _: upload(site, PNG))
     save(args.receipt, state)
     title = "Retained native فارسی"
@@ -185,6 +224,9 @@ def seed(args, draft):
 
 
 def check(args, draft, state):
+    expected_profile = "bootstrap-retention-j3" if args.bootstrap_retention else None
+    if state.get("profile") != expected_profile:
+        raise ValueError("retained seed profile differs; never reinterpret an existing receipt")
     if (state.get("state") not in ("seeded", "verified")
             or not state.get("attempts")
             or any(value.get("status") != "acknowledged" for value in state["attempts"].values())):
@@ -212,8 +254,9 @@ def check(args, draft, state):
     bad_csrf = retained_client(draft["site_origin"], args.ca, state["site_session"])
     bad_csrf.csrf = "x" * 43
     expect_denied(bad_csrf, "/admin/content/create", {}, 401)
-    member = retained_client(draft["site_origin"], args.ca, state["member_session"])
-    expect_denied(member, "/admin/content/create", {}, 403)
+    if not args.bootstrap_retention:
+        member = retained_client(draft["site_origin"], args.ca, state["member_session"])
+        expect_denied(member, "/admin/content/create", {}, 403)
     if state["state"] != "verified":
         state["state"] = "verified"
         save(args.receipt, state)
@@ -276,6 +319,22 @@ def snapshot(args, draft):
     if state["targets"]["control"]["database_oid"] == state["targets"]["site"]["database_oid"]:
         raise ValueError("control/site physical scope is not independent")
     state["files"] = file_snapshot([Path("/etc/rixa"), Path("/var/lib/rixa")])
+    if args.bootstrap_retention:
+        cluster = Path("/etc/postgresql/18/rixa40d786bd85c92605")
+        data = Path("/var/lib/rixa-postgres/rixa40d786bd85c92605/data")
+        state["files"].update(file_snapshot([
+            *(cluster / name for name in ("postgresql.conf", "pg_hba.conf", "pg_ident.conf",
+                                         "pg_ctl.conf", "start.conf", "environment")),
+            data / "PG_VERSION", data / "postgresql.auto.conf",
+            Path("/var/lib/rixa-manager/postgres/rixa29-pg-j3.json"),
+            Path("/var/lib/rixa-manager/rixa29-install-j3.json"),
+            Path("/opt/rixa-manager") / BOOTSTRAP_PINS["fixture_sha256"],
+            Path("/opt/rixa-manager") / BOOTSTRAP_PINS["runtime_sha256"],
+            Path("/etc/systemd/system/rixa.service")]))
+        info = data.lstat()
+        state["targets"]["postgres_data"] = {"device": info.st_dev, "inode": info.st_ino,
+                                            "uid": info.st_uid, "gid": info.st_gid,
+                                            "mode": stat.S_IMODE(info.st_mode)}
     save(args.receipt, state, initial=True)
     return state
 
@@ -296,9 +355,19 @@ def main():
     parser.add_argument("--ca", type=Path)
     parser.add_argument("--receipt", type=Path, required=True)
     parser.add_argument("--before", type=Path)
+    parser.add_argument("--bootstrap-retention", action="store_true",
+                        help="exact granted journey3; excludes all account creation")
     args = parser.parse_args()
     guard(args.receipt.parent)
     FAILURE_RECEIPT = args.receipt.with_name(args.receipt.name + ".failure.json")
+    if args.bootstrap_retention:
+        validate_bootstrap_profile(args, private_json(BOOTSTRAP_ROOT / "config.json"))
+        with bootstrap_loopback_origins():
+            return run_action(args)
+    return run_action(args)
+
+
+def run_action(args):
     if args.action == "compare":
         before, after = private_json(args.before), private_json(args.receipt)
         delta = {key: differences(before[key], after[key]) for key in ("targets", "tables", "files")}
