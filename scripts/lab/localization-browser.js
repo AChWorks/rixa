@@ -135,7 +135,7 @@ async function rixaLocalizationBrowser({browser, context, page, fixture, phase, 
     check(body.includes("THIRD-ONE 1"),"installed server plural missing");
     check(await page.evaluate(()=>window.AChrixI18n.text("rixa","saved_content_count",{},1))==="THIRD-ONE 1","server/browser plural mismatch");
     check(await page.evaluate(()=>window.AChrixI18n.text("rixa","saved_content_count",{},2))==="THIRD-OTHER 2","missing category did not use other");
-    check(await page.evaluate(()=>window.AChrixI18n.text("admin","completed"))==="Completed.","shared English fallback missing");
+    check(await page.evaluate(()=>window.AChrixI18n.text("admin","completed"))==="Completed. Check the displayed result before another change.","shared English fallback missing");
     await noMarkup();
     await page.goto(fixture.site_a+"/admin/appearance/");
     check(await page.locator("select[name=site_language]").inputValue()==="fa","third UI locale rewrote content language");
