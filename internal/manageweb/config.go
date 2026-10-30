@@ -252,7 +252,7 @@ func (c *Console) Serve(ctx context.Context, ready func(string)) error {
 	if e != nil {
 		return errors.Join(e, c.Close())
 	}
-	server := &http.Server{Handler: c.Handler(), ReadHeaderTimeout: 3 * time.Second, ReadTimeout: 3 * time.Minute, WriteTimeout: 3 * time.Minute, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 16 << 10, TLSConfig: &tls.Config{MinVersion: tls.VersionTLS13}}
+	server := &http.Server{BaseContext: func(net.Listener) context.Context { return ctx }, Handler: c.Handler(), ReadHeaderTimeout: 3 * time.Second, ReadTimeout: 3 * time.Minute, WriteTimeout: 3 * time.Minute, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 16 << 10, TLSConfig: &tls.Config{MinVersion: tls.VersionTLS13}}
 	done := make(chan error, 1)
 	go func() { done <- server.ServeTLS(listener, c.options.Certificate, c.options.Key) }()
 	if ready != nil {

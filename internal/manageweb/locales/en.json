@@ -212,6 +212,15 @@
     "access_complete": {
       "other": "This operation's console access is closed. Serving or recovery continues independently; later management requires a fresh permit."
     },
+    "request_access_closed": {
+      "other": "Console access ended while the request was active. Its outcome may be retained. Inspect this same operation through fresh authorized access before continuing."
+    },
+    "request_timeout": {
+      "other": "The request reached its time limit. Inspect this same operation before continuing; it may have retained progress."
+    },
+    "request_cancelled": {
+      "other": "The request was cancelled. Inspect this same operation before continuing; cancellation does not prove that nothing happened."
+    },
     "invalid_request": {
       "other": "Unsupported request. Use the displayed operation and validated fields."
     },

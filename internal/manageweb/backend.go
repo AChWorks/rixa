@@ -28,6 +28,9 @@ type publicProblem struct {
 	Detail  string `json:"technical_detail,omitempty"`
 }
 type response struct {
+	// Only this response may acknowledge its own positive terminal closure.
+	closedHere bool
+
 	Review            map[string]string `json:"review,omitempty"`
 	NativeOperation   string            `json:"native_operation_id,omitempty"`
 	Operation         string            `json:"operation_id"`
@@ -92,6 +95,15 @@ func (c *Console) present(request *http.Request, l *localize.Localizer, r server
 		}
 		v.Problems = append(v.Problems, publicProblem{Field: p.Field, Code: p.Code, Message: text(l, "correct_field"), Detail: detail})
 	}
+	if nativeErr != nil {
+		cause := requestFailure(request.Context())
+		if cause == "" && errors.Is(nativeErr, errNativeAccessEnded) {
+			cause = "request_access_closed"
+		}
+		if cause != "" {
+			v.Problems = append(v.Problems, publicProblem{Field: "request", Code: cause, Message: text(l, cause)})
+		}
+	}
 	a, attempt, unsaved, _ := c.artifactState(request.Context())
 	v.Artifact = publicArtifact{a.Release, a.Source, a.SHA256}
 	v.ArtifactAttempt = attempt
@@ -102,12 +114,13 @@ func (c *Console) present(request *http.Request, l *localize.Localizer, r server
 	c.mutex.Lock()
 	terminal := nativeErr == nil && c.sameNativeOperation(r) && (r.State == "removed" || r.State == "rejected" || (complete && (c.allowed["apply"] || c.allowed["resume"])))
 	if terminal && action != "page" {
+		v.closedHere = !c.closed
 		c.closed = true
 		c.sessionHash = [32]byte{}
 	}
 	v.AccessClosed = c.closed
 	c.mutex.Unlock()
-	if action != "review" || !c.sameNativeOperation(r) || v.AccessClosed || unsaved {
+	if nativeErr != nil || action != "review" || !c.sameNativeOperation(r) || v.AccessClosed || unsaved {
 		v.ReviewToken = ""
 	}
 	return v
@@ -264,11 +277,6 @@ func (c *Console) surface(w http.ResponseWriter, r *http.Request, view shell.Req
 		c.page(w, r, view)
 		return
 	}
-	if r.URL.Path == "/status" && r.Method == http.MethodGet {
-		result, e := c.status(r.Context())
-		jsonResponse(w, statusCode(e), c.present(r, view.Localizer, result, "status", e))
-		return
-	}
 	if r.URL.Path == "/console.css" && r.Method == http.MethodGet {
 		assetResponse(w, "text/css; charset=utf-8", style)
 		return
@@ -277,18 +285,30 @@ func (c *Console) surface(w http.ResponseWriter, r *http.Request, view shell.Req
 		assetResponse(w, "text/javascript; charset=utf-8", client)
 		return
 	}
+	c.fail(w, r, 404, "invalid_request")
+}
+
+func (c *Console) operation(w http.ResponseWriter, r *http.Request, locale *localize.Localizer) {
+	if r.URL.Path == "/status" && r.Method == http.MethodGet {
+		result, e := c.status(r.Context())
+		e = c.nativeResultError(r, e, false)
+		value := c.present(r, locale, result, "status", e)
+		e = c.nativeResultError(r, e, value.closedHere)
+		jsonResponse(w, nativeStatusCode(r.Context(), e), value)
+		return
+	}
 	action := strings.TrimPrefix(r.URL.Path, "/")
 	if r.Method != http.MethodPost || !slices.Contains([]string{"configure", "review", "apply", "resume", "remove"}, action) {
-		c.fail(w, r, 404, "invalid_request")
+		c.nativeFail(w, r, 404, "invalid_request")
 		return
 	}
 	if !c.effects.TryLock() {
-		c.fail(w, r, 409, "busy")
+		c.nativeFail(w, r, 409, "busy")
 		return
 	}
 	defer c.effects.Unlock()
 	if e := c.gate(r.Context(), action); e != nil {
-		c.fail(w, r, statusCode(e), "action_unavailable")
+		c.nativeFail(w, r, statusCode(e), "action_unavailable")
 		return
 	}
 	var result serverinstall.Result
@@ -297,11 +317,14 @@ func (c *Console) surface(w http.ResponseWriter, r *http.Request, view shell.Req
 	if action == "configure" {
 		var in configureInput
 		if decode(w, r, &in, 32<<10) != nil {
-			c.fail(w, r, 400, "invalid_request")
+			c.nativeFail(w, r, 400, "invalid_request")
 			return
 		}
 		if c.options.Scope.Kind == "update" && in != (configureInput{}) {
-			c.fail(w, r, 400, "invalid_request")
+			c.nativeFail(w, r, 400, "invalid_request")
+			return
+		}
+		if !c.authorizeEffect(w, r) {
 			return
 		}
 		supplied = []string{in.ControlDSN, in.SiteDSN, in.ControlPassword, in.SitePassword}
@@ -312,11 +335,14 @@ func (c *Console) surface(w http.ResponseWriter, r *http.Request, view shell.Req
 			Confirmation string `json:"confirmation,omitempty"`
 		}
 		if decode(w, r, &input, 2048) != nil {
-			c.fail(w, r, 400, "invalid_request")
+			c.nativeFail(w, r, 400, "invalid_request")
 			return
 		}
 		if (action != "apply" && input.ReviewToken != "") || (action != "remove" && input.Confirmation != "") || (action == "apply" && len(input.ReviewToken) != 64) || (action == "remove" && input.Confirmation != "REMOVE") {
-			c.fail(w, r, 400, "invalid_request")
+			c.nativeFail(w, r, 400, "invalid_request")
+			return
+		}
+		if !c.authorizeEffect(w, r) {
 			return
 		}
 		supplied = append(supplied, input.ReviewToken)
@@ -344,20 +370,28 @@ func (c *Console) surface(w http.ResponseWriter, r *http.Request, view shell.Req
 			}
 		}
 	}
+	e = c.nativeResultError(r, e, false)
 	if result.OperationID == "" {
-		c.fail(w, r, statusCode(e), "unavailable")
+		c.nativeFail(w, r, statusCode(e), "unavailable")
 		return
 	}
-	value := c.present(r, view.Localizer, result, action, e, supplied...)
+	value := c.present(r, locale, result, action, e, supplied...)
 	if action == "review" && e == nil {
 		summary, err := c.reviewSummary(r.Context())
 		if err != nil {
-			c.fail(w, r, 503, "unavailable")
+			c.nativeFail(w, r, 503, "unavailable")
 			return
 		}
 		value.Review = summary
 	}
-	jsonResponse(w, statusCode(e), value)
+	// Presentation can itself wait on protected draft reads. Do not issue a
+	// confirmation after authority ended during that acknowledgement work.
+	e = c.nativeResultError(r, e, value.closedHere)
+	if e != nil {
+		value.ReviewToken = ""
+		value.Review = nil
+	}
+	jsonResponse(w, nativeStatusCode(r.Context(), e), value)
 }
 
 // The earlier presentation gate is advisory. Only the native strict seam binds

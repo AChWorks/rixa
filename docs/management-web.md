@@ -127,3 +127,19 @@ are masked transiently, including their common encoded forms. The bound private
 draft and unchanged private permit file must remain readable for this protection;
 if their provenance cannot be verified, the details are visibly unavailable.
 The console retains its hashed permit/session authority model.
+
+The Rixa-owned native JSON endpoints retain the existing operation URLs and
+use the same temporary session authenticator and exact capability/target
+authorizer as the Admin page. The released Admin Shell still renders the page
+and catalogs; its ten-second presentation budget does not enclose native
+verification. Native requests have a two-minute context, an eight-second body
+read bound and five seconds to write an acknowledgement after that context
+ends. The earlier permit expiry, client cancellation and owning console cancellation
+always propagate. Live session/authority is checked again after body decoding.
+The browser waits at most 130 seconds for native acknowledgement (190 seconds
+for the separate three-minute artifact fetch/upload path), including CSRF
+acquisition. A timeout/cancellation shows bounded localized guidance alongside
+retained native state when available. It never proves that no effect occurred,
+replays a mutation, or extends operation authority; inspect the same operation
+before an explicit retry. Native publisher rechecks and supervised execution
+remain unchanged.

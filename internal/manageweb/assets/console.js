@@ -16,19 +16,19 @@
   if(!logout&&(!link||link.target==="_blank"||event.ctrlKey||event.metaKey||event.shiftKey||event.altKey))return;
   if(!mayLeave()){event.preventDefault();event.stopImmediatePropagation();}
  },true);
- async function csrf(){
-  const response=await fetch("/console-auth/csrf",{mode:"same-origin",redirect:"error",credentials:"same-origin",cache:"no-store",referrer:location.origin+"/",referrerPolicy:"same-origin",headers:{"X-Identity-Request":"1"}});
+ async function csrf(signal){
+  const response=await fetch("/console-auth/csrf",{mode:"same-origin",redirect:"error",credentials:"same-origin",cache:"no-store",referrer:location.origin+"/",referrerPolicy:"same-origin",headers:{"X-Identity-Request":"1"},signal});
   if(!response.ok)throw {status:response.status,unknown:false};
   const result=await response.json();if(typeof result.csrf!=="string")throw {status:0,unknown:false};
   return result.csrf;
  }
  async function request(path,body,readOnly=false,login=false,artifactAttempt=""){
-  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),path.startsWith("/artifact/")?180000:15000);
+  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),path.startsWith("/artifact/")?190000:path.startsWith("/admin/operation/")?130000:15000);
   let sent=false;
   try{
    const headers={"X-Identity-Request":"1"};
    if(artifactAttempt)headers["X-Rixa-Artifact-Attempt"]=artifactAttempt;
-   if(!readOnly&&!login)headers["X-CSRF-Token"]=await csrf();
+   if(!readOnly&&!login)headers["X-CSRF-Token"]=await csrf(controller.signal);
    if(typeof body==="string")headers["Content-Type"]="application/json";
    sent=!readOnly;
    const response=await fetch(path,{method:readOnly?"GET":"POST",mode:"same-origin",redirect:"error",credentials:"same-origin",cache:"no-store",referrer:location.origin+"/",referrerPolicy:"same-origin",headers,body:readOnly?undefined:body,signal:controller.signal});

@@ -50,7 +50,15 @@ type Console struct {
 
 func (c *Console) liveLocked() bool { return !c.closed && c.deps.now().Before(c.expires) }
 func (c *Console) sameOrigin(r *http.Request) bool {
-	if values := r.Header.Values("Origin"); len(values) > 0 {
+	present := false
+	for name := range r.Header {
+		if strings.EqualFold(name, "Origin") {
+			present = true
+			break
+		}
+	}
+	if present {
+		values := r.Header.Values("Origin")
 		return len(values) == 1 && values[0] == c.origin
 	}
 	values := r.Header.Values("Referer")
@@ -58,7 +66,7 @@ func (c *Console) sameOrigin(r *http.Request) bool {
 		return false
 	}
 	u, e := url.Parse(values[0])
-	return e == nil && u.Scheme == "https" && u.Host == strings.TrimPrefix(c.origin, "https://") && u.User == nil
+	return e == nil && u.Scheme == "https" && u.Host == strings.TrimPrefix(c.origin, "https://") && u.User == nil && u.Opaque == ""
 }
 func (c *Console) current(r *http.Request) (string, bool) {
 	cookies := r.Cookies()
@@ -93,7 +101,7 @@ func (c *Console) AuthenticateRequest(r *http.Request, mutation bool) (achrix.Pr
 	}
 	if mutation {
 		values := r.Header.Values("X-CSRF-Token")
-		if !c.sameOrigin(r) || r.Header.Get("X-Identity-Request") != "1" || len(values) != 1 || subtle.ConstantTimeCompare([]byte(values[0]), []byte(c.csrf(raw))) != 1 {
+		if !c.sameOrigin(r) || len(r.Header.Values("X-Identity-Request")) != 1 || r.Header.Get("X-Identity-Request") != "1" || len(values) != 1 || subtle.ConstantTimeCompare([]byte(values[0]), []byte(c.csrf(raw))) != 1 {
 			return "", shell.ErrUnauthenticated
 		}
 	}
@@ -182,6 +190,8 @@ func (c *Console) serve(w http.ResponseWriter, r *http.Request) {
 		c.auth(w, r)
 	case strings.HasPrefix(r.URL.Path, "/artifact/"):
 		c.artifacts(w, r)
+	case nativePath(r.URL.Path):
+		c.native(w, r)
 	case strings.HasPrefix(r.URL.Path, "/admin/"):
 		c.shell.Handler().ServeHTTP(w, r)
 	default:
