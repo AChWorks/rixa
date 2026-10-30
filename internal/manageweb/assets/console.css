@@ -1,0 +1,14 @@
+:root{font-family:system-ui,sans-serif;color-scheme:light dark;--canvas:#f4f6f9;--surface:#fff;--ink:#1c2638;--muted:#526074;--line:#d2d9e4;--accent:#2459bc;--danger:#9b2525}
+body{line-height:1.65}.access{max-inline-size:34rem;margin:5vh auto;padding:1.5rem;background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:.75rem}
+.access header,.context{display:flex;align-items:start;justify-content:space-between;gap:1rem;flex-wrap:wrap}.language{font-size:.9rem;max-inline-size:100%}
+.scope{display:grid;grid-template-columns:minmax(6rem,auto) minmax(0,1fr);gap:.35rem 1rem;font-size:.9rem;background:var(--canvas);border-inline-start:3px solid var(--accent);padding:1rem;margin-block:1rem 1.5rem}
+.scope dt{color:var(--muted)}.scope dd{margin:0;overflow-wrap:anywhere}.fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,19rem),1fr));gap:1rem}
+[data-console]{max-inline-size:68rem}[data-console] section{margin-block:1.5rem}[data-console] fieldset{border:1px solid var(--line);padding:1rem;margin-block:1rem}
+[data-console] input:not([type=checkbox]),[data-console] select,.access input,.access select{box-sizing:border-box;inline-size:100%;max-inline-size:100%;padding:.6rem;border:1px solid var(--line);border-radius:.3rem;font:inherit}
+[data-console] label,.access label{display:block;margin-block:.5rem}.check{display:flex;align-items:start;gap:.6rem}.check input{margin-block-start:.5rem;flex:none}
+[data-console] button,.access button{font:inherit;padding:.55rem 1rem;margin-block:.5rem;cursor:pointer;max-inline-size:100%;white-space:normal}
+button:disabled{cursor:default;opacity:.65}button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible,summary:focus-visible{outline:3px solid var(--accent);outline-offset:3px}
+.progress{border-block-start:1px solid var(--line);padding-block-start:1rem}[data-pending]{border:2px solid var(--danger);padding:1rem}[data-problems]{padding-inline-start:1.5rem}.danger{color:var(--danger)}
+details{margin-block:1rem}summary{cursor:pointer;font-weight:600}bdi{overflow-wrap:anywhere}#status{overflow-wrap:anywhere}
+@media(prefers-color-scheme:dark){:root{--canvas:#1c2432;--surface:#111923;--ink:#edf2fa;--muted:#b4c1d2;--line:#45566d;--accent:#8bb4ff;--danger:#ffb0a5}}
+@media(max-width:30rem){.access{margin:0;border:0;border-radius:0}.scope{grid-template-columns:minmax(0,1fr)}.scope dd{margin-block-end:.5rem}[data-console] fieldset{padding:.7rem}}

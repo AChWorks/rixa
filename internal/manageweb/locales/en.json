@@ -1,0 +1,273 @@
+{
+  "schema": 1,
+  "locale": "en",
+  "name": "English",
+  "direction": "ltr",
+  "domain": "rixa-manager",
+  "messages": {
+    "title": {
+      "other": "Rixa management"
+    },
+    "access_title": {
+      "other": "Open the temporary console"
+    },
+    "access_help": {
+      "other": "Enter the permit from the infrastructure operator's private file. Product account passwords do not open this console."
+    },
+    "permit": {
+      "other": "Access permit"
+    },
+    "open_console": {
+      "other": "Open console"
+    },
+    "operation": {
+      "other": "Operation"
+    },
+    "kind": {
+      "other": "Operation type"
+    },
+    "expires": {
+      "other": "Access expires at (UTC)"
+    },
+    "manager": {
+      "other": "Executing manager"
+    },
+    "original_installation": {
+      "other": "Original installation"
+    },
+    "language": {
+      "other": "Interface language"
+    },
+    "scope_help": {
+      "other": "This temporary console controls only the operation shown below. Native execution continues independently if the browser closes."
+    },
+    "progress": {
+      "other": "Current progress"
+    },
+    "inspect": {
+      "other": "Inspect operation"
+    },
+    "open_admin": {
+      "other": "Open administration"
+    },
+    "uncertain_title": {
+      "other": "Inspect before continuing"
+    },
+    "uncertain_help": {
+      "other": "The request outcome is uncertain. Inspect this same operation; missing information does not prove that nothing happened. Do not start another operation."
+    },
+    "retry_exact": {
+      "other": "Retry the submitted input"
+    },
+    "configuration": {
+      "other": "Prepare configuration"
+    },
+    "release": {
+      "other": "Release"
+    },
+    "channel": {
+      "other": "Release channel"
+    },
+    "stable": {
+      "other": "Stable"
+    },
+    "development": {
+      "other": "Development prerelease"
+    },
+    "exact_release": {
+      "other": "Exact release (optional)"
+    },
+    "fetch": {
+      "other": "Fetch authenticated release"
+    },
+    "upload": {
+      "other": "Use downloaded archive and provenance"
+    },
+    "source": {
+      "other": "Source commit"
+    },
+    "archive": {
+      "other": "Release archive"
+    },
+    "bundle": {
+      "other": "Provenance bundle"
+    },
+    "verify_upload": {
+      "other": "Authenticate uploaded package"
+    },
+    "runtime": {
+      "other": "Origins and listener"
+    },
+    "tls_bound": {
+      "other": "TLS files are bound by the local infrastructure operator; the browser cannot choose filesystem paths."
+    },
+    "control_origin": {
+      "other": "Control HTTPS origin"
+    },
+    "site_origin": {
+      "other": "Site HTTPS origin"
+    },
+    "listen": {
+      "other": "Runtime listener"
+    },
+    "runtime_language": {
+      "other": "Initial product interface language"
+    },
+    "language_en": {
+      "other": "English"
+    },
+    "language_fa": {
+      "other": "Persian"
+    },
+    "databases": {
+      "other": "Existing PostgreSQL 18 databases"
+    },
+    "secret_help": {
+      "other": "Use separate explicit loopback password URLs. Saved secrets stay private; leave an existing secret empty to retain it."
+    },
+    "control_dsn": {
+      "other": "Control database URL"
+    },
+    "site_dsn": {
+      "other": "Site database URL"
+    },
+    "saved_secret": {
+      "other": "Saved privately — enter only to replace"
+    },
+    "administrators": {
+      "other": "Initial administrators"
+    },
+    "control_login": {
+      "other": "Control administrator login"
+    },
+    "control_password": {
+      "other": "Control administrator password"
+    },
+    "site_login": {
+      "other": "Site administrator login"
+    },
+    "site_password": {
+      "other": "Site administrator password"
+    },
+    "update_retains": {
+      "other": "Update reuses the retained configuration, credentials, databases and site data. It never collects replacement administrator passwords."
+    },
+    "save": {
+      "other": "Save private draft"
+    },
+    "review_heading": {
+      "other": "Review and execute"
+    },
+    "review_help": {
+      "other": "Review the saved configuration and authenticated candidate before applying. Queued execution is not completion. Recovery follows the backend's observed state."
+    },
+    "review": {
+      "other": "Review saved inputs"
+    },
+    "apply_confirmation": {
+      "other": "I reviewed this installation-wide effect and authorize the exact reviewed operation."
+    },
+    "apply": {
+      "other": "Apply reviewed operation"
+    },
+    "resume": {
+      "other": "Resume the retained operation"
+    },
+    "remove": {
+      "other": "Remove owned runtime and service"
+    },
+    "remove_help": {
+      "other": "Serving stops and the owned executable/service are removed. Databases, configuration, credentials, Media, publication and recovery evidence remain. This is not a purge."
+    },
+    "remove_confirmation": {
+      "other": "Type the confirmation token:"
+    },
+    "working": {
+      "other": "Working on this operation…"
+    },
+    "updated": {
+      "other": "Operation result received. Review the current state."
+    },
+    "inspected": {
+      "other": "Current operation state inspected."
+    },
+    "inspection_failed": {
+      "other": "Inspection is unavailable. Keep this operation identity and use the retained CLI manager if needed."
+    },
+    "artifact_ready": {
+      "other": "Publisher authentication passed. Save the configuration, then review the native operation before execution."
+    },
+    "artifact_failed": {
+      "other": "Package authentication or input failed. Check the release, source commit, archive and provenance bundle."
+    },
+    "artifact_limit": {
+      "other": "This permit's bounded artifact attempts are exhausted. Inspect retained inputs before issuing another permit."
+    },
+    "access_required": {
+      "other": "A valid unused infrastructure permit is required. Product login cookies cannot authorize this console."
+    },
+    "access_expired": {
+      "other": "Access expired or was already consumed. Keep unsaved input and ask the infrastructure operator for fresh access to this same operation."
+    },
+    "access_complete": {
+      "other": "This operation's console access is closed. Serving or recovery continues independently; later management requires a fresh permit."
+    },
+    "invalid_request": {
+      "other": "Unsupported request. Use the displayed operation and validated fields."
+    },
+    "invalid_language": {
+      "other": "Choose an installed interface language."
+    },
+    "denied": {
+      "other": "This access does not permit that action."
+    },
+    "busy": {
+      "other": "Another request is active. Inspect retained progress before continuing."
+    },
+    "unavailable": {
+      "other": "The operation is unavailable. Inspect retained state or use the exact retained CLI manager."
+    },
+    "action_unavailable": {
+      "other": "That action is not currently authorized. Inspect the current operation and review changed inputs again."
+    },
+    "correct_field": {
+      "other": "Correct this field using the displayed native requirement code; inspect the English CLI for full diagnostics."
+    },
+    "correct_input": {
+      "other": "Correct the reported fields. Valid input remains in this tab."
+    },
+    "leave_warning": {
+      "other": "Leaving may lose unsaved or uncertain input. The native operation continues independently. Leave this page?"
+    },
+    "state_unknown": {
+      "other": "Inspect the retained operation before further effects."
+    },
+    "state_not-installed": {
+      "other": "No operation draft is saved yet."
+    },
+    "state_draft": {
+      "other": "Private input saved; review before applying."
+    },
+    "state_ready": {
+      "other": "Inputs reviewed. Apply requires this exact review confirmation."
+    },
+    "state_blocked": {
+      "other": "A prerequisite needs attention. Correct it and review again."
+    },
+    "state_applying": {
+      "other": "A supervised executor is running or queued. Inspect progress; this is not completion."
+    },
+    "state_reconciliation-required": {
+      "other": "The outcome needs inspection. Resume is shown only when the backend has positively fenced the prior executor."
+    },
+    "state_installed": {
+      "other": "Native installation or update is complete. Use the administration link when available."
+    },
+    "state_removed": {
+      "other": "Owned serving material removed; private data and recovery evidence remain."
+    },
+    "state_rejected": {
+      "other": "The candidate was rejected before migration; inspect the positively retained prior service."
+    }
+  }
+}
