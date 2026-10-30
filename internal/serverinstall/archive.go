@@ -16,6 +16,7 @@ import (
 	"path"
 	"path/filepath"
 	"reflect"
+	"runtime/debug"
 	"strings"
 
 	"github.com/AChWorks/rixa/internal/product"
@@ -87,7 +88,23 @@ type packageInfo struct {
 	Target     string            `json:"target"`
 }
 
+// The legacy installer retains its exact compiled component-set contract.
 func extractAuthenticated(archive, output string, d Draft) (string, error) {
+	return extractPackageProfile(archive, output, d, true, nil)
+}
+
+// Updates execute the authenticated candidate's own migrate/check commands.
+// Its component graph is bound to BUILDINFO and Go's compiled dependency table,
+// rather than incidentally requiring the manager's selected version values.
+func extractUpdateAuthenticated(archive, output string, d Draft) (string, map[string]string, error) {
+	var metadata packageInfo
+	binary, e := extractPackageProfile(archive, output, d, false, &metadata)
+	if e != nil {
+		return "", nil, e
+	}
+	return binary, metadata.Components, nil
+}
+func extractPackageProfile(archive, output string, d Draft, currentComponents bool, authenticated *packageInfo) (string, error) {
 	f, e := os.Open(archive)
 	if e != nil {
 		return "", ErrState
@@ -190,7 +207,7 @@ func extractAuthenticated(archive, output string, d Draft) (string, error) {
 		return "", ErrInput
 	}
 	var info packageInfo
-	if e = decode(data, &info); e != nil || info.Rixa != d.Release || info.Source != d.SourceCommit || info.Target != "linux-amd64" || !reflect.DeepEqual(info.Components, product.FoundationVersions()) || info.AChrix != info.Components["github.com/AChWorks/achrix"] {
+	if e = decode(data, &info); e != nil || !validPackageIdentity(info, d, currentComponents) {
 		return "", ErrInput
 	}
 	for _, file := range []string{"rixa", "LICENSE", "INSTALL.md", "THIRD_PARTY_MODULES.txt", "config/rixa.example.json", ".env.example"} {
@@ -215,8 +232,11 @@ func extractAuthenticated(archive, output string, d Draft) (string, error) {
 			return "", ErrInput
 		}
 	}
-	if e = validateCompiled(filepath.Join(output, "rixa"), info); e != nil {
+	if e = validateCompiledProfile(filepath.Join(output, "rixa"), info, !currentComponents); e != nil {
 		return "", e
+	}
+	if authenticated != nil {
+		*authenticated = info
 	}
 	binary, e := os.ReadFile(filepath.Join(output, "rixa"))
 	if e != nil {
@@ -249,8 +269,20 @@ func hashFile(path string) (string, error) {
 }
 
 func validateCompiled(path string, metadata packageInfo) error {
+	return validateCompiledProfile(path, metadata, false)
+}
+func validateCompiledProfile(path string, metadata packageInfo, allComponents bool) error {
 	info, e := buildinfo.ReadFile(path)
-	if e != nil || info.Path != "github.com/AChWorks/rixa/cmd/rixa" || info.Main.Path != "github.com/AChWorks/rixa" || info.GoVersion != metadata.Go {
+	if e != nil {
+		return ErrInput
+	}
+	return validateCompiledInfo(info, metadata, allComponents)
+}
+func validateCompiledInfo(info *debug.BuildInfo, metadata packageInfo, allComponents bool) error {
+	if allComponents && !validUpdateComponents(metadata.Components) {
+		return ErrInput
+	}
+	if info == nil || (allComponents && info.Main.Replace != nil) || info.Path != "github.com/AChWorks/rixa/cmd/rixa" || info.Main.Path != "github.com/AChWorks/rixa" || info.GoVersion != metadata.Go {
 		return ErrInput
 	}
 	settings := map[string]string{}
@@ -270,10 +302,22 @@ func validateCompiled(path string, metadata packageInfo) error {
 				return ErrInput
 			}
 			observed[dep.Path] = dep.Version
+		} else if allComponents && (dep.Path == "github.com/AChWorks/achrix" || strings.HasPrefix(dep.Path, "github.com/AChWorks/achrix/")) {
+			return ErrInput
 		}
 	}
 	if !reflect.DeepEqual(observed, metadata.Components) {
 		return ErrInput
 	}
 	return nil
+}
+
+func validPackageIdentity(info packageInfo, d Draft, currentComponents bool) bool {
+	if info.Rixa != d.Release || info.Source != d.SourceCommit || info.Target != "linux-amd64" || info.AChrix != info.Components["github.com/AChWorks/achrix"] {
+		return false
+	}
+	if currentComponents {
+		return reflect.DeepEqual(info.Components, product.FoundationVersions())
+	}
+	return validUpdateComponents(info.Components)
 }

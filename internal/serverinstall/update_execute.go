@@ -15,8 +15,6 @@ import (
 	"strings"
 	"syscall"
 	"time"
-
-	"github.com/AChWorks/rixa/internal/product"
 )
 
 func updateExecutorName(u *updateJournal) string {
@@ -370,14 +368,18 @@ func (m *Manager) stageUpdatePayload(ctx context.Context, u *updateJournal, pare
 		return e
 	}
 	defer os.RemoveAll(filepath.Dir(out))
-	hash, e := extractAuthenticated(filepath.Join(dir, "archive.tar.gz"), out, d)
+	hash, components, e := extractUpdateAuthenticated(filepath.Join(dir, "archive.tar.gz"), out, d)
 	if e != nil {
 		return e
 	}
 	if u.BinarySHA256 != "" && u.BinarySHA256 != hash {
 		return ErrState
 	}
+	if len(u.CandidateComponents) != 0 && !reflect.DeepEqual(u.CandidateComponents, components) {
+		return ErrState
+	}
 	u.BinarySHA256 = hash
+	u.CandidateComponents = components
 	candidate := updateView(parent, u)
 	u.UnitSHA256 = digest(m.serviceBytes(candidate))
 	if e = m.saveUpdate(u); e != nil {
@@ -441,7 +443,7 @@ func (m *Manager) candidateCommand(parent context.Context, u *updateJournal, j *
 			Core       string            `json:"achrix"`
 			Components map[string]string `json:"achrix_components"`
 		}
-		if decode(out.Bytes(), &receipt) != nil || receipt.Status != "ok" || receipt.Sites != 1 || receipt.Core != product.FoundationVersions()["github.com/AChWorks/achrix"] || !reflect.DeepEqual(receipt.Components, product.FoundationVersions()) {
+		if decode(out.Bytes(), &receipt) != nil || !validCandidateCheckReceipt(receipt.Status, receipt.Sites, receipt.Core, receipt.Components, u.CandidateComponents) {
 			return ErrState
 		}
 	}

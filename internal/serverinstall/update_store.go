@@ -40,6 +40,7 @@ type updateJournal struct {
 	HelperSHA256          string            `json:"helper_sha256,omitempty"`
 	TransportEnv          map[string]string `json:"transport_env,omitempty"`
 	ArchiveSHA256         string            `json:"archive_sha256,omitempty"`
+	CandidateComponents   map[string]string `json:"candidate_components,omitempty"`
 	BinarySHA256          string            `json:"binary_sha256,omitempty"`
 	UnitSHA256            string            `json:"unit_sha256,omitempty"`
 	ExecutorGeneration    int               `json:"executor_generation,omitempty"`
@@ -159,6 +160,14 @@ func validUpdate(u *updateJournal) bool {
 	if (u.BinarySHA256 == "") != (u.UnitSHA256 == "") {
 		return false
 	}
+	if u.BinarySHA256 != "" {
+		if !validUpdateComponents(u.CandidateComponents) {
+			return false
+		}
+	} else if len(u.CandidateComponents) != 0 {
+		return false
+	}
+
 	if u.ExecutorGeneration < 0 || u.ExecutorGeneration > 16 {
 		return false
 	}
