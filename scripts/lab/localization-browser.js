@@ -22,6 +22,20 @@ async function rixaLocalizationBrowser({browser, context, page, fixture, phase, 
     site_a:["site-a-admin","A-Strong-Site-A-Password-2026!"],
     site_b:["site-b-admin","A-Strong-Site-B-Password-2026!"]
   };
+  // Chromium resolves *.localhost itself; Playwright's Node request transport
+  // does not. Connect only to loopback with the exact original Host/cookies.
+  async function fixtureRequest(owner, method, address, options={}) {
+    const target=new URL(address), original=target.origin, host=target.host;
+    check(["control.localhost","a.localhost","b.localhost"].includes(target.hostname),"unexpected fixture API host");
+    target.hostname="127.0.0.1";
+    const headers={...options.headers,Host:host};
+    if(!Object.keys(headers).some(key=>key.toLowerCase()==="cookie")) {
+      const cookies=await owner.cookies(original);
+      if(cookies.length) headers.Cookie=cookies.map(cookie=>cookie.name+"="+cookie.value).join("; ");
+    }
+    try { return await owner.request[method](target.href,{...options,headers}); }
+    catch(error) { throw new Error("fixture API transport: "+String(error.message).split("\n")[0]); }
+  }
   async function login(scope) {
     const origin=fixture[scope];
     await page.goto(origin+"/admin/login");
@@ -161,7 +175,7 @@ async function rixaLocalizationBrowser({browser, context, page, fixture, phase, 
   // browser flow must inspect that operation and preserve user input.
   const uncertain=await page.locator("[data-content-save] input[name=operation_id]").inputValue();
   let intercepted=0;
-  await page.route("**/admin/content/save",async route=>{intercepted++;await route.fetch();await route.abort("failed");},{times:1});
+  await page.route("**/admin/content/save",async route=>{intercepted++;const request=route.request(),target=new URL(request.url()),host=target.host;target.hostname="127.0.0.1";try {const response=await route.fetch({url:target.href,headers:{...request.headers(),host},maxRedirects:0});await response.dispose();} catch(error) {await route.abort("failed");throw new Error("fixture acknowledgement transport: "+String(error.message).split("\n")[0]);}await route.abort("failed");},{times:1});
   await page.locator("[data-content-save] button[type=submit]").click();
   await page.waitForFunction(operation=>document.querySelector("#status").textContent.includes(operation),uncertain);
   check(intercepted===1,"unknown mutation submitted more than once");
@@ -176,13 +190,13 @@ async function rixaLocalizationBrowser({browser, context, page, fixture, phase, 
   await responsive("editor");
   mark("lost-acknowledgement-inspect-no-blind-replay");
 
-  const csrfResponse=await context.request.get(fixture.site_a+"/auth/csrf",{headers:{"Origin":fixture.site_a,"X-Identity-Request":"1"}});
+  const csrfResponse=await fixtureRequest(context,"get",fixture.site_a+"/auth/csrf",{headers:{"Origin":fixture.site_a,"X-Identity-Request":"1"}});
   check(csrfResponse.status()===200,"CSRF request denied");
   const token=(await csrfResponse.json()).csrf;
   const current=await page.locator("[data-current-revision]").textContent();
-  const badLocale=await context.request.get(fixture.site_a+"/admin/content/?ui_language=not-installed",{maxRedirects:0});
+  const badLocale=await fixtureRequest(context,"get",fixture.site_a+"/admin/content/?ui_language=not-installed",{maxRedirects:0});
   check(badLocale.status()===400,"unsupported locale did not return400");
-  const denied=await context.request.post(fixture.site_a+"/admin/content/save",{
+  const denied=await fixtureRequest(context,"post",fixture.site_a+"/admin/content/save",{
     headers:{"Origin":fixture.site_b,"X-Identity-Request":"1","X-CSRF-Token":token},
     data:{operation_id:"10000000-0000-4000-8000-000000000001",id:fixture.sites[0].content_id,expected_head:current,title:"must-not-write",body_html:"<p>denied</p>"}
   });
@@ -194,7 +208,7 @@ async function rixaLocalizationBrowser({browser, context, page, fixture, phase, 
   const identity=cookies.find(cookie=>cookie.httpOnly&&cookie.name!=="rixa-ui-language");
   const preference=cookies.find(cookie=>cookie.name==="rixa-ui-language");
   check(identity&&preference&&preference.domain==="a.localhost"&&preference.secure&&preference.httpOnly&&preference.sameSite==="Lax"&&preference.path==="/admin","preference cookie scope weakened");
-  const foreignCookie=await context.request.post(fixture.site_b+"/admin/content/create",{
+  const foreignCookie=await fixtureRequest(context,"post",fixture.site_b+"/admin/content/create",{
     headers:{"Cookie":identity.name+"="+identity.value,"Origin":fixture.site_b,"X-Identity-Request":"1","X-CSRF-Token":token},
     data:{operation_id:"10000000-0000-4000-8000-000000000002",kind:"post",title:"denied",body_html:"<p>denied</p>"}
   });
@@ -204,20 +218,20 @@ async function rixaLocalizationBrowser({browser, context, page, fixture, phase, 
   const anonymous=await browser.newContext({ignoreHTTPSErrors:true});
   try {
     for(const path of [fixture.sites[0].preview_path,"/admin/media/read/"+fixture.sites[0].asset_id]) {
-      const response=await anonymous.request.get(fixture.site_a+path,{maxRedirects:0});
+      const response=await fixtureRequest(anonymous,"get",fixture.site_a+path,{maxRedirects:0});
       check([303,401,403].includes(response.status()),"anonymous private resource not denied");
       const body=await response.text();
       check(!body.includes("Baseline فارسی")&&!body.includes("Retained site-a")&&!body.includes(title),"anonymous response leaked private bytes");
     }
-    const published=await anonymous.request.get(fixture.site_a+fixture.sites[0].public_path);
+    const published=await fixtureRequest(anonymous,"get",fixture.site_a+fixture.sites[0].public_path);
     check(published.status()===200&&(await published.text()).includes("Retained site-a"),"anonymous public content unavailable");
   } finally {await anonymous.close();}
   await login("site_b");
-  const foreign=await context.request.get(fixture.site_b+"/admin/content/edit/"+fixture.sites[0].content_id,{maxRedirects:0});
+  const foreign=await fixtureRequest(context,"get",fixture.site_b+"/admin/content/edit/"+fixture.sites[0].content_id,{maxRedirects:0});
   check(foreign.status()===404,"foreign content escaped site scope");
   await page.locator("#logout").click();
   await page.waitForURL(url=>url.pathname==="/admin/login");
-  const revoked=await context.request.get(fixture.site_b+"/admin/content/",{maxRedirects:0});
+  const revoked=await fixtureRequest(context,"get",fixture.site_b+"/admin/content/",{maxRedirects:0});
   check([303,401,403].includes(revoked.status()),"logged-out session retained access");
   mark("anonymous-private-public-foreign-content-logout");
   check(errors.length===0,"page JavaScript errors: "+errors.join("; "));
