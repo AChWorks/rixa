@@ -91,17 +91,20 @@ func (b *postgresBackend) recordPostgresTools(j *postgresJournal) error {
 	return nil
 }
 func (b *postgresBackend) toolsIntact(j *postgresJournal) bool {
+	return b.observePostgresTools(j) == nil
+}
+func (b *postgresBackend) observePostgresTools(j *postgresJournal) error {
 	if len(j.PostgresTools) != len(postgresToolPaths) {
-		return false
+		return postgresObservationError(ErrState, "complete protected PostgreSQL tool bindings", nil)
 	}
 	for _, path := range postgresToolPaths {
 		p := b.path(path)
 		h, e := hashFile(p)
 		if e != nil || h != j.PostgresTools[path] || !trustedExecutable(p) {
-			return false
+			return postgresObservationError(ErrState, "protected tool binding "+p, e)
 		}
 	}
-	return true
+	return nil
 }
 func (b *postgresBackend) createCluster(ctx context.Context, j *postgresJournal, attempted bool) error {
 	if !b.toolsIntact(j) || b.recordPostgresAccount(j) != nil {
@@ -129,75 +132,50 @@ func (b *postgresBackend) createCluster(ctx context.Context, j *postgresJournal,
 	return b.observeCluster(ctx, j)
 }
 func (b *postgresBackend) observeCluster(ctx context.Context, j *postgresJournal) error {
-	if !b.toolsIntact(j) || b.recordPostgresAccount(j) != nil {
-		return ErrState
+	if e := b.observePostgresTools(j); e != nil {
+		return e
 	}
-	owner, e := readPrivate(filepath.Join(b.namespace(j), "owner"), b.m.ownerUID, 512)
+	if e := b.recordPostgresAccount(j); e != nil {
+		return postgresObservationError(ErrState, "recorded PostgreSQL account identity/groups", e)
+	}
+	marker := filepath.Join(b.namespace(j), "owner")
+	owner, e := readPrivate(marker, b.m.ownerUID, 512)
 	if e != nil || string(owner) != j.Draft.OperationID+"\n"+j.Token+"\n" {
-		return ErrAuthority
+		return postgresObservationError(ErrAuthority, "private namespace owner binding "+marker, e)
 	}
 	for _, path := range []string{b.namespace(j), b.data(j), b.configDir(j)} {
 		real, e := filepath.EvalSymlinks(path)
 		if e != nil || real != path {
-			return ErrAuthority
+			return postgresObservationError(ErrAuthority, "canonical path "+path, e)
 		}
 	}
 	info, e := os.Lstat(b.data(j))
-	if e != nil || !info.IsDir() || fileUID(info) != j.PostgresUID || fileGID(info) != j.PostgresGID || info.Mode().Perm() != 0700 {
-		return ErrAuthority
+	if e != nil {
+		return postgresObservationError(ErrAuthority, "data directory "+b.data(j), e)
+	}
+	if !info.IsDir() || fileUID(info) != j.PostgresUID || fileGID(info) != j.PostgresGID || info.Mode().Perm() != 0700 {
+		return postgresObservationError(ErrAuthority, fmt.Sprintf("data directory %s requires directory/UID=%d/GID=%d/mode=0700", b.data(j), j.PostgresUID, j.PostgresGID), nil)
 	}
 	stat, ok := info.Sys().(*syscall.Stat_t)
 	if !ok {
-		return ErrState
+		return postgresObservationError(ErrState, "data device/inode unavailable at "+b.data(j), nil)
 	}
 	identity := fmt.Sprintf("%d:%d", stat.Dev, stat.Ino)
 	if j.DataIdentity != "" && j.DataIdentity != identity {
-		return ErrState
+		return postgresObservationError(ErrState, "retained data device/inode binding "+b.data(j), nil)
 	}
-	version, e := readRegular(filepath.Join(b.data(j), "PG_VERSION"), 16)
+	versionPath := filepath.Join(b.data(j), "PG_VERSION")
+	version, e := readRegular(versionPath, 16)
 	if e != nil || string(version) != "18\n" {
-		return ErrState
+		return postgresObservationError(ErrState, "PostgreSQL 18 version file "+versionPath, e)
 	}
-	cluster, _, _ := postgresNames(j)
-	for key, want := range map[string]string{"data_directory": b.data(j), "port": strconv.Itoa(j.Draft.Port), "listen_addresses": "127.0.0.1", "password_encryption": "scram-sha-256", "ssl": "off"} {
-		out, e := b.m.run(ctx, "/usr/bin/pg_conftool", "18", cluster, "show", key)
-		text := strings.TrimSpace(string(out))
-		// pg_conftool prints key = value (and quotes string values).
-		if e != nil || !strings.HasPrefix(text, key+" = ") {
-			return ErrState
-		}
-		got := strings.Trim(strings.TrimPrefix(text, key+" = "), "'")
-		if got != want {
-			return ErrState
-		}
-	}
-	confDirectory := filepath.Join(b.configDir(j), "conf.d")
-	actualConf, ce := filepath.EvalSymlinks(confDirectory)
-	if ce != nil || actualConf != confDirectory {
-		return ErrAuthority
-	}
-	confEntries, ce := os.ReadDir(confDirectory)
-	if ce != nil || len(confEntries) != 0 {
-		return ErrAuthority
-	}
-	config, e := readRegular(filepath.Join(b.configDir(j), "postgresql.conf"), 1<<20)
+	config, hba, autoConfig, e := b.observeConfiguration(ctx, j, func(_ context.Context, cmd *exec.Cmd) error { return cmd.Run() })
 	if e != nil {
 		return e
-	}
-	hba, e := readRegular(filepath.Join(b.configDir(j), "pg_hba.conf"), 64<<10)
-	if e != nil || !postgresHBA(hba) {
-		return ErrAuthority
-	}
-	autoConfig, e := b.observeAutoConfig(j)
-	if e != nil {
-		return e
-	}
-	if j.ConfigSHA256 != "" && j.ConfigSHA256 != digest(config) || j.HBASHA256 != "" && j.HBASHA256 != digest(hba) {
-		return ErrState
 	}
 	out, e := b.m.run(ctx, "/usr/lib/postgresql/18/bin/pg_controldata", "--pgdata="+b.data(j))
 	if e != nil {
-		return e
+		return postgresObservationError(e, "physical system identifier from "+b.data(j), nil)
 	}
 	system := ""
 	for _, line := range strings.Split(string(out), "\n") {
@@ -206,11 +184,11 @@ func (b *postgresBackend) observeCluster(ctx context.Context, j *postgresJournal
 		}
 	}
 	if !postgresNumber.MatchString(system) || j.ClusterID != "" && system != j.ClusterID {
-		return ErrState
+		return postgresObservationError(ErrState, "retained PostgreSQL system identifier binding "+b.data(j), nil)
 	}
 	binary := j.PostgresTools["/usr/lib/postgresql/18/bin/postgres"]
 	if j.BinarySHA256 != "" && j.BinarySHA256 != binary {
-		return ErrState
+		return postgresObservationError(ErrState, "retained PostgreSQL binary SHA256 binding", nil)
 	}
 	j.ClusterID, j.DataIdentity, j.ConfigSHA256, j.AutoConfigSHA256, j.HBASHA256, j.BinarySHA256 = system, identity, digest(config), autoConfig, digest(hba), binary
 	return nil
@@ -523,7 +501,13 @@ func postgresConnect(parent context.Context, dsn string) (*pgx.Conn, error) {
 	return pgx.ConnectConfig(ctx, config)
 }
 func (b *postgresBackend) verify(ctx context.Context, j *postgresJournal) error {
-	if b.allowedInventory(ctx, j) != nil || b.observeCluster(ctx, j) != nil || b.loaded(ctx, j) != nil || len(j.DatabaseTargets) != 2 {
+	if b.allowedInventory(ctx, j) != nil {
+		return ErrState
+	}
+	if e := b.observeCluster(ctx, j); e != nil {
+		return postgresObservationError(ErrState, "verification configuration boundary", e)
+	}
+	if b.loaded(ctx, j) != nil || len(j.DatabaseTargets) != 2 {
 		return ErrState
 	}
 	for _, scope := range []string{"control", "site"} {

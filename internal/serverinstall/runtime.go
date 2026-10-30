@@ -38,16 +38,21 @@ type stageReceipt struct {
 	Code      string `json:"code"`
 }
 type boundedOutput struct {
-	bytes.Buffer
+	// Keep the buffer private: promoted ReadFrom/WriteString would let
+	// io.Copy/io.WriteString bypass Write and its child-output bound.
+	buffer   bytes.Buffer
 	exceeded bool
 }
 
+func (b *boundedOutput) Bytes() []byte  { return b.buffer.Bytes() }
+func (b *boundedOutput) String() string { return b.buffer.String() }
+func (b *boundedOutput) Len() int       { return b.buffer.Len() }
 func (b *boundedOutput) Write(p []byte) (int, error) {
 	if b.Len()+len(p) > 64<<10 {
 		b.exceeded = true
 		return 0, errors.New("bounded child output exceeded")
 	}
-	return b.Buffer.Write(p)
+	return b.buffer.Write(p)
 }
 
 // RuntimeStage is a deliberately fixed non-root child boundary. It receives
