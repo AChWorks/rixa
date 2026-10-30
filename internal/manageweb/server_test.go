@@ -32,13 +32,14 @@ import (
 )
 
 type fakeNative struct {
-	mutex     sync.Mutex
-	result    serverinstall.Result
-	draft     serverinstall.Draft
-	updated   serverinstall.UpdateDraft
-	calls     map[string]int
-	token     string
-	loadError error
+	mutex       sync.Mutex
+	result      serverinstall.Result
+	draft       serverinstall.Draft
+	updated     serverinstall.UpdateDraft
+	calls       map[string]int
+	token       string
+	loadError   error
+	statusError error
 }
 
 func (f *fakeNative) get(action string) serverinstall.Result {
@@ -50,7 +51,13 @@ func (f *fakeNative) get(action string) serverinstall.Result {
 	return r
 }
 func (f *fakeNative) Status(context.Context, string) (serverinstall.Result, error) {
-	return f.get("status"), nil
+	r := f.get("status")
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+	if f.statusError != nil {
+		return serverinstall.Result{}, f.statusError
+	}
+	return r, nil
 }
 func (f *fakeNative) LoadDraft(context.Context, string) (serverinstall.Draft, error) {
 	f.mutex.Lock()
@@ -614,34 +621,152 @@ func TestConsoleUpdateScopeAndSecretReplacementDenied(t *testing.T) {
 		t.Fatal("update exact review not forwarded")
 	}
 }
+
+// TestConsoleBrowserPreview is a source-only, fake-native TLS fixture. Its local
+// control file is never an HTTP route and cannot invoke a native executor.
 func TestConsoleBrowserPreview(t *testing.T) {
 	marker := os.Getenv("RIXA_MANAGEWEB_PREVIEW")
 	if marker == "" {
 		t.Skip("explicit isolated browser fixture only")
 	}
-	if !filepath.IsAbs(marker) {
-		t.Fatal("absolute preview marker required")
+	if !filepath.IsAbs(marker) || filepath.Clean(marker) != marker ||
+		privatePath(filepath.Dir(marker), os.Geteuid(), true, false) != nil {
+		t.Fatal("new absolute marker in an owned private directory required")
 	}
-	h := fixture(t, nil)
-	b, e := json.Marshal(map[string]string{"origin": h.console.origin, "permit": h.permit})
-	if e != nil || os.WriteFile(marker, b, 0600) != nil {
+	for _, suffix := range []string{"", ".control", ".control.tmp", ".receipt", ".receipt.tmp", ".stop"} {
+		if _, e := os.Lstat(marker + suffix); !errors.Is(e, os.ErrNotExist) {
+			t.Fatal("preview path already exists")
+		}
+	}
+	var h *harness
+	command := ""
+	// Registered before fixture cleanup: the final receipt observes actual teardown.
+	t.Cleanup(func() {
+		if h == nil {
+			return
+		}
+		_, rootErr := os.Stat(filepath.Dir(h.console.options.PermitFile))
+		_, permitErr := os.Stat(h.console.options.PermitFile)
+		receipt := map[string]any{"schema": "rixa.manageweb-receipt.v1", "phase": "stopped",
+			"private_state_removed": errors.Is(rootErr, os.ErrNotExist),
+			"permit_removed":        errors.Is(permitErr, os.ErrNotExist),
+			"fetch_calls":           h.fetchCalls, "verify_calls": h.verifyCalls}
+		h.backend.mutex.Lock()
+		receipt["calls"] = h.backend.calls
+		receipt["state"] = h.backend.result.State
+		receipt["exact_review_forwarded"] = h.backend.token == strings.Repeat("a", 64)
+		receipt["secrets_retained"] = h.backend.draft.ControlDSN != "" && h.backend.draft.SiteDSN != "" && h.backend.draft.ControlPassword != "" && h.backend.draft.SitePassword != ""
+		h.backend.mutex.Unlock()
+		h.console.mutex.Lock()
+		receipt["closed"] = h.console.closed
+		receipt["expired"] = !h.console.deps.now().Before(h.console.expires)
+		h.console.mutex.Unlock()
+		b, e := json.Marshal(receipt)
+		if e != nil || os.WriteFile(marker+".receipt", b, 0600) != nil {
+			t.Error("private teardown receipt")
+		}
+	})
+	h = fixture(t, func(o *Options, _ *dependencies, _ *fakeNative) {
+		root := filepath.Join(filepath.Dir(o.PermitFile), "catalogs")
+		if os.Mkdir(root, 0700) != nil {
+			t.Fatal("preview catalog root")
+		}
+		body := `{"schema":1,"locale":"ar","name":"Installed fixture","direction":"rtl","domain":"rixa-manager","messages":{"title":{"other":"Installed <text>"},"access_title":{"other":"Installed <text>"}}}`
+		if os.WriteFile(filepath.Join(root, "fixture.json"), []byte(body), 0600) != nil {
+			t.Fatal("preview catalog")
+		}
+		o.CatalogRoot = root
+	})
+	b, e := json.Marshal(map[string]string{"schema": "rixa.manageweb-preview.v1",
+		"origin": h.console.origin, "permit": h.permit, "operation": "fixture-install"})
+	if e != nil {
+		t.Fatal("preview identity")
+	}
+	file, e := os.OpenFile(marker, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if e != nil {
 		t.Fatal("private fake preview marker")
 	}
+	if _, e = file.Write(b); e != nil {
+		t.Fatal(e)
+	}
+	if e = file.Close(); e != nil {
+		t.Fatal(e)
+	}
 	defer os.Remove(marker)
-	stop := marker + ".stop"
-	defer os.Remove(stop)
+	defer os.Remove(marker + ".control")
+	defer os.Remove(marker + ".stop")
+	receipt := func() {
+		h.backend.mutex.Lock()
+		calls := make(map[string]int, len(h.backend.calls))
+		for k, v := range h.backend.calls {
+			calls[k] = v
+		}
+		state := h.backend.result.State
+		retained := h.backend.draft.ControlDSN != "" && h.backend.draft.SiteDSN != "" &&
+			h.backend.draft.ControlPassword != "" && h.backend.draft.SitePassword != ""
+		h.backend.mutex.Unlock()
+		h.console.mutex.Lock()
+		closed := h.console.closed
+		expired := !h.console.deps.now().Before(h.console.expires)
+		h.console.mutex.Unlock()
+		data, e := json.Marshal(map[string]any{"schema": "rixa.manageweb-receipt.v1",
+			"phase": "running", "command": command, "calls": calls, "state": state,
+			"secrets_retained": retained, "closed": closed, "expired": expired})
+		if e != nil {
+			t.Fatal(e)
+		}
+		temp := marker + ".receipt.tmp"
+		if os.WriteFile(temp, data, 0600) != nil || os.Rename(temp, marker+".receipt") != nil {
+			t.Fatal("private preview receipt")
+		}
+	}
+	receipt()
 	deadline := time.NewTimer(3 * time.Minute)
 	defer deadline.Stop()
-	tick := time.NewTicker(100 * time.Millisecond)
+	tick := time.NewTicker(50 * time.Millisecond)
 	defer tick.Stop()
 	for {
 		select {
 		case <-deadline.C:
 			return
 		case <-tick.C:
-			if _, e := os.Stat(stop); e == nil {
+			if _, e := os.Stat(marker + ".stop"); e == nil {
 				return
 			}
+			if info, e := os.Lstat(marker + ".control"); e == nil {
+				if !info.Mode().IsRegular() || info.Mode().Perm() != 0600 || info.Size() > 128 {
+					t.Fatal("private bounded preview control required")
+				}
+				data, e := os.ReadFile(marker + ".control")
+				if e != nil {
+					t.Fatal(e)
+				}
+				command = string(data)
+				switch command {
+				case "inspection-unavailable", "restore-inspection":
+					h.backend.mutex.Lock()
+					h.backend.statusError = nil
+					if command == "inspection-unavailable" {
+						h.backend.statusError = errors.New("fake inspection unavailable")
+					}
+					h.backend.mutex.Unlock()
+				case "installed":
+					h.backend.mutex.Lock()
+					h.backend.result.State = "installed"
+					h.backend.result.Actions = []string{"status"}
+					h.backend.mutex.Unlock()
+				case "expire":
+					h.console.mutex.Lock()
+					h.console.expires = time.Now().Add(-time.Second)
+					h.console.mutex.Unlock()
+				default:
+					t.Fatal("unsupported preview command")
+				}
+				if os.Remove(marker+".control") != nil {
+					t.Fatal("consume preview command")
+				}
+			}
+			receipt()
 		}
 	}
 }

@@ -95,3 +95,9 @@ Actual support still requires a fresh owned aaPanel host journey, strict TLS/
 session/Origin/privacy proof, concurrent CLI/web recovery and populated signed
 update/removal evidence, required CI and independent review. Fake-facade/browser
 evidence is not a substitute for those delivery gates.
+
+The [source-only browser driver](../scripts/lab/manage-web-browser.md) reproduces
+fake-native TLS interaction, recovery, locale and privacy checks. A fresh review
+always clears its prior Apply checkbox and summary; confirm the newly displayed
+review before applying. Its private fixture receipt verifies teardown and does
+not establish a supported host or panel profile.

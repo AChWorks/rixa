@@ -1,0 +1,102 @@
+# Source-only management console browser verification
+
+This driver exercises the actual served management console with Chromium and
+the existing `TestConsoleBrowserPreview` fake-native TLS fixture. It performs
+no native installation, update, panel, PostgreSQL, service or host-network
+effects. Tiny upload bytes pass only the fixture's fake private verification
+seam; they are not publisher-authentication proof.
+
+Use the already available browser runtime. Do not install a browser, alter
+network policy or point the driver at an operator's real console. The driver
+requires the preview schema, exact fake operation and loopback HTTPS origin.
+Use an isolated browser context and scope `ignoreHTTPSerrors` to this self-signed
+fixture. Strict CA/TLS, ingress/Host/Origin enforcement, admission bounds and
+real native effects need their separate existing tests and profile evidence.
+
+## Start one new fixture per run
+
+Create an owned 0700 evidence directory and select a new absolute marker path
+inside it. Existing marker, control, receipt and stop paths are rejected.
+Run the fixture as the ordinary development worker, never root:
+
+```sh
+RIXA_MANAGEWEB_PREVIEW=/absolute/private/proof/run1.json \
+  go test -race ./internal/manageweb -run '^TestConsoleBrowserPreview$' -count=1 -v
+```
+
+Use a persistent job if the execution tool is short lived. Wait for the marker;
+never print it, since it contains the one-use permit. The fixture lives at most
+three minutes and consumes only four private test commands:
+`inspection-unavailable`, `restore-inspection`, `installed`, and `expire`.
+The control file is a test-only local file, with no HTTP endpoint or executor.
+No new generic browser framework or repository dependency is required.
+
+## Run the driver
+
+In a browser execution capability with pre-created `context` and `page`,
+set the two operator-controlled absolute paths below. Use a new marker and
+isolated context for each of `journey` and `expiry`. The caller owns private
+checkpoint I/O; the browser sees neither a local path selector nor control API.
+
+```js
+const fs = await import("node:fs/promises");
+const marker = "/absolute/private/proof/run1.json";
+const sourceRoot = "/absolute/rixa-checkout";
+const mode = "journey"; // repeat with "expiry" and a new fixture
+const fixture = JSON.parse(await fs.readFile(marker, "utf8"));
+const source = await fs.readFile(sourceRoot + "/scripts/lab/manage-web-browser.js", "utf8");
+const run = new Function(source + "; return rixaManageWebBrowser;")();
+const checkpoint = async value => {
+  await fs.appendFile(marker + ".browser.jsonl", JSON.stringify(value) + "\n", {mode:0o600});
+};
+const control = async command => {
+  await fs.writeFile(marker + ".control.tmp", command, {mode:0o600, flag:"wx"});
+  await fs.rename(marker + ".control.tmp", marker + ".control");
+  for (let n = 0; n < 100; n++) {
+    const receipt = JSON.parse(await fs.readFile(marker + ".receipt", "utf8"));
+    if (receipt.command === command) return;
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
+  throw new Error("fixture control not acknowledged");
+};
+try {
+  const result = await run({context, page, fixture, checkpoint, control, mode,
+    screenshotRoot: "/absolute/private/proof"});
+  console.log(JSON.stringify(result)); // allowlisted summary only
+} catch (error) {
+  await checkpoint({phase:"failed", status:"failed", error:error.message});
+  throw error;
+} finally {
+  await fs.writeFile(marker + ".stop", "stop", {mode:0o600, flag:"wx"});
+}
+```
+
+The journey deliberately drops the first configure and Apply responses only
+**after** `route.fetch()` confirms a fake server commit. It retains request
+bodies privately in memory, compares exact configure replay, and never replays
+Apply after inspection observes the same operation applying. It also checks
+read-only failure, dirty navigation cancellation, saved-input/secret handling,
+review redaction, invalid-CSRF denial, a required unchecked confirmation for
+each fresh review, actual completion revocation, no WebStorage, English/Persian/
+installed-locale metadata and escaping, 390/wide overflow and keyboard focus.
+The separate expiry run advances only the fake console's expiry, then proves
+no configure/Apply request is sent and unsaved input remains.
+
+Screenshots are taken before secret entry or after acknowledged secret clearing.
+Checkpoint summaries contain phase names, counters and verdicts, never submitted
+bodies, permit/session/CSRF/review tokens or credential values.
+
+## Verify teardown and classify evidence
+
+After the browser finishes, inspect the actual persistent job status, not just
+a browser return or log EOF. The final private `.receipt` must have
+`phase:"stopped"`, `private_state_removed:true` and `permit_removed:true`.
+It records allowlisted fake calls, final state, secret-presence flags and whether
+the exact fake review token reached Apply. The marker/control/stop files are
+removed; the redacted receipt/checkpoints/screenshots remain for inspection.
+
+Retain failed attempts as failures. An Apply click without the required checkbox
+does not submit the HTML form and cannot prove lost-ack recovery. A full pass
+must include the later Apply/inspection/completion phases. The driver is bounded
+regression and browser evidence, not universal WCAG compliance, real publisher
+verification, strict TLS trust, native recovery or aaPanel support.

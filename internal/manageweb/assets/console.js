@@ -51,6 +51,10 @@
  }
  if(!root)return;
  const configure=root.querySelector("[data-configure]"),pendingBox=root.querySelector("[data-pending]");
+ function clearReview(){
+  reviewToken="";root.querySelector('[name="confirm_apply"]').checked=false;
+  root.querySelector("[data-review]").hidden=true;
+ }
  function lock(){
   const held=busy||!!pending;
   root.querySelector("[data-config]").hidden=!actions.includes("configure");
@@ -78,12 +82,12 @@
    const input=configure.elements.namedItem(problem.field);if(input){input.setAttribute("aria-invalid","true");input.setAttribute("aria-describedby",item.id);}
   }
   if(result.artifact)root.querySelector("[data-artifact]").textContent=[result.artifact.release,result.artifact.source_commit,result.artifact.sha256].filter(Boolean).join(" · ");
-  if(result.state!=="ready")reviewToken="";
+  if(result.state!=="ready")clearReview();
   if(result.review){const summary=root.querySelector("[data-review]");summary.replaceChildren();summary.hidden=false;for(const [name,value] of Object.entries(result.review)){const label=document.createElement("dt"),detail=document.createElement("dd"),id=document.createElement("bdi");label.textContent=t(name);id.dir="ltr";id.textContent=value;detail.append(id);summary.append(label,detail);}}
   if(result.state==="applying"&&!pending&&!result.access_closed)pollTimer=setTimeout(()=>inspect(false),2000);
   const admin=root.querySelector("[data-admin-url]");admin.hidden=true;
   if(result.admin_url){try{const url=new URL(result.admin_url);if(url.protocol==="https:"&&!url.username&&!url.password){admin.href=url.href;admin.hidden=false;}}catch(_){}}
-  if(result.access_closed){actions=[];pending=null;dirty=false;reviewToken="";announce("access_complete");}
+  if(result.access_closed){actions=[];pending=null;dirty=false;clearReview();announce("access_complete");}
   lock();
  }
  async function inspect(explicit=true){
@@ -94,7 +98,7 @@
    if(!matches(result))throw {};
    inspectedPending=!!pending;
    if(pending&&(["applying","reconciliation-required","installed","removed","rejected"].includes(result.state))){pending=null;}
-   if(pending?.action==="review"&&result.state==="ready"){pending=null;reviewToken="";}
+   if(pending?.action==="review"&&result.state==="ready"){pending=null;clearReview();}
    display(result);
    if(explicit)announce(pending?"uncertain_help":"inspected");
   }catch(_){if(explicit)announce("inspection_failed",true);}
@@ -102,6 +106,7 @@
  }
  async function send(attempt){
   if(busy)return;
+  if(attempt.action==="review")clearReview();
   busy=true;lock();announce("working");
   try{
    const result=await request(attempt.path,attempt.body);
@@ -112,7 +117,7 @@
    }else{
     display(result);
     if(attempt.action==="configure"){
-     dirty=false;reviewToken="";
+     dirty=false;clearReview();
      configure.querySelectorAll('input[type="password"]').forEach(input=>{input.value="";input.required=false;input.placeholder=t("saved_secret");});
     }
     if(attempt.action==="review"&&!result.access_closed&&typeof result.review_token==="string")reviewToken=result.review_token;
@@ -124,11 +129,11 @@
    else announce(error.status===401?"access_expired":error.status===409?"action_unavailable":"correct_input",true);
   }finally{busy=false;lock();}
  }
- configure.addEventListener("input",()=>{dirty=true;reviewToken="";lock();});
+ configure.addEventListener("input",()=>{dirty=true;clearReview();lock();});
  configure.addEventListener("submit",event=>{
   event.preventDefault();if(busy||pending||!configure.reportValidity())return;
   const value={};for(const control of configure.elements){if(control.name)value[control.name]=control.value;}
-  reviewToken="";send(Object.freeze({action:"configure",path:configure.action,body:JSON.stringify(value)}));
+  clearReview();send(Object.freeze({action:"configure",path:configure.action,body:JSON.stringify(value)}));
  });
  root.querySelectorAll("[data-action]").forEach(button=>button.addEventListener("click",()=>{if(!busy&&!pending&&!dirty)send(Object.freeze({action:button.dataset.action,path:"/admin/operation/"+button.dataset.action,body:"{}"}));}));
  root.querySelectorAll("[data-action-form]").forEach(form=>form.addEventListener("submit",event=>{
