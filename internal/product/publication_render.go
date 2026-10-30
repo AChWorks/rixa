@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/xml"
+	"github.com/AChWorks/achrix/admin/localize"
 	"html/template"
 	"os"
 	"path/filepath"
@@ -24,22 +25,23 @@ import (
 const generatedFileCache = "public, max-age=60, must-revalidate"
 
 type publicPageView struct {
-	Language    string
-	Direction   string
-	Theme       string
-	SiteTitle   string
+	Locale          *localize.Localizer
+	Language        string
+	Direction       string
+	Theme           string
+	SiteTitle       string
 	SiteDescription string
-	ShowSiteTitle bool
-	HeaderTagline string
-	FooterText  string
-	Title       string
-	Description string
-	Canonical   string
-	Robots      string
-	PublishedAt time.Time
-	ModifiedAt  time.Time
-	Body        template.HTML
-	Structured  template.JS
+	ShowSiteTitle   bool
+	HeaderTagline   string
+	FooterText      string
+	Title           string
+	Description     string
+	Canonical       string
+	Robots          string
+	PublishedAt     time.Time
+	ModifiedAt      time.Time
+	Body            template.HTML
+	Structured      template.JS
 }
 
 type publicHomeItem struct {
@@ -48,18 +50,19 @@ type publicHomeItem struct {
 }
 
 type publicHomeView struct {
-	Language       string
-	Direction      string
-	Theme          string
-	SiteTitle      string
+	Locale          *localize.Localizer
+	Language        string
+	Direction       string
+	Theme           string
+	SiteTitle       string
 	SiteDescription string
-	ShowSiteTitle  bool
-	HeaderTagline  string
-	FooterText     string
-	Canonical      string
-	Robots         string
-	Items          []publicHomeItem
-	Structured     template.JS
+	ShowSiteTitle   bool
+	HeaderTagline   string
+	FooterText      string
+	Canonical       string
+	Robots          string
+	Items           []publicHomeItem
+	Structured      template.JS
 }
 
 var publicPageTemplate = template.Must(template.New("public-page").Parse(`<!doctype html>
@@ -78,7 +81,7 @@ var publicPageTemplate = template.Must(template.New("public-page").Parse(`<!doct
 <header>{{if .ShowSiteTitle}}<p><strong><a href="/">{{.SiteTitle}}</a></strong></p>{{end}}{{if .HeaderTagline}}<p dir="auto">{{.HeaderTagline}}</p>{{end}}</header>
 <main><article>
 <h1 dir="auto">{{.Title}}</h1>
-<p class="rixa-meta"><span>{{if eq .Language "fa"}}انتشار{{else}}Published{{end}} <time datetime="{{.PublishedAt.Format "2006-01-02T15:04:05Z07:00"}}">{{.PublishedAt.Format "2006-01-02"}}</time></span> · <span>{{if eq .Language "fa"}}به‌روزرسانی{{else}}Updated{{end}} <time datetime="{{.ModifiedAt.Format "2006-01-02T15:04:05Z07:00"}}">{{.ModifiedAt.Format "2006-01-02"}}</time></span></p>
+<p class="rixa-meta"><span>{{.Locale.Text "rixa" "public.published" nil}} <time datetime="{{.PublishedAt.Format "2006-01-02T15:04:05Z07:00"}}">{{.PublishedAt.Format "2006-01-02"}}</time></span> · <span>{{.Locale.Text "rixa" "public.updated" nil}} <time datetime="{{.ModifiedAt.Format "2006-01-02T15:04:05Z07:00"}}">{{.ModifiedAt.Format "2006-01-02"}}</time></span></p>
 <div>{{.Body}}</div>
 </article></main>
 {{if .FooterText}}<footer dir="auto">{{.FooterText}}</footer>{{end}}
@@ -98,13 +101,20 @@ var publicHomeTemplate = template.Must(template.New("public-home").Parse(`<!doct
 </head>
 <body>
 <header>{{if .ShowSiteTitle}}<h1 dir="auto">{{.SiteTitle}}</h1>{{end}}{{if .HeaderTagline}}<p dir="auto">{{.HeaderTagline}}</p>{{end}}{{if .SiteDescription}}<p dir="auto">{{.SiteDescription}}</p>{{end}}</header>
-<main>{{if .ShowSiteTitle}}<h2>{{if eq .Language "fa"}}آخرین نوشته‌ها{{else}}Latest posts{{end}}</h2>{{else}}<h1>{{if eq .Language "fa"}}آخرین نوشته‌ها{{else}}Latest posts{{end}}</h1>{{end}}{{if .Items}}<ol>{{range .Items}}<li><a href="{{.URL}}" dir="auto">{{.Title}}</a></li>{{end}}</ol>{{else}}<p>{{if eq .Language "fa"}}هنوز نوشته‌ای منتشر نشده است.{{else}}No published posts.{{end}}</p>{{end}}</main>
+<main>{{if .ShowSiteTitle}}<h2>{{.Locale.Text "rixa" "public.latest_posts" nil}}</h2>{{else}}<h1>{{.Locale.Text "rixa" "public.latest_posts" nil}}</h1>{{end}}{{if .Items}}<ol>{{range .Items}}<li><a href="{{.URL}}" dir="auto">{{.Title}}</a></li>{{end}}</ol>{{else}}<p>{{.Locale.Text "rixa" "public.no_posts" nil}}</p>{{end}}</main>
 {{if .FooterText}}<footer dir="auto">{{.FooterText}}</footer>{{end}}
 </body></html>`))
 
-func renderPublication(publicDir string, manifest *publicationManifest, snapshot publicationSnapshot, assets map[string]publicationAsset) (int64, error) {
+func renderPublication(publicDir string, manifest *publicationManifest, snapshot publicationSnapshot, assets map[string]publicationAsset, catalog *localize.Catalog) (int64, error) {
 	if manifest == nil {
 		return 0, ErrEditorialUnavailable
+	}
+	if catalog == nil || !supportedContentLanguage(snapshot.Appearance.SiteLanguage) {
+		return 0, ErrEditorialInvalid
+	}
+	locale, err := catalog.For(snapshot.Appearance.SiteLanguage)
+	if err != nil {
+		return 0, err
 	}
 	contentDir := filepath.Join(publicDir, "content")
 	if err := os.Mkdir(contentDir, 0o700); err != nil {
@@ -141,22 +151,23 @@ func renderPublication(publicDir string, manifest *publicationManifest, snapshot
 			return 0, err
 		}
 		view := publicPageView{
-			Language: snapshot.Appearance.SiteLanguage,
-			Direction: publicationDirection(snapshot.Appearance.SiteLanguage),
-			Theme: snapshot.Appearance.Theme,
-			SiteTitle: snapshot.Appearance.SiteTitle,
+			Locale:          locale,
+			Language:        snapshot.Appearance.SiteLanguage,
+			Direction:       locale.Locale().Direction,
+			Theme:           snapshot.Appearance.Theme,
+			SiteTitle:       snapshot.Appearance.SiteTitle,
 			SiteDescription: snapshot.Appearance.SiteDescription,
-			ShowSiteTitle: snapshot.Appearance.HeaderShowTitle,
-			HeaderTagline: snapshot.Appearance.HeaderTagline,
-			FooterText: snapshot.Appearance.FooterText,
-			Title: content.Title,
-			Description: publicDescription(content.BodyHTML),
-			Canonical: manifest.Origin + entry.CanonicalRoute,
-			Robots: publicRobotsDirective(manifest.Policy),
-			PublishedAt: entry.FirstPublishedAt,
-			ModifiedAt: entry.ModifiedAt,
-			Body: body,
-			Structured: template.JS(structured),
+			ShowSiteTitle:   snapshot.Appearance.HeaderShowTitle,
+			HeaderTagline:   snapshot.Appearance.HeaderTagline,
+			FooterText:      snapshot.Appearance.FooterText,
+			Title:           content.Title,
+			Description:     publicDescription(content.BodyHTML),
+			Canonical:       manifest.Origin + entry.CanonicalRoute,
+			Robots:          publicRobotsDirective(manifest.Policy),
+			PublishedAt:     entry.FirstPublishedAt,
+			ModifiedAt:      entry.ModifiedAt,
+			Body:            body,
+			Structured:      template.JS(structured),
 		}
 		var page bytes.Buffer
 		if err = publicPageTemplate.Execute(&page, view); err != nil {
@@ -192,18 +203,19 @@ func renderPublication(publicDir string, manifest *publicationManifest, snapshot
 			return 0, err
 		}
 		view := publicHomeView{
-			Language: snapshot.Appearance.SiteLanguage,
-			Direction: publicationDirection(snapshot.Appearance.SiteLanguage),
-			Theme: snapshot.Appearance.Theme,
-			SiteTitle: snapshot.Appearance.SiteTitle,
+			Locale:          locale,
+			Language:        snapshot.Appearance.SiteLanguage,
+			Direction:       locale.Locale().Direction,
+			Theme:           snapshot.Appearance.Theme,
+			SiteTitle:       snapshot.Appearance.SiteTitle,
 			SiteDescription: snapshot.Appearance.SiteDescription,
-			ShowSiteTitle: snapshot.Appearance.HeaderShowTitle,
-			HeaderTagline: snapshot.Appearance.HeaderTagline,
-			FooterText: snapshot.Appearance.FooterText,
-			Canonical: manifest.Origin + "/",
-			Robots: publicRobotsDirective(manifest.Policy),
-			Items: homeItems,
-			Structured: template.JS(structured),
+			ShowSiteTitle:   snapshot.Appearance.HeaderShowTitle,
+			HeaderTagline:   snapshot.Appearance.HeaderTagline,
+			FooterText:      snapshot.Appearance.FooterText,
+			Canonical:       manifest.Origin + "/",
+			Robots:          publicRobotsDirective(manifest.Policy),
+			Items:           homeItems,
+			Structured:      template.JS(structured),
 		}
 		var home bytes.Buffer
 		if err = publicHomeTemplate.Execute(&home, view); err != nil {
@@ -227,7 +239,7 @@ func renderPublication(publicDir string, manifest *publicationManifest, snapshot
 		manifest.Files[asset.File] = publicationFile{
 			Path: asset.File, ContentType: asset.MIME,
 			Cache: generatedFileCache,
-			Size: asset.Size, SHA256: asset.SHA256,
+			Size:  asset.Size, SHA256: asset.SHA256,
 		}
 	}
 
@@ -385,12 +397,12 @@ func structuredContentJSON(manifest *publicationManifest, appearance Appearance,
 	}
 	canonical := manifest.Origin + entry.CanonicalRoute
 	primary := map[string]any{
-		"@type": contentType,
-		"headline": content.Title,
-		"url": canonical,
-		"inLanguage": appearance.SiteLanguage,
+		"@type":         contentType,
+		"headline":      content.Title,
+		"url":           canonical,
+		"inLanguage":    appearance.SiteLanguage,
 		"datePublished": entry.FirstPublishedAt.UTC().Format(time.RFC3339),
-		"dateModified": entry.ModifiedAt.UTC().Format(time.RFC3339),
+		"dateModified":  entry.ModifiedAt.UTC().Format(time.RFC3339),
 	}
 	breadcrumbItems := []map[string]any{{
 		"@type": "ListItem", "position": 1, "name": appearance.SiteTitle, "item": manifest.Origin + "/",
@@ -401,7 +413,7 @@ func structuredContentJSON(manifest *publicationManifest, appearance Appearance,
 		})
 	}
 	graph := []any{primary, map[string]any{
-		"@type": "BreadcrumbList",
+		"@type":           "BreadcrumbList",
 		"itemListElement": breadcrumbItems,
 	}}
 	value := map[string]any{"@context": "https://schema.org", "@graph": graph}
@@ -414,10 +426,10 @@ func structuredContentJSON(manifest *publicationManifest, appearance Appearance,
 
 func structuredHomeJSON(manifest *publicationManifest, appearance Appearance) (string, error) {
 	value := map[string]any{
-		"@context": "https://schema.org",
-		"@type": "WebSite",
-		"name": appearance.SiteTitle,
-		"url": manifest.Origin + "/",
+		"@context":   "https://schema.org",
+		"@type":      "WebSite",
+		"name":       appearance.SiteTitle,
+		"url":        manifest.Origin + "/",
 		"inLanguage": appearance.SiteLanguage,
 	}
 	if appearance.SiteDescription != "" {
@@ -508,13 +520,6 @@ func publicRobotsDirective(policy PublicPolicyConfig) string {
 		values = append(values, "max-snippet:-1")
 	}
 	return strings.Join(values, ", ")
-}
-
-func publicationDirection(language string) string {
-	if language == "fa" {
-		return "rtl"
-	}
-	return "ltr"
 }
 
 func addGeneratedFile(publicDir string, manifest *publicationManifest, relative string, body []byte, contentType, cache, robots string) (int64, error) {

@@ -32,7 +32,7 @@ The menu can fetch an authenticated release through the shared artifact policy, 
 
 Review the intended effects before Apply. Valid entered values remain available when a field is corrected or the operator navigates back. The backend controls which actions are currently possible; an uncertain result does not become a generic Retry button.
 
-Use `--plain` for a simple terminal or `--no-color`/`NO_COLOR` to remove color. Direct commands emit JSON and never prompt. `--non-interactive` rejects opening the menu. Terminal rendering depends on the actual terminal's Unicode shaping and bidirectional support; English/plain operation does not establish Persian full-screen rendering support.
+Use `--plain` for a simple terminal or `--no-color`/`NO_COLOR` to remove color. Direct commands emit JSON and never prompt. `--non-interactive` rejects opening the menu. The operator CLI and terminal menu always use English, independently of the web interface and site content language. Original Unicode input is retained; its display still depends on the terminal's shaping and bidirectional support.
 
 ## Direct commands and private input
 
@@ -47,7 +47,7 @@ A draft/prefill JSON contains real credentials. Use a root-owned private regular
 | `control_dsn`, `site_dsn` | Separate explicit loopback PostgreSQL password URLs |
 | `control_login`, `site_login` | Initial exact administrator logins |
 | `control_password`, `site_password` | Initial passwords, never command arguments or general logs |
-| `language` | `en` or `fa` for the product |
+| `language` | Initial web interface language: bundled `en` (default) or `fa`; never changes the English terminal. Additional installed web locales use the [localization guide](localization.md). |
 
 For example, after preparing the private JSON:
 

@@ -38,9 +38,9 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// The old executable is taken from the immutable published v0.1.0 artifact,
+// The old executable is taken from the immutable published v0.3.0 artifact,
 // never rebuilt with current source or assigned an invented old version.
-const retainedBaselineBinarySHA256 = "f43a446486b7803dc061e379d7f76bd2b172b5d01e06ca06799ee59498f93188"
+const retainedBaselineBinarySHA256 = "1c2b05f5b2b5e4c96ee62ae758c2b5f9c504a5a85f02716e0d0b25677017587e"
 
 type retainedSession struct {
 	cookie    *http.Cookie
@@ -73,11 +73,11 @@ func TestRetainedReleaseUpgrade(t *testing.T) {
 	verifyRetainedBaseline(t, binary)
 	for module, expected := range map[string]string{
 		"github.com/AChWorks/achrix":              "v0.4.0",
-		"github.com/AChWorks/achrix/admin":        "v0.1.0",
+		"github.com/AChWorks/achrix/admin":        "v0.2.0",
 		"github.com/AChWorks/achrix/audit":        "v0.1.0",
-		"github.com/AChWorks/achrix/identity":     "v0.1.0",
+		"github.com/AChWorks/achrix/identity":     "v0.2.0",
 		"github.com/AChWorks/achrix/installation": "v0.1.0",
-		"github.com/AChWorks/achrix/media":        "v0.1.0",
+		"github.com/AChWorks/achrix/media":        "v0.2.0",
 		"github.com/AChWorks/achrix/multisite":    "v0.1.0",
 	} {
 		if achrix.DependencyVersion(module) != expected {
@@ -176,6 +176,7 @@ func TestRetainedReleaseUpgrade(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	beforeTargets := snapshotRetainedTargets(t, ctx, dsns)
 	beforeRows := snapshotRetainedRows(t, ctx, dsns)
 	beforeFiles := snapshotRetainedFiles(t, raw.Sites[:2])
 	assertRetainedFixturePopulated(t, ctx, dsns)
@@ -208,6 +209,20 @@ func TestRetainedReleaseUpgrade(t *testing.T) {
 	assertRetainedSnapshots(t, ctx, dsns, raw.Sites[:2], configPath, beforeRows, beforeFiles, beforeConfig)
 	if runtime.Sites["disabled"] != nil {
 		t.Fatal("disabled site acquired a runtime during upgrade")
+	}
+
+	// A normal scoped stop/reconstruction must retain the same stores, original
+	// sessions and immutable ledgers before any new login or fixture mutation.
+	stopNew()
+	runtime, err = BuildRuntime(resolved, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stopNew = startRetainedCandidate(t, ctx, runtime)
+	httpFixture.waitReady("", nil)
+	assertRetainedSnapshots(t, ctx, dsns, raw.Sites[:2], configPath, beforeRows, beforeFiles, beforeConfig)
+	if !reflect.DeepEqual(snapshotRetainedTargets(t, ctx, dsns), beforeTargets) {
+		t.Fatal("retained physical PostgreSQL targets changed across adoption/restart")
 	}
 
 	// No new login or fixture mutation occurs before the exact retention checks.
@@ -258,7 +273,7 @@ func TestRetainedReleaseUpgrade(t *testing.T) {
 		t.Fatal("control principal bypassed site authorization after upgrade")
 	}
 	stopNew()
-	t.Log("RIXA_RETAINED_UPGRADE baseline=v0.1.0 foundation=v0.3.0 sites=2 exact_rows_files_ledgers=true valid_sessions_retained=true revoked_foreign_denied=true control_dispatch=true")
+	t.Log("RIXA_RETAINED_UPGRADE baseline=v0.3.0 core=v0.4.0 localized_components=v0.2.0 sites=2 exact_rows_files_ledgers=true physical_targets_retained=true scoped_restart=true valid_sessions_retained=true revoked_foreign_denied=true control_dispatch=true")
 }
 
 func verifyRetainedBaseline(t *testing.T, path string) {
@@ -277,11 +292,24 @@ func verifyRetainedBaseline(t *testing.T, path string) {
 	defer cancel()
 	output := retainedCommand(t, ctx, path, []string{"PATH=" + os.Getenv("PATH")}, "version")
 	var version struct {
-		Rixa   string `json:"rixa"`
-		AChrix string `json:"achrix"`
+		Rixa       string            `json:"rixa"`
+		AChrix     string            `json:"achrix"`
+		Components map[string]string `json:"achrix_components"`
 	}
-	if json.Unmarshal(output, &version) != nil || version.Rixa != "v0.1.0" || version.AChrix != "v0.3.0" {
+	if json.Unmarshal(output, &version) != nil || version.Rixa != "v0.3.0" || version.AChrix != "v0.4.0" {
 		t.Fatal("published baseline runtime identity mismatch")
+	}
+	expected := map[string]string{
+		"github.com/AChWorks/achrix":              "v0.4.0",
+		"github.com/AChWorks/achrix/admin":        "v0.1.0",
+		"github.com/AChWorks/achrix/audit":        "v0.1.0",
+		"github.com/AChWorks/achrix/identity":     "v0.1.0",
+		"github.com/AChWorks/achrix/installation": "v0.1.0",
+		"github.com/AChWorks/achrix/media":        "v0.1.0",
+		"github.com/AChWorks/achrix/multisite":    "v0.1.0",
+	}
+	if !reflect.DeepEqual(version.Components, expected) {
+		t.Fatal("published baseline compiled component inventory mismatch")
 	}
 }
 
@@ -546,6 +574,23 @@ func (h retainedHTTP) seedSite(host, id string, session retainedSession, red uin
 	assetPath := extractPublishedAssetPath(h.t, string(page))
 	h.get(host, assetPath, nil, http.StatusOK)
 	return retainedSite{host, created.ID, upload.Asset.ID, assetPath, title, session, original.Bytes(), page}
+}
+
+// Physical identity is distinct from a configured DSN or a matching database
+// name. Keep the exact cluster/database tuple and require independent targets.
+func snapshotRetainedTargets(t *testing.T, ctx context.Context, dsns map[string]string) map[string]databaseTargetIdentity {
+	t.Helper()
+	result := make(map[string]databaseTargetIdentity)
+	seen := make(map[databaseTargetIdentity]bool)
+	for _, scope := range []string{"control", "a", "b"} {
+		identity, err := inspectDatabaseTarget(ctx, dsns[scope])
+		if err != nil || seen[identity] {
+			t.Fatalf("retained physical database identity unavailable or duplicated: %s", scope)
+		}
+		seen[identity] = true
+		result[scope] = identity
+	}
+	return result
 }
 
 func snapshotRetainedRows(t *testing.T, ctx context.Context, dsns map[string]string) map[string]string {

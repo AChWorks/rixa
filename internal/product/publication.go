@@ -16,19 +16,20 @@ import (
 	"time"
 
 	"github.com/AChWorks/achrix"
+	"github.com/AChWorks/achrix/admin/localize"
 	"github.com/AChWorks/achrix/media"
 )
 
 const (
-	PublicationTarget          = "publication"
-	publicationManifestVersion = 1
-	maxPublicationAssets          = 64
-	maxPublicationEntries         = 512
-	maxPublicationAliasesPerEntry = 16
-	maxPublicationBytes     int64  = 256 << 20
-	publicationHistoryLimit       = 16
-	publicReadConcurrency      = 32
-	publicationApplyTimeout   = 2 * time.Minute
+	PublicationTarget                   = "publication"
+	publicationManifestVersion          = 1
+	maxPublicationAssets                = 64
+	maxPublicationEntries               = 512
+	maxPublicationAliasesPerEntry       = 16
+	maxPublicationBytes           int64 = 256 << 20
+	publicationHistoryLimit             = 16
+	publicReadConcurrency               = 32
+	publicationApplyTimeout             = 2 * time.Minute
 )
 
 var publicRouteSegmentSyntax = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._~-]{0,127}$`)
@@ -111,20 +112,20 @@ type publicationFile struct {
 }
 
 type publicationManifest struct {
-	Version           int                         `json:"version"`
-	SiteID            string                      `json:"site_id"`
-	Origin            string                      `json:"origin"`
-	Generation        string                      `json:"generation"`
-	ParentGeneration  string                      `json:"parent_generation,omitempty"`
-	CreatedAt         time.Time                   `json:"created_at"`
-	SourceFingerprint string                      `json:"source_fingerprint"`
-	AppearanceRevision int64                      `json:"appearance_revision"`
-	Policy            PublicPolicyConfig          `json:"policy"`
-	Operation         PublicationOperation        `json:"operation"`
-	Entries           map[string]publicationEntry `json:"entries"`
-	Routes            map[string]publicationRoute `json:"routes"`
-	Assets            map[string]publicationAsset `json:"assets"`
-	Files             map[string]publicationFile  `json:"files"`
+	Version            int                         `json:"version"`
+	SiteID             string                      `json:"site_id"`
+	Origin             string                      `json:"origin"`
+	Generation         string                      `json:"generation"`
+	ParentGeneration   string                      `json:"parent_generation,omitempty"`
+	CreatedAt          time.Time                   `json:"created_at"`
+	SourceFingerprint  string                      `json:"source_fingerprint"`
+	AppearanceRevision int64                       `json:"appearance_revision"`
+	Policy             PublicPolicyConfig          `json:"policy"`
+	Operation          PublicationOperation        `json:"operation"`
+	Entries            map[string]publicationEntry `json:"entries"`
+	Routes             map[string]publicationRoute `json:"routes"`
+	Assets             map[string]publicationAsset `json:"assets"`
+	Files              map[string]publicationFile  `json:"files"`
 }
 
 type publishedGeneration struct {
@@ -155,6 +156,7 @@ type PublicationService struct {
 	slots     chan struct{}
 	applyGate chan struct{}
 	rootSync  func(string) error
+	catalog   *localize.Catalog
 
 	mu                sync.Mutex
 	readMu            sync.Mutex
@@ -165,7 +167,7 @@ type PublicationService struct {
 	lifecycleCancel   context.CancelFunc
 }
 
-func newPublicationService(site ResolvedSite, app *achrix.Application, editorial *EditorialService, mediaService *media.Service) (*PublicationService, error) {
+func newPublicationService(site ResolvedSite, app *achrix.Application, editorial *EditorialService, mediaService *media.Service, catalogs ...*localize.Catalog) (*PublicationService, error) {
 	if site.PublicRoot == "" {
 		return nil, nil
 	}
@@ -179,14 +181,25 @@ func newPublicationService(site ResolvedSite, app *achrix.Application, editorial
 	if err != nil {
 		return nil, ErrConfiguration
 	}
+	var catalog *localize.Catalog
+	if len(catalogs) > 0 {
+		catalog = catalogs[0]
+	}
+	if catalog == nil {
+		catalog, err = localize.Load(bundledProductCatalogs())
+		if err != nil {
+			return nil, fmt.Errorf("%w: publication catalogs: %w", ErrConfiguration, err)
+		}
+	}
 	lifecycleCtx, lifecycleCancel := context.WithCancel(context.Background())
 	return &PublicationService{
 		siteID: site.ID, origin: site.Origin, authority: authority,
 		root: site.PublicRoot, policy: site.PublicPolicy,
 		app: app, editorial: editorial, media: mediaService,
-		slots: make(chan struct{}, publicReadConcurrency),
-		applyGate: make(chan struct{}, 1),
-		rootSync: syncDir,
+		slots:        make(chan struct{}, publicReadConcurrency),
+		applyGate:    make(chan struct{}, 1),
+		rootSync:     syncDir,
+		catalog:      catalog,
 		lifecycleCtx: lifecycleCtx, lifecycleCancel: lifecycleCancel,
 	}, nil
 }
@@ -411,7 +424,7 @@ func (s *PublicationService) Apply(ctx context.Context, actor achrix.Principal, 
 		}
 	}
 
-	renderedBytes, err := renderPublication(publicDir, manifest, snapshot, assets)
+	renderedBytes, err := renderPublication(publicDir, manifest, snapshot, assets, s.catalog)
 	if err != nil {
 		return PublicationResult{}, err
 	}

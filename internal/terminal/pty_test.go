@@ -276,6 +276,9 @@ func TestTerminalPTYChild(t *testing.T) {
 		return
 	}
 	f := &testFacade{draft: testDraft(), firstSaveFailure: !strings.HasPrefix(mode, "fetch")}
+	if strings.HasPrefix(mode, "web-locale-") {
+		f.draft.Language = strings.TrimPrefix(mode, "web-locale-")
+	}
 	fetchChannels := []string{}
 	f.ready = mode == "unsaved" || mode == "unreviewed"
 	options := Options{Input: os.Stdin, Output: os.Stdout, OperationID: "pty-case", Version: "test", Plain: mode == "plain" || mode == "fetch-plain"}
@@ -491,5 +494,23 @@ func TestTerminalPTYCanCancelWhileDiscardingOversizePaste(t *testing.T) {
 	receipt := p.finish(t)
 	if receipt["saves"] != float64(0) || receipt["applies"] != float64(0) {
 		t.Fatal("discard cancellation caused a persisted effect")
+	}
+}
+
+func TestTerminalPTYRemainsEnglishForWebLocales(t *testing.T) {
+	for _, locale := range []string{"fa", "de"} {
+		t.Run(locale, func(t *testing.T) {
+			p := startPTY(t, "web-locale-"+locale)
+			position := p.await(t, 0, "Configure installation")
+			p.send(t, "\x1bOP")
+			position = p.await(t, position, "The terminal interface always uses English")
+			p.send(t, "\r")
+			p.await(t, position, "Server management")
+			p.send(t, "\x03")
+			receipt := p.finish(t)
+			if receipt["saves"] != float64(0) || receipt["applies"] != float64(0) {
+				t.Fatal("language-independent inspection changed installation state")
+			}
+		})
 	}
 }

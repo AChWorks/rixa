@@ -4,6 +4,7 @@ package product
 
 import (
 	"bytes"
+	"github.com/AChWorks/achrix/admin/localize"
 	"html/template"
 	"strings"
 	"testing"
@@ -19,21 +20,21 @@ func TestContentEditorPersianMixedDirectionSurface(t *testing.T) {
 		t.Fatal(err)
 	}
 	data := contentEditView{
-		Language: "fa",
+		Locale: testProductLocalizer(t, "fa"),
 		Revision: ContentRevision{
-			ID:                       "AAAAAAAAAAAAAAAAAAAAAAAAAA",
-			Kind:                     ContentPost,
-			Revision:                 2,
-			Title:                    "عنوان English",
-			BodyHTML:                 body,
+			ID:                        "AAAAAAAAAAAAAAAAAAAAAAAAAA",
+			Kind:                      ContentPost,
+			Revision:                  2,
+			Title:                     "عنوان English",
+			BodyHTML:                  body,
 			PublicationIntentRevision: 2,
-			PublicationIntentVersion: 3,
+			PublicationIntentVersion:  3,
 		},
-		History:     []RevisionSummary{{Revision: 2, Title: "عنوان English", Actor: "actor"}},
-		Body: trusted,
+		History: []RevisionSummary{{Revision: 2, Title: "عنوان English", Actor: "actor"}},
+		Body:    trusted,
 		Publication: PublicationState{
 			Enabled: true, Generation: "CCCCCCCCCCCCCCCCCCCCCCCCCC",
-			DesiredRoute: "/posts/aaaaaaaaaaaaaaaaaaaaaaaaaa/",
+			DesiredRoute:   "/posts/aaaaaaaaaaaaaaaaaaaaaaaaaa/",
 			ActiveRevision: 1,
 		},
 		OperationID: "BBBBBBBBBBBBBBBBBBBBBBBBBB",
@@ -65,9 +66,10 @@ func TestContentEditorPersianMixedDirectionSurface(t *testing.T) {
 func TestPrivatePreviewUsesSiteLanguageWithoutInliningPrivateMedia(t *testing.T) {
 	body := template.HTML(`<p dir="auto">سلام English</p><figure data-media-id="AAAAAAAAAAAAAAAAAAAAAAAAAA"><figcaption dir="auto">تصویر</figcaption></figure>`)
 	data := contentPreviewView{
-		Language: "en",
-		Revision: ContentRevision{ID: "BBBBBBBBBBBBBBBBBBBBBBBBBB", Revision: 3, Title: "Mixed عنوان"},
-		Body:     body,
+		Locale:           testProductLocalizer(t, "en"),
+		Revision:         ContentRevision{ID: "BBBBBBBBBBBBBBBBBBBBBBBBBB", Revision: 3, Title: "Mixed عنوان"},
+		Body:             body,
+		ContentDirection: "rtl",
 		Appearance: Appearance{
 			SiteTitle: "نمونه", SiteLanguage: "fa", HeaderShowTitle: true,
 			HeaderTagline: "Hello سلام", FooterText: "پابرگ", Theme: "dark",
@@ -106,7 +108,8 @@ func TestEditorialClientAssetsKeepMutationRecoveryAndPasteBoundary(t *testing.T)
 
 func TestAppearanceSurfaceContainsOnlyContractFields(t *testing.T) {
 	data := appearanceView{
-		Language: "en",
+		Locale:         testProductLocalizer(t, "en"),
+		ContentLocales: []localize.Locale{{Tag: "en", Name: "English", Direction: "ltr"}, {Tag: "fa", Name: "فارسی", Direction: "rtl"}},
 		Appearance: Appearance{
 			Revision: 1, SiteTitle: "site-a", SiteLanguage: "en", HomeMode: "latest_posts",
 			HeaderShowTitle: true, Theme: "light",
@@ -129,4 +132,17 @@ func TestAppearanceSurfaceContainsOnlyContractFields(t *testing.T) {
 			t.Fatalf("appearance leaked deployment field %q", forbidden)
 		}
 	}
+}
+
+func testProductLocalizer(t *testing.T, language string) *localize.Localizer {
+	t.Helper()
+	catalog, err := localize.Load(bundledProductCatalogs())
+	if err != nil {
+		t.Fatal(err)
+	}
+	locale, err := catalog.For(language)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return locale
 }

@@ -337,7 +337,7 @@ func (a AppearanceInput) validateShape() error {
 		!validPlainText(a.FooterText, 500, false) {
 		return ErrEditorialInvalid
 	}
-	if a.SiteLanguage != "en" && a.SiteLanguage != "fa" {
+	if !supportedContentLanguage(a.SiteLanguage) {
 		return ErrEditorialInvalid
 	}
 	if a.HomeMode != "latest_posts" && a.HomeMode != "page" {

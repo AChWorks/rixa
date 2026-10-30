@@ -44,11 +44,11 @@ spec:
       sourceVersion: v0.4.0
       components:
         github.com/AChWorks/achrix: v0.4.0
-        github.com/AChWorks/achrix/admin: v0.1.0
+        github.com/AChWorks/achrix/admin: v0.2.0
         github.com/AChWorks/achrix/audit: v0.1.0
-        github.com/AChWorks/achrix/identity: v0.1.0
+        github.com/AChWorks/achrix/identity: v0.2.0
         github.com/AChWorks/achrix/installation: v0.1.0
-        github.com/AChWorks/achrix/media: v0.1.0
+        github.com/AChWorks/achrix/media: v0.2.0
         github.com/AChWorks/achrix/multisite: v0.1.0
       consumption: versioned-go-dependency
       specification: docs/PROJECT-SPEC.md

@@ -1,0 +1,297 @@
+{
+  "schema": 1,
+  "locale": "fa",
+  "name": "فارسی",
+  "direction": "rtl",
+  "domain": "rixa",
+  "messages": {
+    "sites_notice": {
+      "other": "فهرست سایت‌های تعریف‌شده در این نصب. نشست مدیریت زیرساخت به‌تنهایی مجوز سایت نیست."
+    },
+    "id": {
+      "other": "شناسه"
+    },
+    "origin": {
+      "other": "مبدأ"
+    },
+    "state": {
+      "other": "وضعیت"
+    },
+    "disabled": {
+      "other": "غیرفعال"
+    },
+    "enabled": {
+      "other": "فعال"
+    },
+    "login": {
+      "other": "شناسه ورود"
+    },
+    "initial_password": {
+      "other": "رمز اولیه"
+    },
+    "create_site_account": {
+      "other": "ایجاد حساب در این سایت"
+    },
+    "new_content": {
+      "other": "محتوای تازه"
+    },
+    "draft_creation_notice": {
+      "other": "ایجاد فقط یک پیش‌نویس خصوصی می‌سازد و چیزی را عمومی نمی‌کند."
+    },
+    "type": {
+      "other": "نوع"
+    },
+    "post": {
+      "other": "نوشته"
+    },
+    "page": {
+      "other": "برگه"
+    },
+    "title": {
+      "other": "عنوان"
+    },
+    "create_draft": {
+      "other": "ایجاد پیش‌نویس"
+    },
+    "saved_content": {
+      "other": "محتوای ذخیره‌شده"
+    },
+    "revision": {
+      "other": "نسخه"
+    },
+    "publication_intent": {
+      "other": "قصد انتشار"
+    },
+    "no_content": {
+      "other": "هنوز محتوایی ذخیره نشده است."
+    },
+    "inspect_mutation_outcome": {
+      "other": "بررسی نتیجهٔ عملیات"
+    },
+    "unknown_mutation_notice": {
+      "other": "اگر پاسخ تغییر از دست رفت، همان شناسه را بررسی کنید و تغییر را دوباره نفرستید."
+    },
+    "operation_id": {
+      "other": "شناسهٔ عملیات"
+    },
+    "inspect": {
+      "other": "بررسی"
+    },
+    "content_list": {
+      "other": "فهرست محتوا"
+    },
+    "formatting": {
+      "other": "قالب‌بندی"
+    },
+    "link_url": {
+      "other": "پیوند HTTPS یا داخلی"
+    },
+    "link_selection": {
+      "other": "پیوند دادن انتخاب"
+    },
+    "media_description": {
+      "other": "توضیح Media"
+    },
+    "insert_media_reference": {
+      "other": "افزودن ارجاع Media"
+    },
+    "content_body": {
+      "other": "متن محتوا"
+    },
+    "save_revision": {
+      "other": "ذخیرهٔ نسخهٔ تازه"
+    },
+    "preview_revision": {
+      "other": "پیش‌نمایش خصوصی همین نسخه"
+    },
+    "publication_intent_notice": {
+      "other": "این عمل چیزی را عمومی نمی‌کند."
+    },
+    "set_publication_intent": {
+      "other": "ثبت قصد انتشار"
+    },
+    "marked_revision": {
+      "other": "نسخهٔ علامت‌خورده"
+    },
+    "clear_publication_intent": {
+      "other": "پاک کردن قصد انتشار"
+    },
+    "public_publication": {
+      "other": "انتشار عمومی"
+    },
+    "publication_apply_notice": {
+      "other": "«قصد انتشار» فقط نسخه را انتخاب می‌کند. این عمل یک نسل ایستای یکپارچه می‌سازد و پس از بررسی freshness آن را فعال می‌کند."
+    },
+    "active_generation": {
+      "other": "نسل فعال"
+    },
+    "public_revision": {
+      "other": "نسخه عمومی"
+    },
+    "public_route": {
+      "other": "مسیر عمومی"
+    },
+    "apply_publication": {
+      "other": "اعمال انتشار یکپارچه"
+    },
+    "saved_revisions": {
+      "other": "نسخه‌های ذخیره‌شده"
+    },
+    "back_to_edit": {
+      "other": "بازگشت به ویرایش"
+    },
+    "private_preview": {
+      "other": "پیش‌نمایش خصوصی"
+    },
+    "private_media_notice": {
+      "other": "ارجاع‌های Media عمداً فایل خصوصی را inline نمی‌کنند."
+    },
+    "appearance_locale_notice": {
+      "other": "این زبان و ظاهر متعلق به خود سایت است و مستقل از زبان رابط مدیریت است."
+    },
+    "appearance_revision": {
+      "other": "نسخهٔ فعلی تنظیمات"
+    },
+    "site": {
+      "other": "سایت"
+    },
+    "site_title": {
+      "other": "عنوان سایت"
+    },
+    "site_description": {
+      "other": "توضیح سایت"
+    },
+    "site_language": {
+      "other": "زبان سایت"
+    },
+    "home": {
+      "other": "صفحهٔ خانه"
+    },
+    "home_mode": {
+      "other": "نوع صفحهٔ خانه"
+    },
+    "latest_posts": {
+      "other": "آخرین نوشته‌ها"
+    },
+    "specific_page": {
+      "other": "یک برگهٔ مشخص"
+    },
+    "home_page_id": {
+      "other": "شناسهٔ برگهٔ خانه"
+    },
+    "home_page_notice": {
+      "other": "در حالت «برگه»، شناسه باید به یک برگهٔ ذخیره‌شده در همین سایت اشاره کند."
+    },
+    "header": {
+      "other": "سربرگ"
+    },
+    "header_show_title": {
+      "other": "نمایش عنوان سایت در سربرگ"
+    },
+    "header_tagline": {
+      "other": "زیرعنوان سربرگ"
+    },
+    "footer": {
+      "other": "پابرگ"
+    },
+    "footer_text": {
+      "other": "متن پابرگ"
+    },
+    "theme": {
+      "other": "پوسته"
+    },
+    "color_mode": {
+      "other": "حالت رنگ"
+    },
+    "light": {
+      "other": "روشن"
+    },
+    "dark": {
+      "other": "تیره"
+    },
+    "save_appearance": {
+      "other": "ذخیرهٔ تنظیمات"
+    },
+    "appearance_publication_notice": {
+      "other": "ظاهر ذخیره‌شده تا زمان ساخت و فعال‌سازی یک نسل عمومی جدید، سایت عمومی را تغییر نمی‌دهد."
+    },
+    "unknown_save_notice": {
+      "other": "اگر پاسخ ذخیره از دست رفت، همان شناسهٔ عملیات را بررسی کنید؛ ذخیره را خودکار تکرار نکنید."
+    },
+    "sites": {
+      "other": "سایت‌ها"
+    },
+    "content": {
+      "other": "محتوا"
+    },
+    "appearance": {
+      "other": "ظاهر سایت"
+    },
+    "edit_content": {
+      "other": "ویرایش محتوا"
+    },
+    "media_id": {
+      "other": "شناسهٔ Media"
+    },
+    "bold": {
+      "other": "پررنگ"
+    },
+    "italic": {
+      "other": "مورب"
+    },
+    "paragraph": {
+      "other": "بند"
+    },
+    "heading_2": {
+      "other": "عنوان سطح ۲"
+    },
+    "heading_3": {
+      "other": "عنوان سطح ۳"
+    },
+    "public.published": {
+      "other": "انتشار"
+    },
+    "public.updated": {
+      "other": "به‌روزرسانی"
+    },
+    "public.latest_posts": {
+      "other": "آخرین نوشته‌ها"
+    },
+    "public.no_posts": {
+      "other": "هنوز نوشته‌ای منتشر نشده است."
+    },
+    "language.title": {
+      "other": "زبان رابط"
+    },
+    "language.help": {
+      "other": "این انتخاب فقط زبان رابط مدیریت را در همین مرورگر تغییر می‌دهد. زبان محتوای سایت و ترمینال مستقل است."
+    },
+    "language.label": {
+      "other": "زبان"
+    },
+    "language.select": {
+      "other": "اعمال زبان"
+    },
+    "outcome_unknown": {
+      "other": "نتیجه نامعلوم است. دوباره ارسال نکنید. عملیات {Operation} را بررسی کنید."
+    },
+    "operation_committed": {
+      "other": "عملیات {Operation} با نوع {Kind} برای {Resource} و نسخهٔ {Revision} ثبت شده است."
+    },
+    "appearance_operation_committed": {
+      "other": "عملیات {Operation} با نوع {Kind} و نسخهٔ {Revision} ثبت شده است."
+    },
+    "editor_drop_disabled": {
+      "other": "رها کردن فایل در ویرایشگر غیرفعال است. فایل را در کتابخانهٔ فایل‌ها بارگذاری کنید و شناسهٔ پایدار Media را اینجا درج کنید."
+    },
+    "editor_invalid_link": {
+      "other": "از نشانی HTTPS یا مسیر داخلی سایت استفاده کنید."
+    },
+    "editor_invalid_media": {
+      "other": "شناسهٔ معتبر Media را وارد کنید."
+    },
+    "saved_content_count": {
+      "other": "{Count} مورد ذخیره‌شده"
+    }
+  }
+}
