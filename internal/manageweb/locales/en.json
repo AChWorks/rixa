@@ -277,6 +277,15 @@
     },
     "state_installed_unconfirmed": {
       "other": "The installation is retained; completion is not confirmed. Inspect the technical diagnostic and available recovery actions."
+    },
+    "artifact_unsaved": {
+      "other": "This authenticated package is not in the saved draft. Save the private draft, then review and confirm the operation again."
+    },
+    "artifact_request_changed": {
+      "other": "Package request edits are not authenticated. Authenticate the intended package or discard these edits before saving."
+    },
+    "discard_artifact_request": {
+      "other": "Discard package request edits"
     }
   }
 }

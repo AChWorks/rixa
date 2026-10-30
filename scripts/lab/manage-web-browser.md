@@ -116,3 +116,24 @@ the useful repair path, mask the actual credentials and render markup as text.
 English technical detail stays LTR beneath a catalog-owned localized label.
 Install Resume/Remove require the native `InstallationEffects` seam; do not
 substitute the CLI convenience methods when testing an earlier source stack.
+
+## Staged-artifact confirmation regression
+
+For each of the exact fake profiles `artifact-install` and `artifact-update`,
+start a new preview with `RIXA_MANAGEWEB_PREVIEW_KIND` equal to that profile,
+and pass the same value as the driver's `mode`. The marker records the profile;
+the driver rejects a mismatch. Use a separate private screenshot directory for
+each attempt and preserve failed receipts.
+
+These profiles keep the same private fake facade and three-artifact-attempt
+bound. They stage fake upload A, exercise a failed request without replay, then
+drop fake fetch B's acknowledgement after its server commit. Exact observational
+Status recognizes B and unlocks Save without another fetch. The regression checks
+that request edits, failure/late Status, unsaved B, reload and Persian navigation
+cannot restore A's review/confirmation; Save plus a new review binds B. Explicit
+discard affects only unsubmitted request edits. It then makes one fake Apply and
+observes completion revocation. The displayed digest must fit narrow/wide layouts.
+
+These fixtures authenticate tiny bytes only through their deliberately fake
+verification seam. They do not prove real publisher authentication, networking,
+native installation/update/recovery or panel support.

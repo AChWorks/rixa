@@ -51,6 +51,13 @@ archive and provenance bundle with exact tag/source. No silent stable-to-
 development fallback occurs. Uploads have fixed private destinations; browser
 filenames and arbitrary URLs/commands are not accepted.
 
+An authenticated staged package is separate from the saved native draft. A changed
+selection remains visibly unsaved and blocks Review/Apply until Save binds that
+exact package, including after reload or language navigation. Editing package
+request fields clears prior confirmation; authenticate the request or explicitly
+discard only those request edits before saving. Discarding request edits neither
+undoes a staged selection nor restores an old Apply confirmation.
+
 Installation asks for origins/listener, separate existing loopback-password
 PostgreSQL 18 connections and initial administrator inputs. Saved secrets are
 not returned in HTML/JSON. Leave an already saved secret empty to retain it.
@@ -65,6 +72,9 @@ An uncertain response blocks further mutation. Inspect the SAME operation.
 A missing result is not proof that nothing happened. After successful inspection, deliberate retry is available only while the native
 backend still offers that action. It reuses the exact retained submitted payload,
 review token and operation identity. Nothing automatically replays a mutation.
+A lost artifact acknowledgement can be positively matched by its bounded staging
+attempt identity during inspection, without repeating the download/upload. This
+correlation grants no native authority and does not alter the saved draft.
 Read-only inspection failure is not a new unknown mutation. Abandoning the
 tab may lose unsaved input. No draft, permit or CSRF token enters WebStorage.
 

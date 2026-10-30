@@ -16,6 +16,7 @@ import (
 
 var releaseTag = regexp.MustCompile("^v[0-9]+\\.[0-9]+\\.[0-9]+([.-][0-9A-Za-z][0-9A-Za-z.-]*)?$")
 var sourceCommit = regexp.MustCompile("^[0-9a-f]{40}$")
+var stagingAttempt = regexp.MustCompile("^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
 
 func (c *Console) artifacts(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -35,7 +36,20 @@ func (c *Console) artifacts(w http.ResponseWriter, r *http.Request) {
 		c.fail(w, r, 409, "action_unavailable")
 		return
 	}
+	// Optional for direct clients; the browser supplies a fresh bounded ID.
+	// Status echoes only a committed verified selection's ID, allowing exact
+	// lost-ack observation without replaying an upload or download.
+	attempt := r.Header.Get("X-Rixa-Artifact-Attempt")
+	if len(r.Header.Values("X-Rixa-Artifact-Attempt")) > 1 || (attempt != "" && !stagingAttempt.MatchString(attempt)) {
+		c.fail(w, r, 400, "invalid_request")
+		return
+	}
 	c.mutex.Lock()
+	if attempt != "" && c.artifactIDs[attempt] {
+		c.mutex.Unlock()
+		c.fail(w, r, 409, "action_unavailable")
+		return
+	}
 	if c.artifactAttempts >= 3 {
 		c.mutex.Unlock()
 		c.fail(w, r, 429, "artifact_limit")
@@ -85,8 +99,16 @@ func (c *Console) artifacts(w http.ResponseWriter, r *http.Request) {
 	}
 	c.mutex.Lock()
 	c.artifact = a
+	c.artifactAttempt = attempt
+	if attempt != "" {
+		if c.artifactIDs == nil {
+			c.artifactIDs = make(map[string]bool, 3)
+		}
+		c.artifactIDs[attempt] = true
+	}
 	c.mutex.Unlock()
-	jsonResponse(w, 200, map[string]any{"artifact": publicArtifact{a.Release, a.Source, a.SHA256}, "message": text(c.localizer(r), "artifact_ready")})
+	_, _, unsaved, _ := c.artifactState(r.Context())
+	jsonResponse(w, 200, map[string]any{"artifact": publicArtifact{a.Release, a.Source, a.SHA256}, "artifact_attempt": attempt, "artifact_unsaved": unsaved, "message": text(c.localizer(r), "artifact_ready")})
 }
 func (c *Console) upload(w http.ResponseWriter, r *http.Request, dir string) (artifact, error) {
 	fail := errors.New("unsupported release upload")

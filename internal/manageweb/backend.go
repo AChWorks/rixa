@@ -45,6 +45,8 @@ type response struct {
 	Actions           []string          `json:"actions"`
 	Problems          []publicProblem   `json:"problems,omitempty"`
 	Artifact          publicArtifact    `json:"artifact"`
+	ArtifactUnsaved   bool              `json:"artifact_unsaved"`
+	ArtifactAttempt   string            `json:"artifact_attempt,omitempty"`
 	AccessClosed      bool              `json:"access_closed"`
 }
 
@@ -90,8 +92,14 @@ func (c *Console) present(request *http.Request, l *localize.Localizer, r server
 		}
 		v.Problems = append(v.Problems, publicProblem{Field: p.Field, Code: p.Code, Message: text(l, "correct_field"), Detail: detail})
 	}
+	a, attempt, unsaved, _ := c.artifactState(request.Context())
+	v.Artifact = publicArtifact{a.Release, a.Source, a.SHA256}
+	v.ArtifactAttempt = attempt
+	v.ArtifactUnsaved = unsaved
+	if unsaved {
+		v.Actions = slices.DeleteFunc(v.Actions, func(action string) bool { return action == "review" || action == "apply" })
+	}
 	c.mutex.Lock()
-	v.Artifact = publicArtifact{c.artifact.Release, c.artifact.Source, c.artifact.SHA256}
 	terminal := nativeErr == nil && c.sameNativeOperation(r) && (r.State == "removed" || r.State == "rejected" || (complete && (c.allowed["apply"] || c.allowed["resume"])))
 	if terminal && action != "page" {
 		c.closed = true
@@ -99,7 +107,7 @@ func (c *Console) present(request *http.Request, l *localize.Localizer, r server
 	}
 	v.AccessClosed = c.closed
 	c.mutex.Unlock()
-	if action != "review" || !c.sameNativeOperation(r) || v.AccessClosed {
+	if action != "review" || !c.sameNativeOperation(r) || v.AccessClosed || unsaved {
 		v.ReviewToken = ""
 	}
 	return v
@@ -139,7 +147,43 @@ func (c *Console) gate(ctx context.Context, action string) error {
 	if action != "status" && !slices.Contains(r.Actions, action) {
 		return serverinstall.ErrState
 	}
+	if action == "review" || action == "apply" {
+		_, _, unsaved, err := c.artifactState(ctx)
+		if err != nil {
+			return err
+		}
+		if unsaved {
+			return serverinstall.ErrState
+		}
+	}
 	return nil
+}
+
+// Staging never edits a native draft. Compare exact private references as well
+// as public identity so even a newly staged copy of the same release needs Save.
+// The paths stay server-side; a failed read cannot make an unsaved selection ready.
+func (c *Console) artifactState(ctx context.Context) (artifact, string, bool, error) {
+	c.mutex.Lock()
+	a, attempt := c.artifact, c.artifactAttempt
+	c.mutex.Unlock()
+	if a.Archive == "" {
+		return a, attempt, false, nil
+	}
+	var archive, bundle, release, source string
+	var err error
+	if c.options.Scope.Kind == "update" {
+		var d serverinstall.UpdateDraft
+		d, err = c.updater.LoadUpdateDraft(ctx, c.options.Scope.Operation)
+		archive, bundle, release, source = d.ArchivePath, d.BundlePath, d.Release, d.SourceCommit
+	} else {
+		var d serverinstall.Draft
+		d, err = c.backend.LoadDraft(ctx, c.options.Scope.Operation)
+		archive, bundle, release, source = d.ArchivePath, d.BundlePath, d.Release, d.SourceCommit
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		return a, attempt, true, nil
+	}
+	return a, attempt, err != nil || archive != a.Archive || bundle != a.Bundle || release != a.Release || source != a.Source, err
 }
 
 type configureInput struct {

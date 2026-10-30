@@ -8,12 +8,14 @@ async function rixaManageWebBrowser({context,page,fixture,checkpoint,control,mod
  check(fixture?.schema==="rixa.manageweb-preview.v1","unexpected fake preview schema");
  const origin=new URL(fixture.origin);
  check(origin.protocol==="https:"&&origin.hostname==="127.0.0.1"&&!origin.username&&!origin.password&&!origin.search&&origin.pathname==="/","only loopback TLS fake preview allowed");
- check(fixture.operation===(mode==="cleanup"?"fixture-update":"fixture-install")&&typeof fixture.permit==="string"&&fixture.permit.length===43,"unexpected fake preview identity");
+ const artifactMode=mode==="artifact-install"||mode==="artifact-update";
+ if(artifactMode)check(fixture.profile===mode,"artifact proof requires its exact fake profile");
+ check(fixture.operation===((mode==="cleanup"||mode==="artifact-update")?"fixture-update":"fixture-install")&&typeof fixture.permit==="string"&&fixture.permit.length===43,"unexpected fake preview identity");
  check(typeof checkpoint==="function"&&typeof control==="function","private checkpoint/control callbacks required");
- check(["journey","expiry","cleanup"].includes(mode),"unsupported bounded browser mode");
- const checks=[],errors=[],counts={configure:0,apply:0,review:0,resume:0,status:0};
+ check(["journey","expiry","cleanup","artifact-install","artifact-update"].includes(mode),"unsupported bounded browser mode");
+ const checks=[],errors=[],counts={configure:0,apply:0,review:0,resume:0,status:0,artifact:0};
  const configureBodies=[];
- let reviewedToken="",applyUsesReview=false;
+ let reviewedToken="",applyUsesReview=false,artifactResponseLost=false;
  page.setDefaultTimeout(10000);
  page.on("pageerror",error=>errors.push(error.name));
  await context.route("**/*",async route=>{
@@ -21,6 +23,15 @@ async function rixaManageWebBrowser({context,page,fixture,checkpoint,control,mod
   check(url.origin===origin.origin&&!url.search,"unexpected browser destination");
   const action=url.pathname.split("/").pop();
   if(url.pathname.startsWith("/admin/operation/")&&Object.hasOwn(counts,action))counts[action]++;
+  if(url.pathname.startsWith("/artifact/")&&request.method()==="POST"){
+   counts.artifact++;
+   if(artifactMode&&action==="fetch"&&JSON.parse(request.postData()).release==="v1.2.4"){
+    check(!artifactResponseLost,"committed artifact was replayed");
+    const response=await route.fetch(),result=await response.json();
+    check(response.status()===200&&result.artifact_attempt===request.headers()["x-rixa-artifact-attempt"]&&result.artifact_unsaved===true,"fake staging did not commit with exact attempt");
+    artifactResponseLost=true;await route.abort("failed");return;
+   }
+  }
   if(request.method()==="POST"&&action==="review") {
    const response=await route.fetch();
    const body=await response.json();
@@ -40,7 +51,7 @@ async function rixaManageWebBrowser({context,page,fixture,checkpoint,control,mod
    applyUsesReview=JSON.parse(request.postData()).review_token===reviewedToken&&reviewedToken.length===64;
    const response=await route.fetch();
    check(response.status()===200,"fake apply did not commit before response loss");
-   await route.abort("failed"); return;
+   if(artifactMode)await route.fulfill({response});else await route.abort("failed"); return;
   }
   await route.continue();
  });
@@ -104,6 +115,114 @@ async function rixaManageWebBrowser({context,page,fixture,checkpoint,control,mod
   check(denied===401,"browser mutation accepted an invalid CSRF token");
   await noStorage();
  });
+
+ if(artifactMode) {
+  const apply=()=>page.locator("[data-action-form=apply]");
+  async function inspectReady(){
+   await page.locator("[data-inspect]").click();
+   await page.waitForFunction(()=>!document.querySelector("[data-inspect]").disabled);
+  }
+  async function review(){
+   await page.locator("[data-action=review]").click();
+   await page.locator("[data-review]").waitFor({state:"visible"});
+   check(!(await apply().locator("[name=confirm_apply]").isChecked()),"review kept prior confirmation");
+  }
+  await step("artifact-a-save-and-review",async()=>{
+   await page.locator("details:has(> summary):has(> form[data-upload]) > summary").click();
+   const upload=page.locator("[data-upload]");
+   await upload.locator("[name=release]").fill("v1.2.3");
+   await upload.locator("[name=source_commit]").fill("a".repeat(40));
+   for(const name of ["archive","bundle"])await upload.locator("[name="+name+"]").setInputFiles({name:"fake-"+name,mimeType:"application/octet-stream",buffer:Buffer.from("fake fixture only")});
+   await upload.locator("button").click();
+   await page.waitForFunction(()=>document.querySelector("[data-artifact]").textContent.includes("v1.2.3")&&!document.querySelector("[data-inspect]").disabled);
+   check(await page.locator("[data-artifact-unsaved]").isVisible(),"authenticated unsaved selection hidden");
+   if(mode==="artifact-install"){
+    for(const [name,value]of Object.entries({...secrets,control_origin:"https://control.example.invalid:9443",site_origin:"https://site.example.invalid:9443",listen:"0.0.0.0:9443",control_login:"control-admin",site_login:"site-admin"}))await form().locator("[name="+name+"]").fill(value);
+   }
+   await form().locator("button").click();
+   await page.waitForFunction(()=>document.querySelector("[data-code]").textContent.includes("draft")&&!document.querySelector("[data-inspect]").disabled);
+   await review();
+   check((await page.locator("[data-review]").textContent()).includes("v1.2.3"),"initial saved artifact review mismatch");
+   await apply().locator("[name=confirm_apply]").check();
+  });
+  await step("failed-package-edit-status-cannot-restore-confirmation",async()=>{
+   const fetch=page.locator("[data-fetch]");
+   await fetch.locator("[name=release]").fill("v0.0.0-invalid");
+   check(!(await apply().locator("[name=confirm_apply]").isChecked())&&await apply().locator("button").isDisabled(),"package edit retained Apply");
+   check(await form().locator("button").isDisabled(),"unverified request edits can be saved");
+   await fetch.locator("button").click();
+   await page.waitForFunction(()=>!document.querySelector("[data-inspect]").disabled&&document.querySelector("#status").getAttribute("role")==="alert");
+   check(await page.locator("[data-pending]").isVisible(),"lost failed artifact acknowledgement not preserved");
+   // A known server failure is still uncertain transport: inspection must not
+   // silently stage a different package or unlock the old confirmation.
+   await inspectReady();
+   check(!(await apply().locator("[name=confirm_apply]").isChecked())&&await apply().locator("button").isDisabled(),"Status restored old Apply after failed selection");
+   check(counts.artifact===2,"failed selection replayed");
+  });
+  // A 503 verification response deliberately has an uncertain effect category.
+  // The same request is not repeated to clear that state. Reload follows an
+  // explicit leave decision and observes the still authoritative saved A.
+  await step("failed-selection-explicit-navigation-keeps-saved-a",async()=>{
+   const accept=async dialog=>dialog.accept();page.on("dialog",accept);
+   try{await page.reload({waitUntil:"domcontentloaded"});}finally{page.off("dialog",accept);}
+   await page.waitForFunction(()=>!document.querySelector("[data-inspect]").disabled);
+   check((await page.locator("[data-artifact]").textContent()).includes("v1.2.3"),"failed selection replaced authenticated A");
+   check(await page.locator("[data-pending]").isHidden(),"reload invented a pending mutation");
+   await review();await apply().locator("[name=confirm_apply]").check();
+  });
+  await step("artifact-b-lost-ack-inspect-no-replay",async()=>{
+   await page.locator("[data-fetch] [name=release]").fill("v1.2.4");
+   await page.locator("[data-fetch] button").click();
+   await page.locator("[data-pending]").waitFor({state:"visible"});
+   check(await form().locator("button").isDisabled(),"unknown staging unlocked Save before observation");
+   await control("inspection-unavailable");await inspectReady();
+   check(await page.locator("[data-pending]").isVisible()&&await page.locator("[data-retry]").isHidden(),"failed inspection cleared unknown staging");
+   await control("restore-inspection");await inspectReady();
+   await page.locator("[data-pending]").waitFor({state:"hidden"});
+   check(counts.artifact===3&&artifactResponseLost,"committed artifact was fetched again");
+   check((await page.locator("[data-artifact]").textContent()).includes("v1.2.4")&&await page.locator("[data-artifact-unsaved]").isVisible(),"inspected B not identified as unsaved");
+   check(await page.locator("[data-action=review]").isHidden()&&await apply().isHidden(),"unsaved B retains A execution actions");
+   check(!(await apply().locator("[name=confirm_apply]").isChecked()),"inspected B retained A confirmation");
+  });
+  await step("unsaved-b-survives-reload-and-locale-navigation",async()=>{
+   const accept=async dialog=>dialog.accept();page.on("dialog",accept);
+   try{
+    await page.reload({waitUntil:"domcontentloaded"});
+    await page.waitForFunction(()=>!document.querySelector("[data-inspect]").disabled);
+    check(await page.locator("[data-artifact-unsaved]").isVisible()&&await apply().isHidden(),"reload hides unsaved B");
+    await language("fa","rtl");
+   }finally{page.off("dialog",accept);}
+   check((await page.locator("[data-artifact]").textContent()).includes("v1.2.4")&&await page.locator("[data-artifact-unsaved]").isVisible()&&await apply().isHidden(),"locale navigation hides unsaved B");
+   await layout("artifact-unsaved-"+mode);
+   await noStorage();
+  });
+  await step("save-b-fresh-review-and-discard-only-request-edits",async()=>{
+   await form().locator("button").click();
+   await page.waitForFunction(()=>!document.querySelector("[data-inspect]").disabled&&document.querySelector("[data-artifact-unsaved]").hidden);
+   await review();
+   check((await page.locator("[data-review]").textContent()).includes("v1.2.4")&&(await page.locator("[data-review]").textContent()).includes("c".repeat(40)),"fresh review did not bind saved B");
+   await apply().locator("[name=confirm_apply]").check();
+   await page.locator("details:has(> summary):has(> form[data-upload]) > summary").click();
+   await page.locator("[data-upload] [name=release]").fill("v1.2.5");
+   check(!(await apply().locator("[name=confirm_apply]").isChecked())&&await form().locator("button").isDisabled(),"upload edits retained confirmation or Save");
+   await inspectReady();
+   check(await apply().locator("button").isDisabled(),"late Status restored old confirmation");
+   await page.locator("[data-reset-artifact-request]").click();
+   check(await page.locator("[data-artifact-unsaved]").isHidden()&&await apply().locator("button").isDisabled(),"discard request restored prior confirmation");
+   await review();
+   await screenshot("artifact-reviewed-"+mode);
+  });
+  await step("exact-b-apply-and-completion",async()=>{
+   await apply().locator("[name=confirm_apply]").check();
+   await apply().locator("button").click();
+   await page.waitForFunction(()=>document.querySelector("[data-code]").textContent.includes("applying")&&!document.querySelector("[data-inspect]").disabled);
+   check(counts.apply===1&&applyUsesReview&&counts.artifact===3,"Apply or staging was replayed");
+   await control("installed");await inspectReady();
+   check(await sessionStatus()===401,"positive completion did not revoke access");
+   await noStorage();
+  });
+  return finish();
+ }
  if(mode==="cleanup") {
   await step("retained-update-cleanup-is-not-completion",async()=>{
    check((await page.locator("[data-code]").textContent()).includes("completion-cleanup-required"),"retained update cleanup state absent");

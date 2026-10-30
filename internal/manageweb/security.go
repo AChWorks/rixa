@@ -44,6 +44,8 @@ type Console struct {
 	slots                            chan struct{}
 	artifact                         artifact
 	artifactAttempts                 int
+	artifactAttempt                  string
+	artifactIDs                      map[string]bool
 }
 
 func (c *Console) liveLocked() bool { return !c.closed && c.deps.now().Before(c.expires) }

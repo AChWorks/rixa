@@ -22,11 +22,12 @@
   const result=await response.json();if(typeof result.csrf!=="string")throw {status:0,unknown:false};
   return result.csrf;
  }
- async function request(path,body,readOnly=false,login=false){
+ async function request(path,body,readOnly=false,login=false,artifactAttempt=""){
   const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),path.startsWith("/artifact/")?180000:15000);
   let sent=false;
   try{
    const headers={"X-Identity-Request":"1"};
+   if(artifactAttempt)headers["X-Rixa-Artifact-Attempt"]=artifactAttempt;
    if(!readOnly&&!login)headers["X-CSRF-Token"]=await csrf();
    if(typeof body==="string")headers["Content-Type"]="application/json";
    sent=!readOnly;
@@ -51,6 +52,22 @@
  }
  if(!root)return;
  const configure=root.querySelector("[data-configure]"),pendingBox=root.querySelector("[data-pending]");
+ let configurationDirty=false,artifactRequestDirty=false,artifactUnsaved=false;
+ const artifactForms=()=>root.querySelectorAll("[data-fetch],[data-upload]");
+ function refreshDirty(){
+  dirty=configurationDirty||artifactRequestDirty||artifactUnsaved;
+  const note=root.querySelector("[data-artifact-unsaved]");
+  note.hidden=!artifactRequestDirty&&!artifactUnsaved;
+  const message=t(artifactRequestDirty?"artifact_request_changed":"artifact_unsaved");
+  if(note.textContent!==message)note.textContent=message;
+ }
+ function staged(result){
+  if(!result.artifact||typeof result.artifact_attempt!=="string")throw {unknown:true};
+  root.querySelector("[data-artifact]").textContent=[result.artifact.release,result.artifact.source_commit,result.artifact.sha256].filter(Boolean).join(" · ");
+  artifactRequestDirty=false;artifactUnsaved=result.artifact_unsaved===true;
+  artifactForms().forEach(form=>form.reset());refreshDirty();clearReview();
+ }
+
  function clearReview(){
   reviewToken="";root.querySelector('[name="confirm_apply"]').checked=false;
   root.querySelector("[data-review]").hidden=true;
@@ -60,6 +77,8 @@
   root.querySelector("[data-config]").hidden=!actions.includes("configure");
   root.querySelector("[data-remove]").hidden=!actions.includes("remove");
   root.querySelectorAll("form input,form select,form button").forEach(control=>{control.disabled=held;});
+  configure.querySelector("button[type=submit]").disabled=held||artifactRequestDirty;
+  root.querySelector("[data-reset-artifact-request]").disabled=held||!artifactRequestDirty;
   root.querySelectorAll("[data-action]").forEach(button=>{button.hidden=!actions.includes(button.dataset.action);button.disabled=held||dirty;});
   root.querySelector('[data-action-form="apply"]').hidden=!actions.includes("apply");
   root.querySelector('[data-action-form="apply"] button').disabled=held||dirty||!reviewToken;
@@ -88,12 +107,13 @@
    const input=configure.elements.namedItem(problem.field);if(input){input.setAttribute("aria-invalid","true");input.setAttribute("aria-describedby",item.id);}
   }
   if(result.artifact)root.querySelector("[data-artifact]").textContent=[result.artifact.release,result.artifact.source_commit,result.artifact.sha256].filter(Boolean).join(" · ");
-  if(result.state!=="ready")clearReview();
-  if(result.review){const summary=root.querySelector("[data-review]");summary.replaceChildren();summary.hidden=false;for(const [name,value] of Object.entries(result.review)){const label=document.createElement("dt"),detail=document.createElement("dd"),id=document.createElement("bdi");label.textContent=t(name);id.dir="ltr";id.textContent=value;detail.append(id);summary.append(label,detail);}}
+  artifactUnsaved=result.artifact_unsaved===true;refreshDirty();
+  if(result.state!=="ready"||dirty)clearReview();
+  if(result.review&&!dirty){const summary=root.querySelector("[data-review]");summary.replaceChildren();summary.hidden=false;for(const [name,value] of Object.entries(result.review)){const label=document.createElement("dt"),detail=document.createElement("dd"),id=document.createElement("bdi");label.textContent=t(name);id.dir="ltr";id.textContent=value;detail.append(id);summary.append(label,detail);}}
   if(result.state==="applying"&&!pending&&!result.access_closed)pollTimer=setTimeout(()=>inspect(false),2000);
   const admin=root.querySelector("[data-admin-url]");admin.hidden=true;
   if(result.admin_url){try{const url=new URL(result.admin_url);if(url.protocol==="https:"&&!url.username&&!url.password){admin.href=url.href;admin.hidden=false;}}catch(_){}}
-  if(result.access_closed){actions=[];pending=null;dirty=false;clearReview();announce("access_complete");}
+  if(result.access_closed){actions=[];pending=null;configurationDirty=false;artifactRequestDirty=false;artifactUnsaved=false;refreshDirty();clearReview();announce("access_complete");}
   lock();
  }
  async function inspect(explicit=true){
@@ -103,6 +123,9 @@
    const result=await request("/admin/operation/status",undefined,true);
    if(!matches(result))throw {};
    inspectedPending=!!pending;
+   if(pending?.action==="artifact"&&result.artifact_attempt===pending.artifactAttempt){
+    staged(result);pending=null;
+   }
    if(pending&&(["applying","reconciliation-required","installed","removed","rejected"].includes(result.state))){pending=null;}
    if(pending?.action==="review"&&result.state==="ready"){pending=null;clearReview();}
    display(result);
@@ -116,20 +139,22 @@
  async function send(attempt){
   if(busy)return;
   if(attempt.action==="review")clearReview();
+  if(attempt.action==="artifact"){artifactRequestDirty=true;refreshDirty();clearReview();}
   busy=true;lock();announce("working");
   try{
-   const result=await request(attempt.path,attempt.body);
+   const result=await request(attempt.path,attempt.body,false,false,attempt.artifactAttempt);
    if(attempt.action!=="artifact"&&!matches(result))throw {unknown:true};
    pending=null;
    if(attempt.action==="artifact"){
-    root.querySelector("[data-artifact]").textContent=[result.artifact.release,result.artifact.source_commit,result.artifact.sha256].join(" · ");announce("artifact_ready");
+    if(result.artifact_attempt!==attempt.artifactAttempt)throw {unknown:true};
+    staged(result);announce("artifact_ready");
    }else{
     display(result);
     if(attempt.action==="configure"){
-     dirty=false;clearReview();
+     configurationDirty=false;refreshDirty();clearReview();
      configure.querySelectorAll('input[type="password"]').forEach(input=>{input.value="";input.required=false;input.placeholder=t("saved_secret");});
     }
-    if(attempt.action==="review"&&!result.access_closed&&typeof result.review_token==="string")reviewToken=result.review_token;
+    if(attempt.action==="review"&&!result.access_closed&&!dirty&&typeof result.review_token==="string")reviewToken=result.review_token;
     announce(result.access_closed?"access_complete":"updated");
    }
   }catch(error){
@@ -138,9 +163,11 @@
    else announce(error.status===401?"access_expired":error.status===409?"action_unavailable":"correct_input",true);
   }finally{busy=false;lock();}
  }
- configure.addEventListener("input",()=>{dirty=true;clearReview();lock();});
+ configure.addEventListener("input",()=>{configurationDirty=true;refreshDirty();clearReview();lock();});
+ artifactForms().forEach(form=>form.addEventListener("input",()=>{artifactRequestDirty=true;refreshDirty();clearReview();lock();}));
+ root.querySelector("[data-reset-artifact-request]").addEventListener("click",()=>{if(busy||pending)return;artifactForms().forEach(form=>form.reset());artifactRequestDirty=false;refreshDirty();clearReview();lock();});
  configure.addEventListener("submit",event=>{
-  event.preventDefault();if(busy||pending||!configure.reportValidity())return;
+  event.preventDefault();if(busy||pending||artifactRequestDirty||!configure.reportValidity())return;
   const value={};for(const control of configure.elements){if(control.name)value[control.name]=control.value;}
   clearReview();send(Object.freeze({action:"configure",path:configure.action,body:JSON.stringify(value)}));
  });
@@ -153,13 +180,13 @@
  root.querySelector("[data-fetch]").addEventListener("submit",event=>{
   event.preventDefault();const form=event.target;if(busy||pending||!form.reportValidity())return;
   const release=form.elements.release.value;const value=release?{release}:{channel:form.elements.channel.value};
-  send(Object.freeze({action:"artifact",path:form.action,body:JSON.stringify(value)}));
+  send(Object.freeze({action:"artifact",path:form.action,body:JSON.stringify(value),artifactAttempt:crypto.randomUUID()}));
  });
  root.querySelector("[data-upload]").addEventListener("submit",event=>{
   event.preventDefault();const form=event.target;if(busy||pending||!form.reportValidity())return;
   const body=new FormData();for(const name of ["release","source_commit"])body.append(name,form.elements[name].value);
   for(const name of ["archive","bundle"])body.append(name,form.elements[name].files[0]);
-  send(Object.freeze({action:"artifact",path:form.action,body}));
+  send(Object.freeze({action:"artifact",path:form.action,body,artifactAttempt:crypto.randomUUID()}));
  });
  root.querySelector("[data-inspect]").addEventListener("click",()=>inspect(true));
  root.querySelector("[data-retry]").addEventListener("click",()=>{if(pending&&!busy)send(pending);});

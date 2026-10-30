@@ -9,6 +9,6 @@ body{line-height:1.65}.access{max-inline-size:34rem;margin:5vh auto;padding:1.5r
 [data-console] button,.access button{font:inherit;padding:.55rem 1rem;margin-block:.5rem;cursor:pointer;max-inline-size:100%;white-space:normal}
 button:disabled{cursor:default;opacity:.65}button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible,summary:focus-visible{outline:3px solid var(--accent);outline-offset:3px}
 .progress{border-block-start:1px solid var(--line);padding-block-start:1rem}[data-pending]{border:2px solid var(--danger);padding:1rem}[data-problems]{padding-inline-start:1.5rem}.danger{color:var(--danger)}
-details{margin-block:1rem}summary{cursor:pointer;font-weight:600}bdi{overflow-wrap:anywhere}#status{overflow-wrap:anywhere}
+details{margin-block:1rem}summary{cursor:pointer;font-weight:600}bdi,[data-artifact]{overflow-wrap:anywhere}#status{overflow-wrap:anywhere}
 @media(prefers-color-scheme:dark){:root{--canvas:#1c2432;--surface:#111923;--ink:#edf2fa;--muted:#b4c1d2;--line:#45566d;--accent:#8bb4ff;--danger:#ffb0a5}}
 @media(max-width:30rem){.access{margin:0;border:0;border-radius:0}.scope{grid-template-columns:minmax(0,1fr)}.scope dd{margin-block-end:.5rem}[data-console] fieldset{padding:.7rem}}

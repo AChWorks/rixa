@@ -135,6 +135,8 @@ func (f *fakeNative) SaveUpdateDraft(_ context.Context, d serverinstall.UpdateDr
 	defer f.mutex.Unlock()
 	f.calls["configure"]++
 	f.updated = d
+	f.result.OperationKind = "update"
+	f.result.InstallationOperation = d.InstallationOperation
 	f.result.State = "draft"
 	f.result.Actions = []string{"configure", "review", "status"}
 	return f.result, nil
@@ -675,7 +677,7 @@ func TestConsoleBrowserPreview(t *testing.T) {
 		}
 	}
 	previewKind := os.Getenv("RIXA_MANAGEWEB_PREVIEW_KIND")
-	if previewKind != "" && previewKind != "update-cleanup" {
+	if previewKind != "" && previewKind != "update-cleanup" && previewKind != "artifact-install" && previewKind != "artifact-update" {
 		t.Fatal("unknown fake preview kind")
 	}
 	var h *harness
@@ -706,8 +708,19 @@ func TestConsoleBrowserPreview(t *testing.T) {
 			t.Error("private teardown receipt")
 		}
 	})
-	h = fixture(t, func(o *Options, _ *dependencies, f *fakeNative) {
+	h = fixture(t, func(o *Options, deps *dependencies, f *fakeNative) {
 		f.diagnosticProbe = true
+		if previewKind == "artifact-install" || previewKind == "artifact-update" {
+			fetch := fakeStagedFetch(t)
+			deps.fetch = func(ctx context.Context, request releaseartifact.FetchRequest) (releaseartifact.FetchResult, error) {
+				h.fetchCalls++
+				return fetch(ctx, request)
+			}
+		}
+		if previewKind == "artifact-update" {
+			o.Scope = Scope{Kind: "update", Operation: "fixture-update", Installation: "fixture-install", Actions: []string{"configure", "review", "apply", "status"}}
+			f.result = serverinstall.Result{OperationKind: "update", OperationID: "fixture-update", InstallationOperation: "fixture-install", State: "not-installed", Code: "not-installed", Actions: []string{"configure", "status"}}
+		}
 		if previewKind == "update-cleanup" {
 			o.Scope = Scope{Kind: "update", Operation: "fixture-update", Installation: "fixture-install", Actions: []string{"status", "resume"}}
 			f.draft = serverinstall.Draft{OperationID: "fixture-install", Release: "v1.2.3", ControlDSN: "postgres://control:cleanup-browser-secret@127.0.0.1:5432/control?sslmode=disable", ControlPassword: "cleanup-admin-secret"}
@@ -726,7 +739,7 @@ func TestConsoleBrowserPreview(t *testing.T) {
 		o.CatalogRoot = root
 	})
 	b, e := json.Marshal(map[string]string{"schema": "rixa.manageweb-preview.v1",
-		"origin": h.console.origin, "permit": h.permit, "operation": h.console.options.Scope.Operation})
+		"origin": h.console.origin, "permit": h.permit, "operation": h.console.options.Scope.Operation, "profile": previewKind})
 	if e != nil {
 		t.Fatal("preview identity")
 	}
