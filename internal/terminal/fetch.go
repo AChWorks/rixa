@@ -20,7 +20,16 @@ import (
 type FetchedArtifact struct{ ArchivePath, BundlePath, ReleaseTag, SourceCommit string }
 
 func fetchRelease(ctx context.Context, s *session, fetch func(context.Context, string, string, string) (FetchedArtifact, error), d *serverinstall.Draft) (bool, error) {
-	values := []string{"stable", filepath.Join("/tmp", "rixa-"+d.OperationID+"-download")}
+	return fetchReleaseSelection(ctx, s, fetch, d, "", "")
+}
+func fetchReleaseSelection(ctx context.Context, s *session, fetch func(context.Context, string, string, string) (FetchedArtifact, error), d *serverinstall.Draft, selection, output string) (bool, error) {
+	if selection == "" {
+		selection = "stable"
+	}
+	if output == "" {
+		output = filepath.Join("/tmp", "rixa-"+d.OperationID+"-download")
+	}
+	values := []string{selection, output}
 	labels := []string{"Release selection", "New private download folder"}
 	hints := []string{"stable, development, or an exact tag. Stable never falls back to a prerelease.", "A new absolute folder. Existing folders are never adopted or overwritten."}
 	index := 0

@@ -27,10 +27,12 @@ func main() {
 
 func run(args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: rixa <artifact|manage|setup|migrate|bootstrap-admin|capture-site|restore-site|check|run|version>")
+		return errors.New("usage: rixa <artifact|bootstrap|manage|setup|migrate|bootstrap-admin|capture-site|restore-site|check|run|version>")
 	}
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	switch args[0] {
+	case "bootstrap":
+		return runBootstrap(context.Background(), args[1:], os.Stdin, os.Stdout)
 	case "manage":
 		return runManage(context.Background(), args[1:], os.Stdin, os.Stdout)
 	case "artifact":

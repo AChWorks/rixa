@@ -55,6 +55,22 @@ func runManage(parent context.Context, args []string, input *os.File, output *os
 		}
 		return err
 	}
+	if len(args) > 0 && args[0] == "internal-postgres-apply" {
+		if len(args) != 2 {
+			return errors.New("internal-postgres-apply requires one operation ID")
+		}
+		r, e := serverinstall.New().RunPostgresOperation(ctx, args[1])
+		if encoded := json.NewEncoder(output).Encode(r); encoded != nil {
+			return encoded
+		}
+		return e
+	}
+	if len(args) > 0 && args[0] == "internal-postgres-package-guard" {
+		if len(args) != 3 || (args[2] != "common" && args[2] != "server") {
+			return errors.New("internal-postgres-package-guard requires one operation ID and common or server phase")
+		}
+		return serverinstall.New().RunPostgresPackageGuard(ctx, args[1], args[2], input)
+	}
 	if os.Geteuid() != 0 {
 		return serverinstall.ErrAuthority
 	}
@@ -66,6 +82,13 @@ func manageWithFacade(ctx context.Context, args []string, input *os.File, output
 	if len(args) > 0 && len(args[0]) > 0 && args[0][0] != '-' {
 		action = args[0]
 		args = args[1:]
+	}
+	if action == "prerequisites" {
+		pg, ok := backend.(serverinstall.PostgresFacade)
+		if !ok {
+			return errors.New("this manager does not support PostgreSQL prerequisite provisioning; supply compatible databases or use a compatible manager")
+		}
+		return managePostgresWithFacade(ctx, args, input, output, pg)
 	}
 	if action == "update" {
 		updater, ok := backend.(serverinstall.UpdateFacade)
@@ -248,7 +271,8 @@ const manageHelp = "Rixa native operator management\n\n" +
 	"  rixa manage apply --operation <id> --review-token <from-review>\n" +
 	"  rixa manage remove --operation <id> --confirm-remove\n" +
 	"  rixa manage update <menu|draft|review|apply|resume|status|remove> [flags]\n" +
-	"  rixa manage update --help\n\n" +
+	"  rixa manage update --help\n" +
+	"  rixa manage prerequisites --help\n\n" +
 	"Direct commands emit safe JSON and never prompt. --non-interactive rejects the menu.\n" +
 	"Draft/prefill JSON contains credentials: same-operator private regular files only.\n" +
 	"Apply queues a fixed persistent operation; inspect status before claiming completion.\n" +

@@ -37,7 +37,7 @@ func Run(ctx context.Context, backend serverinstall.Facade, options Options) err
 	return runManagement(ctx, backend, options, nil)
 }
 
-func runManagement(ctx context.Context, backend serverinstall.Facade, options Options, update *updateAdapter) (err error) {
+func runManagement(ctx context.Context, backend serverinstall.Facade, options Options, profile managementProfile) (err error) {
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	defer stop()
 
@@ -56,13 +56,13 @@ func runManagement(ctx context.Context, backend serverinstall.Facade, options Op
 			return err
 		}
 		prefix := "install-"
-		if update != nil {
-			prefix = "update-"
+		if profile != nil {
+			prefix = profile.kind() + "-"
 		}
 		id = prefix + hex.EncodeToString(b)
 	}
 	draft := serverinstall.Draft{OperationID: id, Listen: "0.0.0.0:8443", Language: "en", ControlLogin: "admin", SiteLogin: "admin"}
-	if update != nil {
+	if profile != nil {
 		draft = serverinstall.Draft{OperationID: id}
 	}
 	if options.Prefill != nil {
@@ -74,10 +74,10 @@ func runManagement(ctx context.Context, backend serverinstall.Facade, options Op
 			id = draft.OperationID
 		}
 		draft.OperationID = id
-		if update == nil && draft.Listen == "" {
+		if profile == nil && draft.Listen == "" {
 			draft.Listen = "0.0.0.0:8443"
 		}
-		if update == nil && draft.Language == "" {
+		if profile == nil && draft.Language == "" {
 			draft.Language = "en"
 		}
 	}
@@ -88,8 +88,8 @@ func runManagement(ctx context.Context, backend serverinstall.Facade, options Op
 	}
 
 	current := serverinstall.Result{OperationID: id, State: "not checked", Code: "not_checked", Actions: []string{"configure", "status"}}
-	if update != nil {
-		current = update.annotate(current)
+	if profile != nil {
+		current = profile.annotate(current)
 	}
 	notice := ""
 	if options.OperationID != "" {
@@ -124,8 +124,8 @@ func runManagement(ctx context.Context, backend serverinstall.Facade, options Op
 			}
 		}
 		actions := menuActions(allowed)
-		if update != nil {
-			actions = updateMenuActions(allowed)
+		if profile != nil {
+			actions = profile.actions(allowed)
 		}
 		if selected >= len(actions) {
 			selected = 0
@@ -136,8 +136,8 @@ func runManagement(ctx context.Context, backend serverinstall.Facade, options Op
 		}
 		lines := menuLines(s, options.Version, current, displayNotice, draft, actions, selected)
 		title := "RIXA / Server management"
-		if update != nil {
-			title = "RIXA / Update management"
+		if profile != nil {
+			title = profile.title()
 		}
 		if err = s.paint(title, lines, "Up/Down or Tab · Enter · F1 help · Ctrl-C exit"); err != nil {
 			return err
@@ -183,18 +183,10 @@ func runManagement(ctx context.Context, backend serverinstall.Facade, options Op
 				"No purge, PostgreSQL provisioner or panel adapter is offered here.",
 				"The terminal interface always uses English, independently of web language.",
 			}
-			if update != nil {
-				help = []string{
-					"Configure selects a candidate for one existing owning installation.",
-					"Review binds active state, candidate, manager and recovery conditions.",
-					"Apply queues the exact reviewed update; a queue is not success.",
-					"Refresh inspects retained progress; uncertain effects require inspection.",
-					"Resume is offered only after the backend proves it is safe.",
-					"Keep the original installation and its frozen manager.",
-					"A binary reversal does not roll back database changes.",
-					"The terminal interface always uses English, independently of web language.",
-				}
+			if profile != nil {
+				help = profile.help()
 			}
+
 			if err = s.paint("RIXA / Help", help, "Enter / Escape returns"); err != nil {
 				return err
 			}
@@ -223,7 +215,11 @@ func runManagement(ctx context.Context, backend serverinstall.Facade, options Op
 		case "exit":
 			return nil
 		case "details":
-			if err = showDetails(ctx, s, overview(options.Version, current, notice), draft); err != nil {
+			detail := overview(options.Version, current, notice)
+			if profile != nil {
+				detail = append(detail, profile.details()...)
+			}
+			if err = showDetails(ctx, s, detail, draft); err != nil {
 				return err
 			}
 		case "configure":
@@ -238,10 +234,10 @@ func runManagement(ctx context.Context, backend serverinstall.Facade, options Op
 					notice = "Download skipped. You may supply already downloaded archive and bundle paths."
 				}
 			}
-			if update == nil {
+			if profile == nil {
 				current, completed, err = configure(ctx, s, backend, &draft, current)
 			} else {
-				current, completed, err = update.configure(ctx, s, &draft, current)
+				current, completed, err = profile.configure(ctx, s, &draft, current)
 			}
 			if err != nil {
 				return err
@@ -291,8 +287,8 @@ func runManagement(ctx context.Context, backend serverinstall.Facade, options Op
 				"Only the exact reviewed operation will be queued.",
 				"Closing this menu does not stop an already queued operation.",
 			}
-			if update != nil {
-				title, word, confirmation = updateConfirmation(action, id, current, update.installation)
+			if profile != nil {
+				title, word, confirmation = profile.confirmation(action, id, current)
 			}
 			yes, confirmErr := confirm(ctx, s, title, confirmation, word)
 			if confirmErr != nil {
@@ -313,7 +309,7 @@ func runManagement(ctx context.Context, backend serverinstall.Facade, options Op
 				"Keep configuration, credentials, databases, site data and prerequisites.",
 				"This stops serving. A separate purge is not available.",
 			}
-			if update != nil {
+			if profile != nil && profile.kind() == "update" {
 				removal = append([]string{
 					"Update operation: " + SafeText(id),
 					"Installation operation: " + SafeText(current.InstallationOperation),
@@ -373,6 +369,12 @@ func overview(version string, r serverinstall.Result, notice string) []string {
 	lines := []string{"Manager: " + SafeText(version) + "  |  Operation: " + SafeText(r.OperationID), "Recorded release: " + SafeText(r.Release), "State: " + SafeText(state) + "  |  Stage: " + SafeText(r.Stage)}
 	if r.OperationKind == "update" {
 		lines = []string{"Executing manager: " + SafeText(version) + "  |  Update operation: " + SafeText(r.OperationID), "Installation operation: " + SafeText(r.InstallationOperation), "Active release: " + SafeText(r.ActiveRelease), "Candidate release: " + SafeText(r.Release), "State: " + SafeText(state) + "  |  Stage: " + SafeText(r.Stage)}
+	}
+	if r.OperationKind == "postgres" {
+		lines = []string{"Manager: " + SafeText(version) + "  |  PostgreSQL operation: " + SafeText(r.OperationID), "Scope: clean dedicated PostgreSQL prerequisites", "State: " + SafeText(state) + "  |  Stage: " + SafeText(r.Stage)}
+	}
+	if r.OperationKind == "bootstrap" {
+		lines = []string{"Starter manager: " + SafeText(version), "Retained operation: " + SafeText(r.OperationID), "State: " + SafeText(state), "Scope: Rixa native server"}
 	}
 	if r.AdminURL != "" {
 		lines = append(lines, "Administration: "+SafeText(r.AdminURL))
@@ -707,6 +709,9 @@ func menuLines(s *session, version string, r serverinstall.Result, notice string
 		header = []string{"Recorded release: " + SafeText(r.Release) + " · Manager: " + SafeText(version), "State: " + SafeText(r.State) + " · Stage: " + SafeText(r.Stage)}
 		if r.OperationKind == "update" {
 			header = []string{"Active: " + SafeText(r.ActiveRelease) + " · Candidate: " + SafeText(r.Release), "Installation: " + SafeText(r.InstallationOperation) + " · Manager: " + SafeText(version), "State: " + SafeText(r.State) + " · Stage: " + SafeText(r.Stage)}
+		}
+		if r.OperationKind == "postgres" || r.OperationKind == "bootstrap" {
+			header = []string{"Manager: " + SafeText(version) + " · Operation: " + SafeText(r.OperationID), "State: " + SafeText(r.State) + " · Stage: " + SafeText(r.Stage)}
 		}
 		if r.AdminURL != "" && budget >= 10 {
 			header = append(header, "Administration: "+SafeText(r.AdminURL))
