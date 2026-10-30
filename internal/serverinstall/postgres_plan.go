@@ -206,7 +206,7 @@ func (b *postgresBackend) inventory(ctx context.Context) (map[string]string, err
 }
 func (b *postgresBackend) helpers() map[string]string {
 	out := map[string]string{}
-	for _, p := range []string{"/usr/bin/apt-get", "/usr/bin/dpkg-query", "/usr/bin/dpkg-deb", "/usr/share/keyrings/debian-archive-keyring.gpg"} {
+	for _, p := range []string{"/usr/bin/apt-get", "/usr/bin/dpkg-query", "/usr/bin/dpkg-deb", "/usr/share/keyrings/debian-archive-keyring.pgp"} {
 		path := b.path(p)
 		h, e := hashFile(path)
 		if e != nil || !trustedExecutable(path) {
@@ -372,7 +372,7 @@ func (b *postgresBackend) postgresSources(j *postgresJournal, persistent bool) [
 	if persistent {
 		return []byte("Types: deb\nURIs: https://apt.postgresql.org/pub/repos/apt\nSuites: trixie-pgdg\nComponents: main\nArchitectures: amd64\nSigned-By: /usr/share/keyrings/rixa-pgdg.asc\n")
 	}
-	debian := b.path("/usr/share/keyrings/debian-archive-keyring.gpg")
+	debian := b.path("/usr/share/keyrings/debian-archive-keyring.pgp")
 	return []byte("deb [arch=amd64 signed-by=" + debian + "] https://deb.debian.org/debian trixie main\ndeb [arch=amd64 signed-by=" + debian + "] https://deb.debian.org/debian trixie-updates main\ndeb [arch=amd64 signed-by=" + debian + "] https://security.debian.org/debian-security trixie-security main\ndeb [arch=amd64 signed-by=" + key + "] https://apt.postgresql.org/pub/repos/apt trixie-pgdg main\n")
 }
 func (b *postgresBackend) aptConfiguration(j *postgresJournal) []byte {
