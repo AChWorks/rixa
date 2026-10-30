@@ -166,3 +166,26 @@ QEMU/unit/cgroup/socket quiescence, record its sealed0400 disk identity in
 failed-journey seals. Never relabel a failed disk as clean, remove its seal to
 continue in place, or use it as backing for a new clean acceptance journey.
 A separately authorized next journey uses the original unchanged clean baseline.
+
+## Journey3 populated retention
+
+The separately granted journey3 proof uses `update-smoke.py --bootstrap-retention`
+with the exact protected d97f97f fixture, original native install input and
+`retention-j3.json` receipt. This bounded profile reuses the existing Media,
+revision, Appearance, publication, privacy and all-schema snapshot mechanisms.
+It excludes the default update proof's member-account creation and member login;
+it never reinterprets an earlier default-profile receipt. Each mutation still
+records its operation/attempt before the request and preserves unknown outcomes.
+
+Only that proof process maps the two declared HTTPS origins to guest loopback.
+URL, SNI, CA and hostname verification remain strict. Other destinations/ports
+are refused, and the resolver is restored on exit; no OS DNS/hosts edits occur.
+Snapshots retain all logical tables, runtime/config/Media/public files, physical
+database/data-directory identity, static PostgreSQL files and frozen managers.
+
+The authorized reboot is normal poweroff, actual QEMU completion/quiescence,
+then relaunch of the original journey3 disk with a new launch attempt. At that
+quiesced boundary only, one exclusive byte-identical populated checkpoint may be
+preserved with mode0400 for a separately authorized consumer. It is not a clean baseline,
+backup/restore support or permission to boot another guest. Hold populated
+serving for Master browser acceptance; removal/final shutdown need continuation.
