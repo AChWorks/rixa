@@ -73,7 +73,10 @@ def cgroup_population(group):
     return events["populated"]
 
 
+FAILURE_RECEIPT = None
+
 def main():
+    global FAILURE_RECEIPT
     os.umask(0o077)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--operation", required=True)
@@ -82,6 +85,7 @@ def main():
     parser.add_argument("--timeout", type=int, default=180)
     args = parser.parse_args()
     proof.guard(args.receipt.parent)
+    FAILURE_RECEIPT = args.receipt.with_name(args.receipt.name + ".failure.json")
     if not re.fullmatch("[a-z][a-z0-9-]{0,47}", args.operation) or not 1 <= args.timeout <= 600:
         raise ValueError("bounded exact operation and wait required")
     if args.receipt.exists():
@@ -141,5 +145,10 @@ if __name__ == "__main__":
     try:
         sys.exit(main())
     except Exception as error:
+        if FAILURE_RECEIPT is not None and not FAILURE_RECEIPT.exists():
+            try:
+                proof.save(FAILURE_RECEIPT, {"error_type": type(error).__name__, "detail": str(error)[:8192]}, initial=True)
+            except Exception:
+                pass
         print("update interruption proof failed (" + type(error).__name__ + "); inspect private receipt/unit.", file=sys.stderr)
         sys.exit(1)

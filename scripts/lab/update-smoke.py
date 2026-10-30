@@ -280,7 +280,10 @@ def differences(before, after):
             for key in sorted(set(before) | set(after)) if before.get(key) != after.get(key)}
 
 
+FAILURE_RECEIPT = None
+
 def main():
+    global FAILURE_RECEIPT
     os.umask(0o077)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("seed", "check", "snapshot", "compare"))
@@ -290,6 +293,7 @@ def main():
     parser.add_argument("--before", type=Path)
     args = parser.parse_args()
     guard(args.receipt.parent)
+    FAILURE_RECEIPT = args.receipt.with_name(args.receipt.name + ".failure.json")
     if args.action == "compare":
         before, after = private_json(args.before), private_json(args.receipt)
         delta = {key: differences(before[key], after[key]) for key in ("targets", "tables", "files")}
@@ -316,6 +320,11 @@ if __name__ == "__main__":
     try:
         sys.exit(main())
     except Exception as error:
+        if FAILURE_RECEIPT is not None and not FAILURE_RECEIPT.exists():
+            try:
+                save(FAILURE_RECEIPT, {"error_type": type(error).__name__, "detail": str(error)[:8192]}, initial=True)
+            except Exception:
+                pass
         # Do not print arbitrary transport/SQL errors: they may contain secrets.
         print("native update proof failed (" + type(error).__name__ + "); inspect private fixture/state.", file=sys.stderr)
         sys.exit(1)
