@@ -12,7 +12,7 @@ Appearance's **Site language** is separate: its current content/publication poli
 
 Bundled English/Persian require no external files. To install data-only translations in a compatible executable:
 
-1. Prepare a dedicated private directory readable by the runtime, separate from Media, public publication, uploads, application source and credentials. Use an absolute canonical path; do not grant site users write access.
+1. Prepare a dedicated private directory readable by the runtime, separate from Media, public publication, uploads, application source and credentials. Use an absolute canonical path without symlink aliases and no group/other permissions (normally `0700`), with ownership permitting the runtime to read it. Do not grant site users write access.
 2. Set `catalog_root` in the protected runtime JSON to that directory. This is operator configuration, not a web upload field.
 3. Add UTF-8 JSON files following the [AChrix catalog contract](https://github.com/AChWorks/achrix/blob/HEAD/docs/web/localization.md). Each file owns one domain/locale. The product domain is `rixa`; shared screens use Admin, Identity and Media domains. Preserve existing English keys and named parameters. Partial packs use English fallback. Never repeat bundled domain/locale/key identities.
 4. Validate using the trusted selected executable: `rixa check --config /absolute/rixa.json`. This also requires valid runtime prerequisites and starts no ingress. Keep the running instance available when validation fails.

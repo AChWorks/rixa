@@ -24,6 +24,8 @@ A versioned development prerelease may package exactly the already-proven develo
 
 CMS capabilities and operational management develop together: content, Media, appearance, publication and selected-site administration must remain simple to understand and complete. Use a modern minimal interface, consistent vocabulary, clear scope/actions and recoverable errors. Preserve Persian/English, RTL/LTR and accessible keyboard behavior in delivered flows; accessibility and usability are verified outcomes rather than visual-style claims.
 
+The web interface defaults to English/LTR and offers Persian/RTL. Additional installed interface languages use translation data without source edits or rebuilding an already compatible executable. Interface language is separate from content language, formatting and authorization; Persian user content remains intact. The operator CLI and terminal menu always use English. Reuse optional AChrix localization support and product-owned catalogs rather than adding a second translation engine or mandatory Core service.
+
 Keep the implementation readable, efficient and extensible through demonstrated needs and supported boundaries. Prefer the smallest maintainable solution and measure relevant performance/resource effects before adding optimization machinery or speculative abstractions.
 
 ## Installation and onboarding direction
