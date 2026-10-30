@@ -5,8 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -448,36 +446,6 @@ func (m *Manager) candidateCommand(parent context.Context, u *updateJournal, j *
 		}
 		if decode(out.Bytes(), &receipt) != nil || !validCandidateCheckReceipt(receipt.Status, receipt.Sites, receipt.Core, receipt.Components, u.CandidateComponents) {
 			return ErrState
-		}
-	}
-	return nil
-}
-func (m *Manager) updateHTTPPostflight(ctx context.Context, j *journal) error {
-	client, e := m.localClient(j)
-	if e != nil {
-		return e
-	}
-	defer client.CloseIdleConnections()
-	for _, origin := range []string{j.Draft.ControlOrigin, j.Draft.SiteOrigin} {
-		for _, probe := range []struct {
-			path   string
-			status int
-		}{{"/admin/login", http.StatusOK}, {"/auth/csrf", http.StatusUnauthorized}} {
-			request, e := http.NewRequestWithContext(ctx, http.MethodGet, origin+probe.path, nil)
-			if e != nil {
-				return e
-			}
-			request.Header.Set("Origin", origin)
-			request.Header.Set("X-Identity-Request", "1")
-			response, e := client.Do(request)
-			if e != nil {
-				return e
-			}
-			count, re := io.Copy(io.Discard, io.LimitReader(response.Body, (2<<20)+1))
-			ce := response.Body.Close()
-			if re != nil || ce != nil || count > 2<<20 || response.StatusCode != probe.status {
-				return ErrPrerequisite
-			}
 		}
 	}
 	return nil
