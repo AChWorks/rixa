@@ -83,8 +83,20 @@ positive acknowledgement. An interrupted SSH client does not prove that its
 executor stopped. Inspect the exact owned unit, cgroup descendants, active
 runtime and protected journal before recovery.
 
-For a real interruption, observe the implementation's durable stage/attempt
-boundary and interrupt only the positively owned update executor in the guest.
+For a real interruption, launch the guarded watcher in a persistent guest task
+before Apply; it waits for an actual durable stage/attempt boundary:
+
+```bash
+python3 /root/lab/update-interrupt.py --operation lab-update --stage migrate \
+  --receipt /root/lab/migrate-interruption.json --timeout 180
+```
+
+The watcher requires the exact acknowledged unit/generation, frozen manager
+process image and owned cgroup before signaling the whole executor. It then
+observes the actual kernel cgroup and systemd state; the signal acknowledgement
+alone is not a fence. A stage that completed too quickly is a missed experiment,
+not interruption evidence. Keep the receipt and inspect the completed operation.
+Interrupt only the positively owned update executor in the guest.
 Do not edit journals, replace payload executables with wrappers, rewrite ledgers
 or add a fake success marker. Record what effects were positively observed, what
 remains uncertain, the kernel-observed executor fence and the resulting offered
