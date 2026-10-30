@@ -358,6 +358,16 @@ func (m *Manager) installService(ctx context.Context, j *journal) error {
 	}
 }
 func (m *Manager) Remove(ctx context.Context, id string) (Result, error) {
+	return m.remove(ctx, id, false)
+}
+
+// RemoveInstallation removes only the original installation, never the active
+// child update that the ordinary CLI Remove method may follow.
+func (m *Manager) RemoveInstallation(ctx context.Context, id string) (Result, error) {
+	return m.remove(ctx, id, true)
+}
+
+func (m *Manager) remove(ctx context.Context, id string, installationOnly bool) (Result, error) {
 	unlock, e := m.lock(ctx, false)
 	if e != nil {
 		return Result{}, e
@@ -371,6 +381,9 @@ func (m *Manager) Remove(ctx context.Context, id string) (Result, error) {
 	if u, ue := m.installationUpdate(id); ue != nil {
 		return Result{}, ue
 	} else if u != nil {
+		if installationOnly {
+			return Result{}, ErrState
+		}
 		return m.removeUpdatedInstallation(ctx, u)
 	}
 	j, e := m.load(id)

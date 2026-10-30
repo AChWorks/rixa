@@ -16,6 +16,7 @@ on:
       - "internal/product/version.go"
       - "cmd/rixa/**"
       - "internal/releaseartifact/**"
+      - "internal/manageweb/**"
       - "internal/releasepackage/**"
       - "internal/serverinstall/**"
       - "internal/terminal/**"

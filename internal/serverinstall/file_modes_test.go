@@ -62,6 +62,8 @@ func TestUmaskCreationChild(t *testing.T) {
 		}
 		assertOwnedMode(t, p, f.mode)
 	}
+	t.Run("missing-first-draft", TestDraftReadMissingStateAllowsFirstSave)
+
 	state := filepath.Join(root, "state")
 	if e := privateDir(state, os.Geteuid(), true); e != nil {
 		t.Fatal(e)

@@ -26,6 +26,9 @@ import (
 func runManage(parent context.Context, args []string, input *os.File, output *os.File) error {
 	ctx, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	defer stop()
+	if len(args) > 0 && args[0] == "web" {
+		return runManageWeb(ctx, args[1:], output)
+	}
 	if len(args) > 0 && args[0] == "internal-stage" {
 		if len(args) != 2 {
 			return errors.New("invalid fixed runtime-stage arguments")
@@ -95,7 +98,7 @@ func manageWithFacade(ctx context.Context, args []string, input *os.File, output
 		return manageUpdateWithFacade(ctx, args, input, output, updater)
 	}
 	if action != "menu" && action != "draft" && action != "review" && action != "apply" && action != "resume" && action != "status" && action != "remove" {
-		return errors.New("usage: rixa manage <menu|draft|review|apply|resume|status|remove> [--operation <id>]; draft also needs --source <private-json>")
+		return errors.New("usage: rixa manage <menu|draft|review|apply|resume|status|remove|web> [--operation <id>]; draft also needs --source <private-json>")
 	}
 	fs := flag.NewFlagSet("manage "+action, flag.ContinueOnError)
 	// Flag diagnostics can contain user-supplied values. Keep them out of general
@@ -261,6 +264,7 @@ func fetchForManage(ctx context.Context, tag, channel, output string) (terminal.
 }
 
 const manageHelp = "Rixa native operator management\n\n" +
+	"  rixa manage web --help  (temporary scoped browser console)\n" +
 	"  rixa manage [menu] [--operation <id>] [--prefill <private-json>] [--plain] [--no-color]\n" +
 	"  rixa manage draft --source <private-json> [--operation <matching-id>]\n" +
 	"  rixa manage <review|resume|status> --operation <id>\n" +

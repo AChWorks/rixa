@@ -2,7 +2,7 @@
 
 The `manage` commands provide one concrete infrastructure-operator path: a verified Rixa archive, private guided configuration, explicit migration and administrator bootstrap, and a persistent systemd service. Use an independently trusted executable that actually contains these commands and follow the guides supplied with its package. Historical packages do not gain management commands from newer documentation.
 
-This prepared-server **development profile** requires supplied PostgreSQL databases and TLS material. Production support, certificate issuance, destructive purge and panel/web setup have separate contracts. The [starter and PostgreSQL prerequisite path](#bootstrap-starter-and-postgresql-prerequisites) below defines a separate clean-host operation for packages that contain it. The [installation and management contract](installation-and-management.md) owns the broader journey; [manual development installation](release-install.md) remains available for other documented runtime profiles.
+This prepared-server **development profile** requires supplied PostgreSQL databases and TLS material. Builds exposing `manage web` can present these same operations in a temporary protected browser console, described below. A panel host additionally needs the exact supported panel profile and acceptance evidence; production support, certificate issuance and destructive purge remain separate contracts. The [starter and PostgreSQL prerequisite path](#bootstrap-starter-and-postgresql-prerequisites) below defines a separate clean-host operation for packages that contain it. The [installation and management contract](installation-and-management.md) owns the broader journey; [manual development installation](release-install.md) remains available for other documented runtime profiles.
 
 ## Supported inputs and authority
 
@@ -19,6 +19,56 @@ The initial native profile requires:
 The loopback database restriction makes the reviewed credential source identical under root and the non-login runtime user. Implicit environment/password-file credentials, Unix peer authentication, remote database profiles, service-file options and silent database major upgrades are not supported by this adapter. A missing prerequisite produces a field-specific result; the operator supplies or corrects it before applying.
 
 Supplied TLS material is checked for key pairing, time, hostnames and server usage, then privately staged. Local postflight uses that supplied certificate to verify the exact HTTPS endpoints. This does not establish public DNS resolution, browser CA trust, firewall reachability or automatic certificate renewal.
+
+## Temporary browser access
+
+Use this interface only when the independently trusted manager exposes
+`rixa manage web --help`. It runs the same native operations as the terminal and
+CLI, with a root-issued short-lived single-use permit bound to one operation,
+kind and action set. A product or panel login does not grant this authority.
+
+Prepare a root-private directory and regular `0600` TLS files. The console
+certificate must cover `127.0.0.1`; the runtime certificate must cover the control
+and site hostnames. Start the trusted manager explicitly:
+
+```bash
+sudo /usr/local/bin/rixa manage web --kind install --operation first-install \
+  --tls-cert /root/private/console.pem --tls-key /root/private/console.key \
+  --runtime-cert /root/private/runtime.pem --runtime-key /root/private/runtime.key \
+  --permit-file /root/private/first-install.permit
+```
+
+Reach its default loopback TLS listener through an authorized SSH tunnel:
+
+```bash
+ssh -N -L 127.0.0.1:9444:127.0.0.1:9444 operator@host
+```
+
+Trust the selected console certificate, open the displayed HTTPS URL, and enter
+the permit from its private file. Fetch or upload an authenticated release, save
+the private draft, review the actual operation and explicitly apply that review.
+The browser cannot choose arbitrary commands or local paths. Inspect the same
+operation after uncertain acknowledgement; do not repeat an effect because a
+tab or tunnel closed. The native executor continues independently.
+
+For a new update, use `--kind update --operation first-update --installation first-install`
+with console TLS and a new permit file. Later status/removal uses a fresh permit
+with `--actions status,remove`; installation-kind access still requires its
+operator-bound runtime TLS flags. Reopen retained work with its exact recorded
+manager rather than replacing the frozen image. Ordinary removal retains the
+data and prerequisites described below; there is no browser purge operation.
+
+The [browser console guide](https://github.com/AChWorks/rixa/blob/HEAD/docs/management-web.md)
+explains the forms, private inputs, localization and aaPanel-assisted native
+profile. Read it at the selected package's source version before relying on its
+commands. The panel profile uses supplied compatible PostgreSQL 18, native
+systemd supervision and direct Rixa TLS on a separate explicit port, with Rixa
+panel mapping disabled and existing 80/443 sites preserved. The clean-host
+PostgreSQL provisioner below intentionally does not run on panel hosts. A panel
+name or PHP/web-root account does not establish those capabilities; exact tested
+combinations and delivery evidence belong to
+[panel installation work](https://github.com/AChWorks/rixa/issues/30) and the
+selected release.
 
 ## Guided terminal
 

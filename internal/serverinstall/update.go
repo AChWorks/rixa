@@ -52,7 +52,7 @@ func (m *Manager) SaveUpdateDraft(ctx context.Context, d UpdateDraft) (Result, e
 	return updateResult(u), nil
 }
 func (m *Manager) LoadUpdateDraft(ctx context.Context, id string) (UpdateDraft, error) {
-	unlock, e := m.lock(ctx, false)
+	unlock, e := m.lockDraftRead(ctx, id)
 	if e != nil {
 		return UpdateDraft{}, e
 	}

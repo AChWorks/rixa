@@ -92,7 +92,7 @@ func (m *Manager) SaveDraft(ctx context.Context, d Draft) (Result, error) {
 	return result(j), nil
 }
 func (m *Manager) LoadDraft(ctx context.Context, id string) (Draft, error) {
-	unlock, e := m.lock(ctx, false)
+	unlock, e := m.lockDraftRead(ctx, id)
 	if e != nil {
 		return Draft{}, e
 	}

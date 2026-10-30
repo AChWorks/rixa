@@ -49,6 +49,16 @@ func (m *Manager) resumable(ctx context.Context, j *journal) bool {
 // descendant are observed quiesced. Frozen code/targets and product-owned
 // effect-specific reconciliation govern continuation; no generic retry exists.
 func (m *Manager) Resume(ctx context.Context, id string) (Result, error) {
+	return m.resume(ctx, id, false)
+}
+
+// ResumeInstallation continues only the original installation, never a pending
+// child update that the ordinary CLI Resume method may follow.
+func (m *Manager) ResumeInstallation(ctx context.Context, id string) (Result, error) {
+	return m.resume(ctx, id, true)
+}
+
+func (m *Manager) resume(ctx context.Context, id string, installationOnly bool) (Result, error) {
 	unlock, e := m.lock(ctx, false)
 	if e != nil {
 		return Result{}, e
@@ -66,7 +76,17 @@ func (m *Manager) Resume(ctx context.Context, id string) (Result, error) {
 			return Result{}, ue
 		}
 		if u.Draft.InstallationOperation == id {
+			if installationOnly {
+				return result(j), ErrState
+			}
 			return m.resumeUpdate(ctx, u)
+		}
+	}
+	if installationOnly {
+		if u, ue := m.installationUpdate(id); ue != nil {
+			return Result{}, ue
+		} else if u != nil {
+			return result(j), ErrState
 		}
 	}
 	if !m.resumable(ctx, j) {
