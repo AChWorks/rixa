@@ -48,6 +48,20 @@ Accept only exit zero with `rixa.artifact-fetch.v1`, `status: verified`, `code: 
 
 Fetch still requires the independently trusted Rixa executable and supported official `gh` helper. It does not establish the initial bootstrap trust root, extract a payload, install a service or authorize privileged execution. Activation must freeze and reverify the exact returned bytes under its own protected operation boundary.
 
+## Bootstrap starter and generation trust
+
+The source starter command is separate from the initial one-line trust entry. These additions are unpublished, and a complete authenticated clean-server journey has not yet been proven. Follow [native management](server-management.md#bootstrap-starter-and-postgresql-prerequisite-source) for source command boundaries and the exact release's supplied guides for available commands.
+
+The accepted trust sequence is:
+
+1. Publish a bootstrap-capable prebuilt starter **S** through the normal three-asset publisher, then independently download and verify its public tag, source, archive digest, provenance and package identity.
+2. Review a subsequent immutable bootstrap generation **B** that pins the already-published S tag/source/archive digest and the official `gh` helper version/archive digest. The documented entry authenticates that generation, and the generation hashes its pinned downloads before parsing or executing them. A digest learned only from the same untrusted download is not an independent anchor. S cannot pin its own final archive hash in its source.
+3. Use the trusted starter's existing `releaseartifact.Fetch` / `Verify` policy to select the explicit product channel or exact tag. Stable remains the default and fails if no suitable stable release exists. Development selection is explicit and never turns a prerelease into a stable or production release.
+4. Freeze and reverify protected copies of the authenticated candidate, then use the shared authenticated package parser to check source, platform, actual compiled components and legal material. Stage the selected manager under protected content-addressed storage with no-replace activation. A prepared manager is not an applied installation or prerequisite plan.
+5. Route existing operations to their recorded frozen managers. Keep original installation/update/prerequisite records and helpers; a newer starter does not silently replace their ownership or resume their effects.
+
+Generation B follows S so the trust chain has no self-reference or unverified payload execution. It does not add a fourth asset to ordinary product releases, copy provenance policy into a shell installer, or require operators to compile Go. No generation script, invented release pin or ready-to-run one-line command is supplied by this source change. Initial generation publication and actual clean-server acceptance remain separate delivery gates; current version decisions and evidence belong to [Issue 29](https://github.com/AChWorks/rixa/issues/29).
+
 ## Meaning and limits of success
 
 Success identifies the bytes that were actually checked. It does not make an ordinary download pathname immutable. Installation must stage those exact bytes in protected storage, recheck the recorded digest and bind the intended candidate before replacement or privileged execution. The package's compiled component metadata, licenses, supported platform and schema compatibility need their own checks.

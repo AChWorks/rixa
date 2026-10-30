@@ -2,7 +2,7 @@
 
 The `manage` commands provide one concrete infrastructure-operator path: a verified Rixa archive, private guided configuration, explicit migration and administrator bootstrap, and a persistent systemd service. Use a trusted executable that actually contains these commands. Historical packages do not gain management commands from newer documentation.
 
-This is a **development profile**, separate from production support, automatic PostgreSQL provisioning, certificate issuance, destructive purge and panel/web setup. The [installation and management contract](installation-and-management.md) describes that broader journey; [manual development installation](release-install.md) remains available for other documented runtime profiles.
+This prepared-server **development profile** requires supplied PostgreSQL databases and TLS material. Production support, certificate issuance, destructive purge and panel/web setup have separate contracts. The [unpublished starter/prerequisite source](#bootstrap-starter-and-postgresql-prerequisite-source) below describes a distinct clean-host path whose real provisioning proof is pending. The [installation and management contract](installation-and-management.md) owns the broader journey; [manual development installation](release-install.md) remains available for other documented runtime profiles.
 
 ## Supported inputs and authority
 
@@ -173,3 +173,91 @@ sudo rixa manage update remove --operation first-update --confirm-remove
 ```
 
 Removal checks the current candidate's static/loaded service and executable ownership, stops serving and removes only its positively owned runtime executable/unit. It retains databases, configuration, credentials, accounts, original Media, published files, legal material, prerequisites and original/update recovery evidence. Purge remains a separate unimplemented destructive operation.
+
+
+## Bootstrap starter and PostgreSQL prerequisite source
+
+**Unreleased source path:** the starter and PostgreSQL provisioning commands in this section are implemented for controlled validation, but are not present in the published prepared-server release and real clean-server provisioning has not yet been proven. This section does not provide a public one-line shell entry or establish production support. Use a trusted executable that actually contains these commands; use each published package's own guides for its available behavior.
+
+The [starter/generation trust sequence](release-verification.md#bootstrap-starter-and-generation-trust) first publishes and independently verifies a bootstrap-capable starter, then pins it in a subsequent reviewed immutable generation with the official verifier helper. No invented starter digest or mutable script can substitute for that initial trust. Ordinary product releases retain exactly the archive, checksum and attestation assets.
+
+### Discover and select the right manager
+
+Source-only direct inspection and preparation examples are:
+
+```bash
+sudo rixa bootstrap inspect --non-interactive
+sudo rixa bootstrap route --operation <retained-operation-id> --non-interactive
+sudo rixa bootstrap prepare --channel development --operation <new-install-id>
+sudo rixa bootstrap prepare --channel development --update --operation <new-update-id>
+```
+
+These direct commands return JSON and never open a menu or launch the selected manager. `inspect` observes protected ownership; `route` returns the fixed menu route for the same retained operation. `prepare` fetches through the shared publisher policy, freezes and reverifies copies, checks the package's actual compiled/source/target/legal identity, and stages a manager under protected content-addressed storage in `/opt/rixa-bootstrap`. Its `prepared` result authorizes no package installation, migration, Apply or Resume. Failed verification may leave bounded private evidence; do not treat a partial folder as an authenticated candidate.
+
+Stable is the default and never falls back to a development prerelease. Choose `--channel development` intentionally, or one exact `--release <tag>` without `--channel`. An optional `--output` names a new absolute private download folder; existing folders are never adopted, overwritten or cleared.
+
+Interactive source use starts with `sudo rixa bootstrap --channel development`. It acquires the controlling terminal even when starter input came from a download pipe. Plain/no-color preferences survive the selected-manager handoff, and all operator text remains English regardless of web/site locale. The menu exposes actual discovery outcomes, including retained work and an explicit new-update choice. It opens the chosen manager's normal review/apply interface; it never automatically applies, resumes, reinstalls or resets an operation.
+
+The router validates the original installation, pending/active updates and separate PostgreSQL records. Frozen work uses the exact protected image recorded for that operation. Preserve it even when a newer manager has been downloaded. Unknown material, duplicate operation IDs across types, changed images or an unavailable reviewed manager require inspection. An unexecuted draft still needs its own current review. Do not remove a journal, replace an old manager or invent a new operation ID to force a clean installation.
+
+### Proposed clean PostgreSQL profile and bounded effects
+
+The new prerequisite adapter targets only an authorized root infrastructure operator on a clean dedicated **Debian 13 / Linux amd64 / systemd / PostgreSQL 18** host. Trusted base APT/dpkg tools and the Debian archive keyring must exist; the eventual one-line generation also needs its documented HTTPS/CA/hash/archive base. Distinct HTTPS hostnames and valid TLS certificate/key material remain supplied inputs. There is no certificate issuance/renewal, DNS/firewall change, listener takeover, reverse-proxy or broader panel profile in this operation.
+
+Choose either supplied compatible PostgreSQL databases through the existing native input path, or explicitly review provisioning on a positively clean dedicated host. The provisioner refuses existing/shared/panel-managed PostgreSQL packages, accounts, clusters, services, occupied target ports and uncertain ownership. Existing incompatible or partially configured package state is an operator/provider condition, not permission to upgrade, adopt or erase it. Stock SSH/resolver/networkd sockets are admitted only when their socket, process/account and native service identity match the reviewed profile; a familiar name or port alone is insufficient. The operation changes no network service or firewall policy.
+
+The reviewed plan identifies exact new Debian/PGDG package versions and their dependency effects. It authenticates scoped signed APT metadata and the pinned official PGDG key, rejects upgrades/removals and unversioned major-tracking package choices, installs common tooling first, and suppresses implicit `main` creation before the version-specific server. The fixed executor and read-only package guard bind package effects to the reviewed plan and actual APT locking/executor context; callers cannot supply an arbitrary privileged command.
+
+It then creates one operation-derived named cluster on the explicitly selected unused loopback port, plus separate least-privilege control/site roles and databases. The public plan supplies the actual cluster name, port and package versions; the owning operation binds its generated role/database identities. Configuration/data ownership, enabled service, physical database identity, effective configuration/HBA/ident/password settings and actual password authentication must verify. The proposed profile binds the generated `postgresql.auto.conf` with no settings and requires positive denial of a wrong password; a successful connection under permissive trust rules is insufficient. Administrative provisioning runs with its explicitly bound OS/database authority; the serving Rixa profile continues to use explicit loopback TCP/password DSNs, with no ambient PG credentials or runtime peer-authentication expansion.
+
+The prerequisite's fixed ownership boundary includes:
+
+| Resource | Purpose |
+| --- | --- |
+| `/var/lib/rixa-manager/postgres` | Private journals, generated credentials, ownership and diagnostics; preserve for recovery and never publish. |
+| `/var/cache/rixa-postgres` | Operation-bound authenticated APT planning/download evidence; not an application credential source. |
+| `/usr/share/keyrings/rixa-pgdg.asc` and `/etc/apt/sources.list.d/rixa-pgdg.sources` | Reviewed scoped PGDG trust/source installed during Apply. |
+| `/etc/postgresql-common/createcluster.d/rixa.conf` | Owned suppression of implicit `main` creation. |
+| `/etc/postgresql/18/<plan-cluster>` and `/var/lib/rixa-postgres/<plan-cluster>` | Exact named cluster configuration/data, bound to the owning operation. |
+
+The plan's actual cluster name and package versions are authoritative. Ordinary Rixa removal preserves these prerequisite resources.
+
+### Prerequisite draft, review, apply and private handoff
+
+The prerequisite draft contains exactly:
+
+```json
+{
+  "operation_id": "first-postgres",
+  "port": 55432,
+  "dedicated_host": true
+}
+```
+
+The port is an example, not a promise that it is free. Store the JSON in a same-operator private regular file outside repositories and web roots. `dedicated_host: true` is an explicit clean-host choice; the terminal requires the corresponding dedication confirmation. It does not grant missing infrastructure authority or bypass the host assessment.
+
+```bash
+sudo rixa manage prerequisites draft --source /root/private/first-postgres.json
+sudo rixa manage prerequisites review --operation first-postgres
+sudo rixa manage prerequisites apply --operation first-postgres --review-token <exact-review-token>
+sudo rixa manage prerequisites status --operation first-postgres
+```
+
+The guided equivalent is `manage prerequisites menu`, with the existing plain/no-color/noninteractive rules. Saving preserves generated secrets privately and invalidates an earlier review. Review writes bounded planning evidence/cache, authenticates and binds the exact package/host/tool baseline, and returns the token and public effect plan; it does not install packages or create a cluster, roles or databases. Apply requires that exact unexpired review token under the shared native lifecycle lock and rechecks its binding. A queued fixed executor is not completion.
+
+An `installed` prerequisite is reverified before its generated credentials may privately prefill a new native installation:
+
+```bash
+sudo rixa bootstrap prepare --channel development \
+  --operation first-install --postgres first-postgres
+```
+
+The bootstrap menu offers the same explicit completed-prerequisite choice. This handoff writes the two DSNs only into a protected native prefill; public JSON/terminal output contains no credential values and there is no credential-printing verb. Native configuration, its own Review/Apply and administration/readiness checks still follow. Keep caller input/prefill files private and manage their retention separately.
+
+### Prerequisite interruption, unsupported state and removal
+
+Keep the same operation and its protected records under `/var/lib/rixa-manager/postgres`, including diagnostics. Inspect `manage prerequisites status --operation <id>` and the exact executor identified by its stage. Status observes current retained state; it does not silently repair packages, recreate databases or reset passwords.
+
+Only when the backend explicitly offers Resume, use `manage prerequisites resume --operation <id>` with that operation's exact frozen manager. Positive start acknowledgement, a quiescent executor/cgroup, intact reviewed intent/images, package inventory and owned cluster/database observations are required. Timeout is not proof of no effect. Partial dpkg configuration, partial initialization, unmarked database ownership or drifted authentication may remain `reconciliation-required` for operator action. Preserve diagnostics and inspect actual state rather than blindly repeating Apply, creating a replacement operation or using a generic package-repair command.
+
+Ordinary Rixa removal retains PostgreSQL packages, cluster, roles/databases, credentials and prerequisite/recovery records, together with the normal Rixa configuration/data/Media retention. This adapter offers no PostgreSQL removal, destructive purge, password reset, automatic major upgrade or unattended recovery. Source/unit/PTY evidence does not replace the separate isolated provisioning, interruption/re-entry, completed native installation and public starter/generation acceptance gates.

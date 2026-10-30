@@ -37,7 +37,9 @@ The reported Rixa version must match the release tag and `BUILDINFO.json`; the C
 
 ## Choose the operation profile
 
-A trusted build containing `rixa manage` provides the [native operator path](server-management.md) on its explicitly supported Debian/systemd profile. It guides configuration, supervises installation independently of SSH, and provides retained status, supported compatible update/recovery and ordinary runtime/service removal. PostgreSQL databases, TLS material and a trusted supported verifier remain explicit prerequisites; this is not automatic host provisioning, a one-line bootstrap, an unattended updater or panel installation.
+A trusted build containing `rixa manage` provides the [native operator path](server-management.md) on its explicitly supported Debian/systemd profile. It guides configuration, supervises installation independently of SSH, and provides retained status, supported compatible update/recovery and ordinary runtime/service removal. Released prepared-server packages require supplied PostgreSQL databases, TLS material and a trusted supported verifier.
+
+The [bootstrap starter and PostgreSQL prerequisite source](server-management.md#bootstrap-starter-and-postgresql-prerequisite-source) adds a separate discovery/staging route and an explicitly reviewed clean-host provisioning operation. These additions are unpublished and real clean-server provisioning is not yet proven. They do not change the requirements of an older package. A complete one-line trust generation, unattended updater and panel profile need their own delivered evidence.
 
 Use that guide for native management. The following steps are the separate manual foreground development path. Do not pre-create the manual layout below and then ask the native manager to adopt it; native installation refuses unrelated existing material.
 
@@ -100,4 +102,4 @@ A Rixa release is one coherent product artifact with one selected compatible Cor
 
 Accept a dependency update only after genuine prior-release retained-state proof covers accounts/credentials and fixed grants, content/references, original Media, appearance/configuration, publication, exact migration ledgers, sessions, readiness and site isolation. New source or an upstream fixture is not that product proof. Ordinary upgrades and controlled transfer have different session/compatibility semantics; consult the source-version `docs/site-transfer.md` before restoring a bundle.
 
-The accepted future CLI/TUI/web management experience is documented in source as `docs/installation-and-management.md`. This manual development-package procedure does not provide that installer/updater or establish production support.
+The broader CLI/TUI/web management experience is documented in [installation and management](installation-and-management.md); the [native operator guide](server-management.md) owns its implemented subsets and evidence limits. The manual foreground procedure above does not register native ownership, provision prerequisites, adopt an existing service or establish production support.
