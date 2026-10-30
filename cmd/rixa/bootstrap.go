@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/AChWorks/rixa/internal/product"
 	"github.com/AChWorks/rixa/internal/serverinstall"
@@ -204,6 +205,19 @@ func launchBootstrap(ctx context.Context, route serverinstall.BootstrapRoute, in
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = input, output, output
 	cmd.Env = bootstrapEnvironment(os.Environ(), route.HelperPath, route.Plain, route.NoColor)
 
+	return runBootstrapChild(cmd, input)
+}
+
+// The parent owns final terminal restoration even if cancellation must kill an
+// unresponsive selected manager before its own restoration defer can run.
+func runBootstrapChild(cmd *exec.Cmd, input *os.File) (err error) {
+	state, e := term.GetState(int(input.Fd()))
+	if e != nil {
+		return e
+	}
+	defer func() { err = errors.Join(err, term.Restore(int(input.Fd()), state)) }()
+	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
+	cmd.WaitDelay = 2 * time.Second
 	return cmd.Run()
 }
 
