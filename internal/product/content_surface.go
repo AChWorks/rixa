@@ -13,28 +13,31 @@ import (
 
 	"github.com/AChWorks/achrix"
 	shell "github.com/AChWorks/achrix/admin"
+	"github.com/AChWorks/achrix/admin/localize"
 )
 
 type contentSurface struct {
-	service     *EditorialService
-	publication *PublicationService
+	service        *EditorialService
+	publication    *PublicationService
+	contentLocales []localize.Locale
 }
 
-func newContentSurface(service *EditorialService, publication *PublicationService) (shell.Surface, error) {
+func newContentSurface(service *EditorialService, publication *PublicationService, languages ...localize.Locale) (shell.Surface, error) {
 	if service == nil {
 		return shell.Surface{}, shell.ErrConfiguration
 	}
-	h := &contentSurface{service: service, publication: publication}
-	return shell.Surface{ID: "content", Title: shell.Text{English: "Content", Persian: "محتوا"}, Capability: CapabilityContentList, Target: ContentCollectionTarget, Handler: h.serve}, nil
+	h := &contentSurface{service: service, publication: publication, contentLocales: append([]localize.Locale(nil), languages...)}
+	return shell.Surface{ID: "content", Title: shell.Text{Domain: "rixa", Key: "content"}, Capability: CapabilityContentList, Target: ContentCollectionTarget, Handler: h.serve}, nil
 }
 
 type contentIndexView struct {
-	Language    string
+	Locale      *localize.Localizer
 	Items       []ContentSummary
+	Count       int64
 	OperationID string
 }
 type contentEditView struct {
-	Language    string
+	Locale      *localize.Localizer
 	Revision    ContentRevision
 	History     []RevisionSummary
 	Body        template.HTML
@@ -42,10 +45,11 @@ type contentEditView struct {
 	OperationID string
 }
 type contentPreviewView struct {
-	Language   string
-	Revision   ContentRevision
-	Body       template.HTML
-	Appearance Appearance
+	Locale           *localize.Localizer
+	Revision         ContentRevision
+	Body             template.HTML
+	Appearance       Appearance
+	ContentDirection string
 }
 
 func (h *contentSurface) serve(w http.ResponseWriter, r *http.Request, view shell.Request) {
@@ -97,7 +101,7 @@ func (h *contentSurface) index(w http.ResponseWriter, r *http.Request, view shel
 		editorialHTTPFail(w, err, "")
 		return
 	}
-	if err = view.Render(shell.Page{Title: (shell.Text{English: "Content", Persian: "محتوا"}).In(view.Language), Template: contentIndexTemplate, Data: contentIndexView{Language: view.Language, Items: items, OperationID: newOperationID()}}); err != nil {
+	if err = renderProductPage(view, "content", shell.Page{Template: contentIndexTemplate, Data: contentIndexView{Locale: view.Localizer, Items: items, Count: int64(len(items)), OperationID: newOperationID()}}); err != nil {
 		editorialHTTPFail(w, ErrEditorialUnavailable, "")
 	}
 }
@@ -126,7 +130,7 @@ func (h *contentSurface) edit(w http.ResponseWriter, r *http.Request, view shell
 	if h.publication != nil {
 		publication = h.publication.State(revision.ID, revision.Kind)
 	}
-	if err = view.Render(shell.Page{Title: (shell.Text{English: "Edit content", Persian: "ویرایش محتوا"}).In(view.Language), Template: contentEditTemplate, Data: contentEditView{Language: view.Language, Revision: revision, History: history, Body: body, Publication: publication, OperationID: newOperationID()}}); err != nil {
+	if err = renderProductPage(view, "edit_content", shell.Page{Template: contentEditTemplate, Data: contentEditView{Locale: view.Localizer, Revision: revision, History: history, Body: body, Publication: publication, OperationID: newOperationID()}}); err != nil {
 		editorialHTTPFail(w, ErrEditorialUnavailable, "")
 	}
 }
@@ -157,7 +161,18 @@ func (h *contentSurface) preview(w http.ResponseWriter, r *http.Request, view sh
 		editorialHTTPFail(w, ErrEditorialUnavailable, "")
 		return
 	}
-	if err = view.Render(shell.Page{Title: (shell.Text{English: "Private preview", Persian: "پیش‌نمایش خصوصی"}).In(view.Language), Template: contentPreviewTemplate, Data: contentPreviewView{Language: view.Language, Revision: revision, Body: body, Appearance: appearance}}); err != nil {
+	direction := ""
+	for _, language := range h.contentLocales {
+		if language.Tag == appearance.SiteLanguage {
+			direction = language.Direction
+			break
+		}
+	}
+	if direction == "" {
+		editorialHTTPFail(w, ErrEditorialUnavailable, "")
+		return
+	}
+	if err = renderProductPage(view, "private_preview", shell.Page{Template: contentPreviewTemplate, Data: contentPreviewView{Locale: view.Localizer, Revision: revision, Body: body, Appearance: appearance, ContentDirection: direction}}); err != nil {
 		editorialHTTPFail(w, ErrEditorialUnavailable, "")
 	}
 }
@@ -316,7 +331,6 @@ func (h *contentSurface) publish(w http.ResponseWriter, r *http.Request, view sh
 	})
 }
 
-
 func decodeEditorialJSON(w http.ResponseWriter, r *http.Request, value any) error {
 	if len(r.Header.Values("Content-Type")) != 1 || r.Header.Get("Content-Type") != "application/json" {
 		return ErrEditorialInvalid
@@ -373,42 +387,47 @@ func editorialHTTPFail(w http.ResponseWriter, err error, operationID string) {
 
 var contentIndexTemplate = template.Must(template.New("content-index").Parse(`{{define "content"}}
 <script src="/admin/content/editor.js" defer></script>
-<section><h2>{{if eq .Language "fa"}}محتوای تازه{{else}}New content{{end}}</h2><p>{{if eq .Language "fa"}}ایجاد فقط یک پیش‌نویس خصوصی می‌سازد و چیزی را عمومی نمی‌کند.{{else}}Creation makes only a private draft and publishes nothing.{{end}}</p>
-<form data-admin-form data-content-create action="/admin/content/create" method="post"><input type="hidden" name="operation_id" value="{{.OperationID}}"><input type="hidden" name="body_html" value="&lt;p&gt;&lt;br&gt;&lt;/p&gt;"><label>{{if eq .Language "fa"}}نوع{{else}}Type{{end}} <select name="kind" required><option value="post">{{if eq .Language "fa"}}نوشته{{else}}Post{{end}}</option><option value="page">{{if eq .Language "fa"}}برگه{{else}}Page{{end}}</option></select></label><label>{{if eq .Language "fa"}}عنوان{{else}}Title{{end}} <input name="title" maxlength="200" required dir="auto"></label><button type="submit">{{if eq .Language "fa"}}ایجاد پیش‌نویس{{else}}Create draft{{end}}</button></form></section>
-<section><h2>{{if eq .Language "fa"}}محتوای ذخیره‌شده{{else}}Saved content{{end}}</h2>{{if .Items}}<table><thead><tr><th>{{if eq .Language "fa"}}عنوان{{else}}Title{{end}}</th><th>{{if eq .Language "fa"}}نوع{{else}}Type{{end}}</th><th>{{if eq .Language "fa"}}نسخه{{else}}Revision{{end}}</th><th>{{if eq .Language "fa"}}قصد انتشار{{else}}Publication intent{{end}}</th></tr></thead><tbody>{{range .Items}}<tr><td><a href="/admin/content/edit/{{.ID}}"><bdi dir="auto">{{.Title}}</bdi></a><br><code>{{.ID}}</code></td><td>{{.Kind}}</td><td>{{.HeadRevision}}</td><td>{{if .PublicationIntentRevision}}{{.PublicationIntentRevision}}{{else}}—{{end}}</td></tr>{{end}}</tbody></table>{{else}}<p>{{if eq .Language "fa"}}هنوز محتوایی ذخیره نشده است.{{else}}No content has been saved yet.{{end}}</p>{{end}}</section>
+<section><h2>{{.Locale.Text "rixa" "new_content" nil}}</h2><p>{{.Locale.Text "rixa" "draft_creation_notice" nil}}</p>
+<form data-admin-form data-content-create action="/admin/content/create" method="post"><input type="hidden" name="operation_id" value="{{.OperationID}}"><input type="hidden" name="body_html" value="&lt;p&gt;&lt;br&gt;&lt;/p&gt;"><label>{{.Locale.Text "rixa" "type" nil}} <select name="kind" required><option value="post">{{.Locale.Text "rixa" "post" nil}}</option><option value="page">{{.Locale.Text "rixa" "page" nil}}</option></select></label><label>{{.Locale.Text "rixa" "title" nil}} <input name="title" maxlength="200" required dir="auto"></label><button type="submit">{{.Locale.Text "rixa" "create_draft" nil}}</button></form></section>
+<section><h2>{{.Locale.Text "rixa" "saved_content" nil}}</h2><p>{{.Locale.Plural "rixa" "saved_content_count" .Count nil}}</p>{{if .Items}}<table><thead><tr><th>{{.Locale.Text "rixa" "title" nil}}</th><th>{{.Locale.Text "rixa" "type" nil}}</th><th>{{.Locale.Text "rixa" "revision" nil}}</th><th>{{.Locale.Text "rixa" "publication_intent" nil}}</th></tr></thead><tbody>{{range .Items}}<tr><td><a href="/admin/content/edit/{{.ID}}"><bdi dir="auto">{{.Title}}</bdi></a><br><code>{{.ID}}</code></td><td>{{if eq .Kind "post"}}{{$.Locale.Text "rixa" "post" nil}}{{else}}{{$.Locale.Text "rixa" "page" nil}}{{end}}</td><td>{{.HeadRevision}}</td><td>{{if .PublicationIntentRevision}}{{.PublicationIntentRevision}}{{else}}—{{end}}</td></tr>{{end}}</tbody></table>{{else}}<p>{{.Locale.Text "rixa" "no_content" nil}}</p>{{end}}</section>
 {{template "operation-lookup" .}}{{end}}
-{{define "operation-lookup"}}<section><h2>{{if eq .Language "fa"}}بررسی نتیجهٔ عملیات{{else}}Inspect mutation outcome{{end}}</h2><p>{{if eq .Language "fa"}}اگر پاسخ تغییر از دست رفت، همان شناسه را بررسی کنید و تغییر را دوباره نفرستید.{{else}}If a mutation response was lost, inspect the same ID and do not submit the change again.{{end}}</p><form data-admin-form data-read-only data-operation-lookup action="/admin/content/operation" method="post"><label>{{if eq .Language "fa"}}شناسهٔ عملیات{{else}}Operation ID{{end}} <input name="operation_id" data-operation-lookup-input dir="ltr" maxlength="36" required></label><button type="submit">{{if eq .Language "fa"}}بررسی{{else}}Inspect{{end}}</button></form></section>{{end}}`))
+{{define "operation-lookup"}}<section><h2>{{.Locale.Text "rixa" "inspect_mutation_outcome" nil}}</h2><p>{{.Locale.Text "rixa" "unknown_mutation_notice" nil}}</p><form data-admin-form data-read-only data-operation-lookup action="/admin/content/operation" method="post"><label>{{.Locale.Text "rixa" "operation_id" nil}} <input name="operation_id" data-operation-lookup-input dir="ltr" maxlength="36" required></label><button type="submit">{{.Locale.Text "rixa" "inspect" nil}}</button></form></section>{{end}}`))
 
 var contentEditTemplate = template.Must(template.New("content-edit").Parse(`{{define "content"}}
-<link rel="stylesheet" href="/admin/content/editor.css"><script src="/admin/content/editor.js" defer></script><p><a href="/admin/content">← {{if eq .Language "fa"}}فهرست محتوا{{else}}Content list{{end}}</a></p><p>ID: <code>{{.Revision.ID}}</code> · {{if eq .Language "fa"}}نسخه{{else}}revision{{end}} <output data-current-revision>{{.Revision.Revision}}</output></p>
-<form data-admin-form data-content-save action="/admin/content/save" method="post"><input type="hidden" name="operation_id" value="{{.OperationID}}" data-operation-field><input type="hidden" name="id" value="{{.Revision.ID}}"><input type="hidden" name="expected_head" value="{{.Revision.Revision}}" data-head-field><textarea name="body_html" data-editor-source hidden>{{.Revision.BodyHTML}}</textarea><label>{{if eq .Language "fa"}}عنوان{{else}}Title{{end}} <input name="title" value="{{.Revision.Title}}" maxlength="200" required dir="auto"></label>
-<fieldset><legend>{{if eq .Language "fa"}}قالب‌بندی{{else}}Formatting{{end}}</legend><div class="editor-toolbar" role="toolbar"><button type="button" data-wrap="strong"><strong>B</strong></button><button type="button" data-wrap="em"><em>I</em></button><button type="button" data-block="p">P</button><button type="button" data-block="h2">H2</button><button type="button" data-block="h3">H3</button></div><label>{{if eq .Language "fa"}}پیوند HTTPS یا داخلی{{else}}HTTPS or site-relative link{{end}} <input data-link-url dir="ltr"></label><button type="button" data-add-link>{{if eq .Language "fa"}}پیوند دادن انتخاب{{else}}Link selection{{end}}</button><label>Media ID <input data-media-id dir="ltr" maxlength="26" pattern="[A-Z2-7]{26}"></label><label>{{if eq .Language "fa"}}توضیح Media{{else}}Media description{{end}} <input data-media-caption maxlength="300" dir="auto"></label><button type="button" data-add-media>{{if eq .Language "fa"}}افزودن ارجاع Media{{else}}Insert Media reference{{end}}</button></fieldset>
-<div data-editor contenteditable="true" role="textbox" aria-multiline="true" aria-label="{{if eq .Language "fa"}}متن محتوا{{else}}Content body{{end}}" dir="auto">{{.Body}}</div><button type="submit">{{if eq .Language "fa"}}ذخیرهٔ نسخهٔ تازه{{else}}Save new revision{{end}}</button></form>
-<p><a data-preview-link href="/admin/content/preview/{{.Revision.ID}}/{{.Revision.Revision}}">{{if eq .Language "fa"}}پیش‌نمایش خصوصی همین نسخه{{else}}Private preview of this revision{{end}}</a></p>
-<section><h2>{{if eq .Language "fa"}}قصد انتشار{{else}}Publication intent{{end}}</h2><p>{{if eq .Language "fa"}}این عمل چیزی را عمومی نمی‌کند.{{else}}This action does not make anything public.{{end}}</p><form data-admin-form data-publication-form action="/admin/content/publication-intent" method="post"><input type="hidden" name="operation_id" value="{{.OperationID}}" data-operation-field><input type="hidden" name="id" value="{{.Revision.ID}}"><input type="hidden" name="expected_head" value="{{.Revision.Revision}}" data-head-field><input type="hidden" name="expected_publication_version" value="{{.Revision.PublicationIntentVersion}}" data-publication-version-field><label>{{if eq .Language "fa"}}نسخه{{else}}Revision{{end}} <input name="revision" value="{{.Revision.Revision}}" data-revision-field inputmode="numeric" pattern="[0-9]+" required></label><button type="submit">{{if eq .Language "fa"}}ثبت قصد انتشار{{else}}Set publication intent{{end}}</button></form>{{if .Revision.PublicationIntentRevision}}<p>{{if eq .Language "fa"}}نسخهٔ علامت‌خورده{{else}}Marked revision{{end}}: <output data-publication-intent-output>{{.Revision.PublicationIntentRevision}}</output></p><form data-admin-form data-publication-clear action="/admin/content/publication-intent-clear" method="post"><input type="hidden" name="operation_id" value="{{.OperationID}}" data-operation-field><input type="hidden" name="id" value="{{.Revision.ID}}"><input type="hidden" name="expected_head" value="{{.Revision.Revision}}" data-head-field><input type="hidden" name="expected_publication_version" value="{{.Revision.PublicationIntentVersion}}" data-publication-version-field><input type="hidden" name="revision" value="{{.Revision.Revision}}"><button type="submit">{{if eq .Language "fa"}}پاک کردن قصد انتشار{{else}}Clear publication intent{{end}}</button></form>{{end}}</section>
-{{if .Publication.Enabled}}<section><h2>{{if eq .Language "fa"}}انتشار عمومی{{else}}Public publication{{end}}</h2>
-<p>{{if eq .Language "fa"}}«قصد انتشار» فقط نسخه را انتخاب می‌کند. این عمل یک نسل ایستای یکپارچه می‌سازد و پس از بررسی freshness آن را فعال می‌کند.{{else}}Publication intent only selects a revision. This action builds one coherent static generation and activates it only after freshness checks.{{end}}</p>
-<p>{{if eq .Language "fa"}}نسل فعال{{else}}Active generation{{end}}: <output data-publication-generation-output>{{if .Publication.Generation}}{{.Publication.Generation}}{{else}}—{{end}}</output>{{if .Publication.ActiveRevision}} · {{if eq .Language "fa"}}نسخه عمومی{{else}}public revision{{end}} {{.Publication.ActiveRevision}}{{end}}</p>
+<link rel="stylesheet" href="/admin/content/editor.css"><script src="/admin/content/editor.js" defer></script><p><a href="/admin/content">← {{.Locale.Text "rixa" "content_list" nil}}</a></p><p>{{.Locale.Text "rixa" "id" nil}}: <code dir="ltr">{{.Revision.ID}}</code> · {{.Locale.Text "rixa" "revision" nil}} <output data-current-revision>{{.Revision.Revision}}</output></p>
+<form data-admin-form data-content-save action="/admin/content/save" method="post"><input type="hidden" name="operation_id" value="{{.OperationID}}" data-operation-field><input type="hidden" name="id" value="{{.Revision.ID}}"><input type="hidden" name="expected_head" value="{{.Revision.Revision}}" data-head-field><textarea name="body_html" data-editor-source hidden>{{.Revision.BodyHTML}}</textarea><label>{{.Locale.Text "rixa" "title" nil}} <input name="title" value="{{.Revision.Title}}" maxlength="200" required dir="auto"></label>
+<fieldset><legend>{{.Locale.Text "rixa" "formatting" nil}}</legend><div class="editor-toolbar" role="toolbar"><button type="button" data-wrap="strong" aria-label="{{.Locale.Text "rixa" "bold" nil}}"><strong>B</strong></button><button type="button" data-wrap="em" aria-label="{{.Locale.Text "rixa" "italic" nil}}"><em>I</em></button><button type="button" data-block="p" aria-label="{{.Locale.Text "rixa" "paragraph" nil}}">P</button><button type="button" data-block="h2" aria-label="{{.Locale.Text "rixa" "heading_2" nil}}">H2</button><button type="button" data-block="h3" aria-label="{{.Locale.Text "rixa" "heading_3" nil}}">H3</button></div><label>{{.Locale.Text "rixa" "link_url" nil}} <input data-link-url dir="ltr"></label><button type="button" data-add-link>{{.Locale.Text "rixa" "link_selection" nil}}</button><label>{{.Locale.Text "rixa" "media_id" nil}} <input data-media-id dir="ltr" maxlength="26" pattern="[A-Z2-7]{26}"></label><label>{{.Locale.Text "rixa" "media_description" nil}} <input data-media-caption maxlength="300" dir="auto"></label><button type="button" data-add-media>{{.Locale.Text "rixa" "insert_media_reference" nil}}</button></fieldset>
+<div data-editor contenteditable="true" role="textbox" aria-multiline="true" aria-label="{{.Locale.Text "rixa" "content_body" nil}}" dir="auto">{{.Body}}</div><button type="submit">{{.Locale.Text "rixa" "save_revision" nil}}</button></form>
+<p><a data-preview-link href="/admin/content/preview/{{.Revision.ID}}/{{.Revision.Revision}}">{{.Locale.Text "rixa" "preview_revision" nil}}</a></p>
+<section><h2>{{.Locale.Text "rixa" "publication_intent" nil}}</h2><p>{{.Locale.Text "rixa" "publication_intent_notice" nil}}</p><form data-admin-form data-publication-form action="/admin/content/publication-intent" method="post"><input type="hidden" name="operation_id" value="{{.OperationID}}" data-operation-field><input type="hidden" name="id" value="{{.Revision.ID}}"><input type="hidden" name="expected_head" value="{{.Revision.Revision}}" data-head-field><input type="hidden" name="expected_publication_version" value="{{.Revision.PublicationIntentVersion}}" data-publication-version-field><label>{{.Locale.Text "rixa" "revision" nil}} <input name="revision" value="{{.Revision.Revision}}" data-revision-field inputmode="numeric" pattern="[0-9]+" required></label><button type="submit">{{.Locale.Text "rixa" "set_publication_intent" nil}}</button></form>{{if .Revision.PublicationIntentRevision}}<p>{{.Locale.Text "rixa" "marked_revision" nil}}: <output data-publication-intent-output>{{.Revision.PublicationIntentRevision}}</output></p><form data-admin-form data-publication-clear action="/admin/content/publication-intent-clear" method="post"><input type="hidden" name="operation_id" value="{{.OperationID}}" data-operation-field><input type="hidden" name="id" value="{{.Revision.ID}}"><input type="hidden" name="expected_head" value="{{.Revision.Revision}}" data-head-field><input type="hidden" name="expected_publication_version" value="{{.Revision.PublicationIntentVersion}}" data-publication-version-field><input type="hidden" name="revision" value="{{.Revision.Revision}}"><button type="submit">{{.Locale.Text "rixa" "clear_publication_intent" nil}}</button></form>{{end}}</section>
+{{if .Publication.Enabled}}<section><h2>{{.Locale.Text "rixa" "public_publication" nil}}</h2>
+<p>{{.Locale.Text "rixa" "publication_apply_notice" nil}}</p>
+<p>{{.Locale.Text "rixa" "active_generation" nil}}: <output data-publication-generation-output>{{if .Publication.Generation}}{{.Publication.Generation}}{{else}}—{{end}}</output>{{if .Publication.ActiveRevision}} · {{.Locale.Text "rixa" "public_revision" nil}} {{.Publication.ActiveRevision}}{{end}}</p>
 <form data-admin-form data-publication-apply action="/admin/content/publish" method="post">
 <input type="hidden" name="operation_id" value="{{.OperationID}}" data-operation-field>
 <input type="hidden" name="id" value="{{.Revision.ID}}">
 <input type="hidden" name="expected_generation" value="{{.Publication.Generation}}" data-publication-generation>
-<label>{{if eq .Language "fa"}}مسیر عمومی{{else}}Public route{{end}} <input name="route" value="{{.Publication.DesiredRoute}}" maxlength="512" dir="ltr" required></label>
-<button type="submit">{{if eq .Language "fa"}}اعمال انتشار یکپارچه{{else}}Apply coherent publication{{end}}</button>
+<label>{{.Locale.Text "rixa" "public_route" nil}} <input name="route" value="{{.Publication.DesiredRoute}}" maxlength="512" dir="ltr" required></label>
+<button type="submit">{{.Locale.Text "rixa" "apply_publication" nil}}</button>
 </form></section>{{end}}
-<section><h2>{{if eq .Language "fa"}}نسخه‌های ذخیره‌شده{{else}}Saved revisions{{end}}</h2><ol>{{range .History}}<li><a href="/admin/content/preview/{{$.Revision.ID}}/{{.Revision}}">{{if eq $.Language "fa"}}نسخه{{else}}Revision{{end}} {{.Revision}}</a> — <bdi dir="auto">{{.Title}}</bdi> · <code>{{.Actor}}</code></li>{{end}}</ol></section>
-<section><h2>{{if eq .Language "fa"}}بررسی نتیجهٔ عملیات{{else}}Inspect mutation outcome{{end}}</h2><form data-admin-form data-read-only data-operation-lookup action="/admin/content/operation" method="post"><label>Operation ID <input name="operation_id" data-operation-lookup-input dir="ltr" maxlength="36" required></label><button type="submit">{{if eq .Language "fa"}}بررسی{{else}}Inspect{{end}}</button></form></section>{{end}}`))
+<section><h2>{{.Locale.Text "rixa" "saved_revisions" nil}}</h2><ol>{{range .History}}<li><a href="/admin/content/preview/{{$.Revision.ID}}/{{.Revision}}">{{$.Locale.Text "rixa" "revision" nil}} {{.Revision}}</a> — <bdi dir="auto">{{.Title}}</bdi> · <code>{{.Actor}}</code></li>{{end}}</ol></section>
+<section><h2>{{.Locale.Text "rixa" "inspect_mutation_outcome" nil}}</h2><form data-admin-form data-read-only data-operation-lookup action="/admin/content/operation" method="post"><label>{{.Locale.Text "rixa" "operation_id" nil}} <input name="operation_id" data-operation-lookup-input dir="ltr" maxlength="36" required></label><button type="submit">{{.Locale.Text "rixa" "inspect" nil}}</button></form></section>{{end}}`))
 
-var contentPreviewTemplate = template.Must(template.New("content-preview").Parse(`{{define "content"}}<link rel="stylesheet" href="/admin/content/editor.css"><p><a href="/admin/content/edit/{{.Revision.ID}}">← {{if eq .Language "fa"}}بازگشت به ویرایش{{else}}Back to edit{{end}}</a></p><p><strong>{{if eq .Language "fa"}}پیش‌نمایش خصوصی{{else}}Private preview{{end}}</strong> · {{if eq .Language "fa"}}نسخه{{else}}revision{{end}} {{.Revision.Revision}}</p><article class="site-preview" data-theme="{{.Appearance.Theme}}" lang="{{.Appearance.SiteLanguage}}" dir="{{if eq .Appearance.SiteLanguage "fa"}}rtl{{else}}ltr{{end}}"><header>{{if .Appearance.HeaderShowTitle}}<h1><bdi dir="auto">{{.Appearance.SiteTitle}}</bdi></h1>{{end}}{{if .Appearance.HeaderTagline}}<p dir="auto">{{.Appearance.HeaderTagline}}</p>{{end}}</header><h2 dir="auto">{{.Revision.Title}}</h2><div class="preview-body">{{.Body}}</div>{{if .Appearance.FooterText}}<footer dir="auto">{{.Appearance.FooterText}}</footer>{{end}}</article><p>{{if eq .Language "fa"}}ارجاع‌های Media عمداً فایل خصوصی را inline نمی‌کنند.{{else}}Media references intentionally do not inline private originals.{{end}}</p>{{end}}`))
+var contentPreviewTemplate = template.Must(template.New("content-preview").Parse(`{{define "content"}}<link rel="stylesheet" href="/admin/content/editor.css"><p><a href="/admin/content/edit/{{.Revision.ID}}">← {{.Locale.Text "rixa" "back_to_edit" nil}}</a></p><p><strong>{{.Locale.Text "rixa" "private_preview" nil}}</strong> · {{.Locale.Text "rixa" "revision" nil}} {{.Revision.Revision}}</p><article class="site-preview" data-theme="{{.Appearance.Theme}}" lang="{{.Appearance.SiteLanguage}}" dir="{{.ContentDirection}}"><header>{{if .Appearance.HeaderShowTitle}}<h1><bdi dir="auto">{{.Appearance.SiteTitle}}</bdi></h1>{{end}}{{if .Appearance.HeaderTagline}}<p dir="auto">{{.Appearance.HeaderTagline}}</p>{{end}}</header><h2 dir="auto">{{.Revision.Title}}</h2><div class="preview-body">{{.Body}}</div>{{if .Appearance.FooterText}}<footer dir="auto">{{.Appearance.FooterText}}</footer>{{end}}</article><p>{{.Locale.Text "rixa" "private_media_notice" nil}}</p>{{end}}`))
 
 const contentEditorCSS = `[data-editor]{min-height:16rem;border:1px solid GrayText;padding:1rem;max-width:52rem;overflow-wrap:anywhere}[data-editor]:focus{outline:3px solid #3478db;outline-offset:3px}.editor-toolbar{display:flex;flex-wrap:wrap;gap:.4rem}.site-preview{max-width:48rem;border:1px solid GrayText;padding:1.5rem}.site-preview[data-theme="dark"]{color-scheme:dark;background:#171717;color:#f2f2f2}.site-preview[data-theme="light"]{color-scheme:light;background:#fff;color:#111}.preview-body{overflow-wrap:anywhere}[data-editor] figure{border:1px dashed GrayText;padding:.7rem}`
 
 const contentEditorJS = `
 "use strict";
 (() => {
-  const fa = document.documentElement.lang === "fa";
   const status = document.getElementById("status");
-  const text = (en, faText) => fa ? faText : en;
+  const i18n = window.AChrixI18n;
+  function isolated(value) {
+    const node = document.createElement("bdi");
+    node.dir = "ltr";
+    node.textContent = value;
+    return node;
+  }
 
   function uuid() {
     if (crypto.randomUUID) return crypto.randomUUID();
@@ -472,10 +491,7 @@ const contentEditorJS = `
     const lookup = document.querySelector("[data-operation-lookup-input]");
     if (operation && lookup) lookup.value = operation.value;
     if (operation && status) {
-      status.textContent = text(
-        "Outcome unknown. Do not submit again. Inspect operation " + operation.value + ".",
-        "نتیجه نامعلوم است. دوباره ارسال نکنید. عملیات " + operation.value + " را بررسی کنید."
-      );
+      status.replaceChildren(i18n.parts("rixa", "outcome_unknown", {Operation: isolated(operation.value)}));
     }
   }));
 
@@ -500,10 +516,7 @@ const contentEditorJS = `
     });
     editor.addEventListener("drop", event => {
       event.preventDefault();
-      if (status) status.textContent = text(
-        "Drop is disabled. Upload files in File library and insert the stable Media ID here.",
-        "رها کردن فایل در ویرایشگر غیرفعال است. فایل را در کتابخانهٔ فایل‌ها بارگذاری کنید و شناسهٔ پایدار Media را اینجا درج کنید."
-      );
+      if (status) status.textContent = i18n.text("rixa", "editor_drop_disabled");
     });
   }
 
@@ -540,7 +553,7 @@ const contentEditorJS = `
     if (!editor) return;
     const href = document.querySelector("[data-link-url]")?.value || "";
     if (!safeLink(href)) {
-      if (status) status.textContent = text("Use an HTTPS URL or a site-relative path.", "از نشانی HTTPS یا مسیر داخلی سایت استفاده کنید.");
+      if (status) status.textContent = i18n.text("rixa", "editor_invalid_link");
       return;
     }
     const selection = getSelection();
@@ -561,7 +574,7 @@ const contentEditorJS = `
     const id = document.querySelector("[data-media-id]")?.value || "";
     const caption = document.querySelector("[data-media-caption]")?.value || "";
     if (!/^[A-Z2-7]{26}$/.test(id)) {
-      if (status) status.textContent = text("Enter a valid Media asset ID.", "شناسهٔ معتبر Media را وارد کنید.");
+      if (status) status.textContent = i18n.text("rixa", "editor_invalid_media");
       return;
     }
     const figure = document.createElement("figure");
@@ -608,10 +621,10 @@ const contentEditorJS = `
 
   document.querySelectorAll("[data-operation-lookup]").forEach(form => form.addEventListener("admin:success", event => {
     const detail = event.detail || {};
-    if (status) status.textContent = text(
-      "Operation " + (detail.operation_id || "") + " committed as " + (detail.kind || "") + " on " + (detail.resource_id || "") + " revision " + (detail.result_revision || "0") + ".",
-      "عملیات " + (detail.operation_id || "") + " ثبت شده است."
-    );
+    if (status) status.replaceChildren(i18n.parts("rixa", "operation_committed", {
+      Operation: isolated(detail.operation_id || ""), Kind: isolated(detail.kind || ""),
+      Resource: isolated(detail.resource_id || ""), Revision: isolated(detail.result_revision || "0")
+    }));
   }));
 
   sync();

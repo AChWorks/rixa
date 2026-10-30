@@ -1,0 +1,298 @@
+{
+  "schema": 1,
+  "locale": "en",
+  "name": "English",
+  "direction": "ltr",
+  "domain": "rixa",
+  "messages": {
+    "sites_notice": {
+      "other": "Declared sites for this installation. A control session is not itself a site permission."
+    },
+    "id": {
+      "other": "ID"
+    },
+    "origin": {
+      "other": "Origin"
+    },
+    "state": {
+      "other": "State"
+    },
+    "disabled": {
+      "other": "disabled"
+    },
+    "enabled": {
+      "other": "enabled"
+    },
+    "login": {
+      "other": "Login"
+    },
+    "initial_password": {
+      "other": "Initial password"
+    },
+    "create_site_account": {
+      "other": "Create site account"
+    },
+    "new_content": {
+      "other": "New content"
+    },
+    "draft_creation_notice": {
+      "other": "Creation makes only a private draft and publishes nothing."
+    },
+    "type": {
+      "other": "Type"
+    },
+    "post": {
+      "other": "Post"
+    },
+    "page": {
+      "other": "Page"
+    },
+    "title": {
+      "other": "Title"
+    },
+    "create_draft": {
+      "other": "Create draft"
+    },
+    "saved_content": {
+      "other": "Saved content"
+    },
+    "revision": {
+      "other": "Revision"
+    },
+    "publication_intent": {
+      "other": "Publication intent"
+    },
+    "no_content": {
+      "other": "No content has been saved yet."
+    },
+    "inspect_mutation_outcome": {
+      "other": "Inspect mutation outcome"
+    },
+    "unknown_mutation_notice": {
+      "other": "If a mutation response was lost, inspect the same ID and do not submit the change again."
+    },
+    "operation_id": {
+      "other": "Operation ID"
+    },
+    "inspect": {
+      "other": "Inspect"
+    },
+    "content_list": {
+      "other": "Content list"
+    },
+    "formatting": {
+      "other": "Formatting"
+    },
+    "link_url": {
+      "other": "HTTPS or site-relative link"
+    },
+    "link_selection": {
+      "other": "Link selection"
+    },
+    "media_description": {
+      "other": "Media description"
+    },
+    "insert_media_reference": {
+      "other": "Insert Media reference"
+    },
+    "content_body": {
+      "other": "Content body"
+    },
+    "save_revision": {
+      "other": "Save new revision"
+    },
+    "preview_revision": {
+      "other": "Private preview of this revision"
+    },
+    "publication_intent_notice": {
+      "other": "This action does not make anything public."
+    },
+    "set_publication_intent": {
+      "other": "Set publication intent"
+    },
+    "marked_revision": {
+      "other": "Marked revision"
+    },
+    "clear_publication_intent": {
+      "other": "Clear publication intent"
+    },
+    "public_publication": {
+      "other": "Public publication"
+    },
+    "publication_apply_notice": {
+      "other": "Publication intent only selects a revision. This action builds one coherent static generation and activates it only after freshness checks."
+    },
+    "active_generation": {
+      "other": "Active generation"
+    },
+    "public_revision": {
+      "other": "public revision"
+    },
+    "public_route": {
+      "other": "Public route"
+    },
+    "apply_publication": {
+      "other": "Apply coherent publication"
+    },
+    "saved_revisions": {
+      "other": "Saved revisions"
+    },
+    "back_to_edit": {
+      "other": "Back to edit"
+    },
+    "private_preview": {
+      "other": "Private preview"
+    },
+    "private_media_notice": {
+      "other": "Media references intentionally do not inline private originals."
+    },
+    "appearance_locale_notice": {
+      "other": "These settings belong to the site and are independent from the administration interface language."
+    },
+    "appearance_revision": {
+      "other": "Current appearance revision"
+    },
+    "site": {
+      "other": "Site"
+    },
+    "site_title": {
+      "other": "Site title"
+    },
+    "site_description": {
+      "other": "Site description"
+    },
+    "site_language": {
+      "other": "Site language"
+    },
+    "home": {
+      "other": "Home"
+    },
+    "home_mode": {
+      "other": "Home mode"
+    },
+    "latest_posts": {
+      "other": "Latest posts"
+    },
+    "specific_page": {
+      "other": "A specific page"
+    },
+    "home_page_id": {
+      "other": "Home page ID"
+    },
+    "home_page_notice": {
+      "other": "In page mode, the ID must reference a saved page in this same site."
+    },
+    "header": {
+      "other": "Header"
+    },
+    "header_show_title": {
+      "other": "Show site title in header"
+    },
+    "header_tagline": {
+      "other": "Header tagline"
+    },
+    "footer": {
+      "other": "Footer"
+    },
+    "footer_text": {
+      "other": "Footer text"
+    },
+    "theme": {
+      "other": "Theme"
+    },
+    "color_mode": {
+      "other": "Color mode"
+    },
+    "light": {
+      "other": "Light"
+    },
+    "dark": {
+      "other": "Dark"
+    },
+    "save_appearance": {
+      "other": "Save appearance"
+    },
+    "appearance_publication_notice": {
+      "other": "Saved appearance does not change the public site until a new coherent public generation is built and activated."
+    },
+    "unknown_save_notice": {
+      "other": "If the save response was lost, inspect the same operation ID; do not automatically submit it again."
+    },
+    "sites": {
+      "other": "Sites"
+    },
+    "content": {
+      "other": "Content"
+    },
+    "appearance": {
+      "other": "Appearance"
+    },
+    "edit_content": {
+      "other": "Edit content"
+    },
+    "media_id": {
+      "other": "Media ID"
+    },
+    "bold": {
+      "other": "Bold"
+    },
+    "italic": {
+      "other": "Italic"
+    },
+    "paragraph": {
+      "other": "Paragraph"
+    },
+    "heading_2": {
+      "other": "Heading 2"
+    },
+    "heading_3": {
+      "other": "Heading 3"
+    },
+    "public.published": {
+      "other": "Published"
+    },
+    "public.updated": {
+      "other": "Updated"
+    },
+    "public.latest_posts": {
+      "other": "Latest posts"
+    },
+    "public.no_posts": {
+      "other": "No published posts."
+    },
+    "language.title": {
+      "other": "Interface language"
+    },
+    "language.help": {
+      "other": "This choice changes only this browser’s administration language. Site content and terminal language are independent."
+    },
+    "language.label": {
+      "other": "Language"
+    },
+    "language.select": {
+      "other": "Apply language"
+    },
+    "outcome_unknown": {
+      "other": "Outcome unknown. Do not submit again. Inspect operation {Operation}."
+    },
+    "operation_committed": {
+      "other": "Operation {Operation} committed as {Kind} on {Resource} revision {Revision}."
+    },
+    "appearance_operation_committed": {
+      "other": "Operation {Operation} committed as {Kind} revision {Revision}."
+    },
+    "editor_drop_disabled": {
+      "other": "Drop is disabled. Upload files in File library and insert the stable Media ID here."
+    },
+    "editor_invalid_link": {
+      "other": "Use an HTTPS URL or a site-relative path."
+    },
+    "editor_invalid_media": {
+      "other": "Enter a valid Media asset ID."
+    },
+    "saved_content_count": {
+      "one": "{Count} saved item",
+      "other": "{Count} saved items"
+    }
+  }
+}
