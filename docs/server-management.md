@@ -181,7 +181,7 @@ Removal checks the current candidate's static/loaded service and executable owne
 
 Use this path only with an independently trusted executable or authenticated package that contains `bootstrap` and `manage prerequisites`, following its supplied guides and host profile. These commands do not by themselves provide an authenticated public one-line entry or establish production support. Published profiles and acceptance evidence belong to [Releases](https://github.com/AChWorks/rixa/releases), [installation work](https://github.com/AChWorks/rixa/issues/29) and their linked CI records; a source build or local fixture is not public delivery evidence.
 
-The [starter/generation trust sequence](release-verification.md#bootstrap-starter-and-generation-trust) first publishes and independently verifies a bootstrap-capable starter, then pins it in a subsequent reviewed immutable generation with the official verifier helper. No invented starter digest or mutable script can substitute for that initial trust. Ordinary product releases retain exactly the archive, checksum and attestation assets.
+The [starter/generation trust sequence](release-verification.md#bootstrap-starter-and-generation-trust) first publishes and independently verifies a bootstrap-capable starter, then pins it in a subsequent reviewed immutable generation with the official verifier helper. No invented starter digest or mutable script can substitute for that initial trust. The [authenticated entry guide](bootstrap-entry.md) supplies the generation-specific command and retained-tool boundary. Ordinary product releases retain exactly the archive, checksum and attestation assets.
 
 ### Discover and select the right manager
 

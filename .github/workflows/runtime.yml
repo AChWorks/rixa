@@ -58,6 +58,9 @@ jobs:
           python3 -B -m unittest discover -s scripts/lab -p 'test_*.py' -v
           bash -n scripts/lab/provision-postgres.sh
 
+      - name: Check bootstrap entry trust boundaries
+        run: python3 -B -m unittest discover -s scripts/tests -p 'test_bootstrap_entry.py' -v
+
       - name: Vet
         run: go vet ./...
 
