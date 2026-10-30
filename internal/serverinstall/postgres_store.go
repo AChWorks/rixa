@@ -60,6 +60,7 @@ type postgresJournal struct {
 	ClusterID             string                      `json:"cluster_id,omitempty"`
 	DataIdentity          string                      `json:"data_identity,omitempty"`
 	ConfigSHA256          string                      `json:"config_sha256,omitempty"`
+	AutoConfigSHA256      string                      `json:"auto_config_sha256,omitempty"`
 	HBASHA256             string                      `json:"hba_sha256,omitempty"`
 	BinarySHA256          string                      `json:"binary_sha256,omitempty"`
 	DatabaseTargets       map[string]string           `json:"database_targets,omitempty"`
@@ -123,7 +124,7 @@ func validPostgresJournal(j *postgresJournal) bool {
 	if !validPostgresVerifier(j.ControlPassword, j.ControlVerifier) || !validPostgresVerifier(j.SitePassword, j.SiteVerifier) {
 		return false
 	}
-	for _, v := range []string{j.ReviewToken, j.ReviewedManagerSHA256, j.ManagerSHA256, j.Frozen, j.HostSHA256, j.KeySHA256, j.ListsSHA256, j.ConfigSHA256, j.HBASHA256, j.BinarySHA256, j.AssessmentID, j.DpkgConfigSHA256} {
+	for _, v := range []string{j.ReviewToken, j.ReviewedManagerSHA256, j.ManagerSHA256, j.Frozen, j.HostSHA256, j.KeySHA256, j.ListsSHA256, j.ConfigSHA256, j.AutoConfigSHA256, j.HBASHA256, j.BinarySHA256, j.AssessmentID, j.DpkgConfigSHA256} {
 		if v != "" && !hashSyntax.MatchString(v) {
 			return false
 		}
@@ -253,7 +254,7 @@ func validPostgresJournal(j *postgresJournal) bool {
 			return false
 		}
 	}
-	if j.Attempts["cluster"] == "verified" && (j.ClusterID == "" || j.PostgresUID == 0 || j.PostgresGID == 0 || j.DataIdentity == "" || j.ConfigSHA256 == "" || j.HBASHA256 == "" || j.BinarySHA256 == "") {
+	if j.Attempts["cluster"] == "verified" && (j.ClusterID == "" || j.PostgresUID == 0 || j.PostgresGID == 0 || j.DataIdentity == "" || j.ConfigSHA256 == "" || j.AutoConfigSHA256 == "" || j.HBASHA256 == "" || j.BinarySHA256 == "") {
 		return false
 	}
 	if j.State == "installed" {

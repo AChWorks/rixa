@@ -267,8 +267,12 @@ func (b *postgresBackend) cleanHost(ctx context.Context, j *postgresJournal) (ma
 	if e != nil || !postgresBaseServices(services) {
 		return nil, "", ErrPrerequisite
 	}
-	listeners, e := b.m.run(ctx, "/usr/bin/ss", "--no-header", "--listening", "--tcp", "--numeric")
-	if e != nil || !postgresBaseListeners(listeners) {
+	listeners, e := b.m.run(ctx, "/usr/bin/ss", "--no-header", "--listening", "--tcp", "--udp", "--numeric", "--processes", "--extended")
+	if e != nil {
+		return nil, "", ErrPrerequisite
+	}
+	normalizedListeners, e := b.stockListeners(ctx, listeners)
+	if e != nil {
 		return nil, "", ErrPrerequisite
 	}
 	listener, e := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(j.Draft.Port))
@@ -288,14 +292,6 @@ func (b *postgresBackend) cleanHost(ctx context.Context, j *postgresJournal) (ma
 		}
 	}
 	sort.Strings(normalizedServices)
-	var normalizedListeners []string
-	for _, line := range strings.Split(string(listeners), "\n") {
-		f := strings.Fields(line)
-		if len(f) >= 5 {
-			normalizedListeners = append(normalizedListeners, f[0]+" "+f[3]+" "+f[4])
-		}
-	}
-	sort.Strings(normalizedListeners)
 	state, _ := json.Marshal(struct {
 		Machine             string
 		Packages            map[string]string
@@ -311,25 +307,6 @@ func postgresBaseServices(out []byte) bool {
 		}
 		f := strings.Fields(line)
 		if len(f) < 4 || !allowed[f[0]] {
-			return false
-		}
-	}
-	return true
-}
-func postgresBaseListeners(out []byte) bool {
-	for _, line := range strings.Split(string(out), "\n") {
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-		f := strings.Fields(line)
-		if len(f) < 5 {
-			return false
-		}
-		_, port, e := net.SplitHostPort(f[3])
-		if e != nil {
-			return false
-		}
-		if port != "22" && !(port == "53" && (strings.HasPrefix(f[3], "127.") || strings.HasPrefix(f[3], "[::1]"))) {
 			return false
 		}
 	}

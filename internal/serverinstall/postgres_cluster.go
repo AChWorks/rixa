@@ -188,6 +188,10 @@ func (b *postgresBackend) observeCluster(ctx context.Context, j *postgresJournal
 	if e != nil || !postgresHBA(hba) {
 		return ErrAuthority
 	}
+	autoConfig, e := b.observeAutoConfig(j)
+	if e != nil {
+		return e
+	}
 	if j.ConfigSHA256 != "" && j.ConfigSHA256 != digest(config) || j.HBASHA256 != "" && j.HBASHA256 != digest(hba) {
 		return ErrState
 	}
@@ -208,7 +212,7 @@ func (b *postgresBackend) observeCluster(ctx context.Context, j *postgresJournal
 	if j.BinarySHA256 != "" && j.BinarySHA256 != binary {
 		return ErrState
 	}
-	j.ClusterID, j.DataIdentity, j.ConfigSHA256, j.HBASHA256, j.BinarySHA256 = system, identity, digest(config), digest(hba), binary
+	j.ClusterID, j.DataIdentity, j.ConfigSHA256, j.AutoConfigSHA256, j.HBASHA256, j.BinarySHA256 = system, identity, digest(config), autoConfig, digest(hba), binary
 	return nil
 }
 func postgresHBA(data []byte) bool {
@@ -542,6 +546,9 @@ func (b *postgresBackend) verify(ctx context.Context, j *postgresJournal) error 
 		if e != nil || version/10000 != 18 || server+":"+database != j.DatabaseTargets[v.key] {
 			return ErrState
 		}
+		if e = postgresRequirePassword(ctx, v.dsn); e != nil {
+			return e
+		}
 		own, _ := url.Parse(v.dsn)
 		other, _ := url.Parse(v.other)
 		other.User = own.User
@@ -635,17 +642,12 @@ func (b *postgresBackend) physicalSQLProof(ctx context.Context, j *postgresJourn
 	if e := b.observeCluster(ctx, j); e != nil {
 		return e
 	}
-	out, e := b.sqlCommand(ctx, j, "postgres", "SELECT json_build_object('system',(pg_catalog.pg_control_system()).system_identifier::text,'data',current_setting('data_directory'),'listen',current_setting('listen_addresses'),'port',current_setting('port')); ")
+	out, e := b.sqlCommand(ctx, j, "postgres", "SELECT json_build_object('system',(pg_catalog.pg_control_system()).system_identifier::text,'data',current_setting('data_directory'),'listen',current_setting('listen_addresses'),'port',current_setting('port'),'config',current_setting('config_file'),'hba',current_setting('hba_file'),'ident',current_setting('ident_file'),'password',current_setting('password_encryption'),'ssl',current_setting('ssl'));")
 	if e != nil {
 		return e
 	}
-	var actual struct {
-		System string `json:"system"`
-		Data   string `json:"data"`
-		Listen string `json:"listen"`
-		Port   string `json:"port"`
-	}
-	if json.Unmarshal(out, &actual) != nil || actual.System != j.ClusterID || actual.Data != b.data(j) || actual.Listen != "127.0.0.1" || actual.Port != strconv.Itoa(j.Draft.Port) {
+	var actual postgresSecurityObservation
+	if json.Unmarshal(out, &actual) != nil || !b.validSecurityObservation(j, actual) {
 		return ErrAuthority
 	}
 	return nil

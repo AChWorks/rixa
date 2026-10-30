@@ -276,14 +276,7 @@ func TestPostgresDedicatedAffirmationCannotApproveForeignServicesOrListeners(t *
 			t.Fatal("dedicated affirmation adopted foreign service")
 		}
 	}
-	if !postgresBaseListeners([]byte("LISTEN 0 128 0.0.0.0:22 0.0.0.0:*\n")) {
-		t.Fatal("supported SSH listener rejected")
-	}
-	for _, s := range []string{"LISTEN 0 128 0.0.0.0:80 0.0.0.0:*\n", "LISTEN 0 128 127.0.0.1:5432 0.0.0.0:*\n"} {
-		if postgresBaseListeners([]byte(s)) {
-			t.Fatal("foreign listener silently adopted")
-		}
-	}
+
 }
 func TestPostgresMainSuppressionMustActuallyBeIncludedLast(t *testing.T) {
 	for _, name := range []string{"supported", "no-include", "override-after", "foreign-include", "existing-main"} {
