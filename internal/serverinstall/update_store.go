@@ -145,6 +145,20 @@ func validUpdate(u *updateJournal) bool {
 	if u.Stage != "" && u.Stage != "review" && !known[u.Stage] {
 		return false
 	}
+	// Stages are a single ordered contract. A partial receipt cannot skip
+	// compatibility, migration, readiness or the durable activation boundary.
+	for i, stage := range updateStages {
+		if u.Attempts[stage] != "" {
+			for _, previous := range updateStages[:i] {
+				if u.Attempts[previous] != "verified" {
+					return false
+				}
+			}
+		}
+	}
+	if (u.BinarySHA256 == "") != (u.UnitSHA256 == "") {
+		return false
+	}
 	if u.ExecutorGeneration < 0 || u.ExecutorGeneration > 16 {
 		return false
 	}
@@ -157,10 +171,19 @@ func validUpdate(u *updateJournal) bool {
 		return false
 	}
 	if u.Frozen == "" {
+		if u.Stage != "" && u.Stage != "review" {
+			return false
+		}
+		if u.State == "ready" && (u.ReviewToken == "" || u.ParentSHA256 == "" || u.ConfigSHA256 == "" || u.EnvironmentSHA256 == "" || u.ReviewedManagerSHA256 == "" || u.HelperSHA256 == "" || u.ArchiveSHA256 == "" || len(u.DatabaseTargets) != 2) {
+			return false
+		}
 		if u.State != "draft" && u.State != "ready" && u.State != "blocked" {
 			return false
 		}
 		return len(u.Attempts) == 0 && u.ManagerSHA256 == "" && u.ExecutorGeneration == 0 && !u.ExecutorAcknowledged && u.BinarySHA256 == "" && u.UnitSHA256 == ""
+	}
+	if u.Stage == "" || u.Stage == "review" || u.Attempts["executor"] == "" || !safePath(u.HelperPath) {
+		return false
 	}
 	if u.Frozen != updateDigest(u.Draft) || u.ParentSHA256 == "" || u.ConfigSHA256 == "" || u.EnvironmentSHA256 == "" || len(u.DatabaseTargets) != 2 || u.ManagerSHA256 == "" || u.HelperSHA256 == "" || u.ArchiveSHA256 == "" || u.ReviewedManagerSHA256 != u.ManagerSHA256 || u.ReviewToken == "" || u.ActiveRelease == "" || u.ExecutorGeneration < 1 {
 		return false
@@ -189,7 +212,9 @@ func updateResult(u *updateJournal) Result {
 		r.Actions = []string{"configure", "review", "apply", "status"}
 		r.ReviewToken = u.ReviewToken
 	case "installed":
-		r.Actions = []string{"status", "remove"}
+		if u.Attempts["remove"] == "" {
+			r.Actions = []string{"status", "remove"}
+		}
 		r.ActiveRelease = u.Draft.Release
 	case "removed":
 		r.ActiveRelease = u.Draft.Release

@@ -243,18 +243,9 @@ func (m *Manager) executeUpdate(ctx context.Context, u *updateJournal, parent *j
 		if e := m.loadedUpdateService(ctx, parent, false); e != nil {
 			return e
 		}
-		if m.unitQuiesced(ctx, "rixa.service", false) {
-			return nil
-		}
-		if _, e := m.run(ctx, "/usr/bin/systemctl", "stop", "rixa.service"); e != nil {
-			return e
-		}
-		if !m.unitQuiesced(ctx, "rixa.service", false) {
-			return ErrState
-		}
-		return nil
+		return m.disableUpdateService(ctx)
 	case "compatibility", "migrate", "check":
-		if !m.unitQuiesced(ctx, "rixa.service", false) {
+		if !m.updateMigrationFenced(ctx) {
 			return ErrState
 		}
 		if e := m.checkOwnedService(parent); e != nil {
@@ -266,7 +257,7 @@ func (m *Manager) executeUpdate(ctx context.Context, u *updateJournal, parent *j
 		}
 		return m.candidateCommand(ctx, u, candidate, command)
 	case "activate":
-		if !m.unitQuiesced(ctx, "rixa.service", false) {
+		if !m.updateMigrationFenced(ctx) {
 			return ErrState
 		}
 		if e := m.checkPayload(candidate); e != nil {
@@ -294,17 +285,29 @@ func (m *Manager) executeUpdate(ctx context.Context, u *updateJournal, parent *j
 			return e
 		}
 		if e := m.loadedUpdateService(ctx, candidate, true); e == nil {
+			if m.updateUnitFileState(ctx) == "enabled" {
+				return nil
+			}
+			if m.updateUnitFileState(ctx) != "disabled" {
+				return ErrState
+			}
+			if _, e := m.run(ctx, "/usr/bin/systemctl", "enable", "rixa.service"); e != nil {
+				return e
+			}
+			if m.updateUnitFileState(ctx) != "enabled" {
+				return ErrState
+			}
 			return nil
 		}
 		if !m.unitQuiesced(ctx, "rixa.service", false) {
 			return ErrState
 		}
-		if _, e := m.run(ctx, "/usr/bin/systemctl", "start", "rixa.service"); e != nil {
+		if _, e := m.run(ctx, "/usr/bin/systemctl", "enable", "--now", "rixa.service"); e != nil {
 			return e
 		}
 		deadline := time.Now().Add(30 * time.Second)
 		for time.Now().Before(deadline) {
-			if e := m.loadedUpdateService(ctx, candidate, true); e == nil {
+			if e := m.loadedUpdateService(ctx, candidate, true); e == nil && m.updateUnitFileState(ctx) == "enabled" {
 				return nil
 			}
 			select {
@@ -315,6 +318,9 @@ func (m *Manager) executeUpdate(ctx context.Context, u *updateJournal, parent *j
 		}
 		return ErrPrerequisite
 	case "postflight":
+		if m.updateUnitFileState(ctx) != "enabled" {
+			return ErrState
+		}
 		if e := m.checkOwnedService(candidate); e != nil {
 			return e
 		}
@@ -323,6 +329,9 @@ func (m *Manager) executeUpdate(ctx context.Context, u *updateJournal, parent *j
 		}
 		return m.updateHTTPPostflight(ctx, candidate)
 	case "commit":
+		if m.updateUnitFileState(ctx) != "enabled" {
+			return ErrState
+		}
 		if e := m.checkOwnedService(candidate); e != nil {
 			return e
 		}
@@ -474,10 +483,23 @@ func (m *Manager) rejectIncompatibleUpdate(ctx context.Context, u *updateJournal
 	if u.Attempts["migrate"] != "" || m.boundUpdateRuntime(ctx, u, parent) != nil || m.checkOwnedService(parent) != nil || m.loadedUpdateService(ctx, parent, false) != nil || !m.unitQuiesced(ctx, "rixa.service", false) {
 		return m.updateFailure(u, "compatibility-recovery-required", "Candidate compatibility did not verify. Prior serving state cannot be safely restored automatically; inspect ownership and retained evidence.", cause)
 	}
-	if _, e := m.run(ctx, "/usr/bin/systemctl", "start", "rixa.service"); e != nil {
+	if _, e := m.run(ctx, "/usr/bin/systemctl", "enable", "--now", "rixa.service"); e != nil {
 		return m.updateFailure(u, "prior-service-outcome-unknown", "Candidate compatibility failed before migration. Prior service start needs operator inspection.", e)
 	}
-	if m.loadedUpdateService(ctx, parent, true) != nil || m.updateHTTPPostflight(ctx, parent) != nil {
+	verified := false
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		if m.loadedUpdateService(ctx, parent, true) == nil && m.updateUnitFileState(ctx) == "enabled" && m.updateHTTPPostflight(ctx, parent) == nil {
+			verified = true
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return m.updateFailure(u, "prior-service-unverified", "Prior serving state requires inspection; no migration was attempted.", ctx.Err())
+		case <-time.After(250 * time.Millisecond):
+		}
+	}
+	if !verified {
 		return m.updateFailure(u, "prior-service-unverified", "Candidate compatibility failed before migration. Inspect the prior service; no migration was attempted.", cause)
 	}
 	u.State, u.Code, u.Message = "rejected", "candidate-incompatible-prior-restored", "The candidate did not prove existing-schema compatibility. No migration was attempted; the exact prior service and TLS access controls were positively restored. Use a new reviewed compatible candidate."
@@ -488,4 +510,35 @@ func (m *Manager) rejectIncompatibleUpdate(ctx context.Context, u *updateJournal
 		return updateResult(u), e
 	}
 	return updateResult(u), ErrPrerequisite
+}
+
+func (m *Manager) updateUnitFileState(ctx context.Context) string {
+	b, e := m.run(ctx, "/usr/bin/systemctl", "show", "--property=UnitFileState", "--value", "rixa.service")
+	if e != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(b))
+}
+
+// Called only after exact static/loaded service ownership is established.
+// Lost disable acknowledgements remain unknown; explicit fenced continuation
+// observes disabled+quiescent rather than replaying the disable blindly.
+func (m *Manager) disableUpdateService(ctx context.Context) error {
+	state := m.updateUnitFileState(ctx)
+	if state != "enabled" && state != "disabled" {
+		return ErrState
+	}
+	if state == "disabled" && m.unitQuiesced(ctx, "rixa.service", false) {
+		return nil
+	}
+	if _, e := m.run(ctx, "/usr/bin/systemctl", "disable", "--now", "rixa.service"); e != nil {
+		return e
+	}
+	if !m.updateMigrationFenced(ctx) {
+		return ErrState
+	}
+	return nil
+}
+func (m *Manager) updateMigrationFenced(ctx context.Context) bool {
+	return m.updateUnitFileState(ctx) == "disabled" && m.unitQuiesced(ctx, "rixa.service", false)
 }

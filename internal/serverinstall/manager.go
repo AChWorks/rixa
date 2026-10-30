@@ -73,6 +73,11 @@ func (m *Manager) SaveDraft(ctx context.Context, d Draft) (Result, error) {
 		return Result{}, e
 	}
 	defer unlock()
+	if _, ue := m.loadUpdate(d.OperationID); ue == nil {
+		return Result{}, ErrState
+	} else if !errors.Is(ue, os.ErrNotExist) {
+		return Result{}, ue
+	}
 	if old, e := m.load(d.OperationID); e == nil {
 		if old.Frozen != "" || len(old.Attempts) != 0 {
 			return result(old), ErrState

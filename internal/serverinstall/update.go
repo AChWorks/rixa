@@ -104,7 +104,7 @@ func (m *Manager) reviewUpdate(ctx context.Context, u *updateJournal) []Problem 
 		return problems
 	}
 	pending, e := m.updateMarker("pending-update")
-	if e != nil || pending != "" {
+	if e != nil || (pending != "" && pending != u.Draft.OperationID) {
 		add("installation_operation", "update-pending", "Inspect or resume the pending update before starting another update.")
 		return problems
 	}
@@ -163,6 +163,10 @@ func (m *Manager) reviewUpdate(ctx context.Context, u *updateJournal) []Problem 
 		add("installation_operation", "unsupported-current-scope", "Current config, TLS, environment or physical PostgreSQL18 targets differ from the supported owned native profile. Preserve them and reconcile the changed listener, origins, site scope, principals, roots, TLS or database credentials before updating.")
 		return problems
 	}
+	if m.updateUnitFileState(ctx) != "enabled" {
+		add("service", "service-enablement", "This native update profile requires the owned service to be enabled before review. Reconcile operator-changed enablement before updating.")
+		return problems
+	}
 	u.ConfigSHA256, u.EnvironmentSHA256 = digest(config), digest(environment)
 	u.DatabaseTargets = parent.DatabaseTargets
 	image, e := currentManagerImage()
@@ -214,6 +218,9 @@ func supportedUpdateConfig(actual, owned product.Config) bool {
 	return reflect.DeepEqual(a, b)
 }
 func (m *Manager) updateRuntimeEvidence(ctx context.Context, parent *journal) ([]byte, []byte, error) {
+	if !trustedRootParent(runtimeRoot) || privateDir(runtimeRoot, int(parent.UID), false) != nil {
+		return nil, nil, ErrState
+	}
 	config, e := readPrivate(runtimeConfigPath, int(parent.UID), 1<<20)
 	if e != nil {
 		return nil, nil, e
@@ -247,7 +254,7 @@ func (m *Manager) boundUpdateRuntime(ctx context.Context, u *updateJournal, pare
 	if e != nil || digest(config) != u.ConfigSHA256 || digest(env) != u.EnvironmentSHA256 || !reflect.DeepEqual(parent.DatabaseTargets, u.DatabaseTargets) {
 		return ErrState
 	}
-	snapshot, e := readPrivate(filepath.Join(m.stateRoot, u.Draft.OperationID+".config"), m.ownerUID, 1<<20)
+	snapshot, e := readPrivate(m.updateConfigPath(u), m.ownerUID, 1<<20)
 	if e != nil || digest(snapshot) != u.ConfigSHA256 || !bytes.Equal(snapshot, config) {
 		return ErrState
 	}
@@ -292,7 +299,7 @@ func (m *Manager) ApplyUpdate(ctx context.Context, id, token string) (Result, er
 	if e != nil || digest(config) != u.ConfigSHA256 {
 		return updateResult(u), ErrState
 	}
-	if e = writeExpected(filepath.Join(m.stateRoot, id+".config"), config, 0600, m.ownerUID); e != nil {
+	if e = writeExpected(m.updateConfigPath(u), config, 0600, m.ownerUID); e != nil {
 		return updateResult(u), e
 	}
 	manager, e := m.snapshotManager()
@@ -349,4 +356,8 @@ func (m *Manager) updateOwnedRuntime(ctx context.Context, u *updateJournal, pare
 		return e
 	}
 	return m.loadedUpdateService(ctx, parent, false)
+}
+
+func (m *Manager) updateConfigPath(u *updateJournal) string {
+	return filepath.Join(m.stateRoot, u.Draft.OperationID+".config."+u.ConfigSHA256)
 }

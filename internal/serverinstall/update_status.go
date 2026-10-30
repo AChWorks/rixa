@@ -74,7 +74,7 @@ func (m *Manager) updateStatus(ctx context.Context, u *updateJournal) (Result, e
 			r.Code, r.Message, r.Actions = "update-pending", "A newer update is pending; inspect that operation before removal.", []string{"status"}
 			return r, nil
 		}
-		if m.boundUpdateRuntime(ctx, u, parent) != nil || m.checkOwnedService(current) != nil || m.loadedUpdateService(ctx, current, true) != nil || m.updateHTTPPostflight(ctx, current) != nil {
+		if m.boundUpdateRuntime(ctx, u, parent) != nil || m.checkOwnedService(current) != nil || m.loadedUpdateService(ctx, current, true) != nil || m.updateUnitFileState(ctx) != "enabled" || m.updateHTTPPostflight(ctx, current) != nil {
 			r.Code, r.Message, r.Actions = "installed-unhealthy", "Updated native installation is retained, but current runtime, service or TLS checks did not verify. Inspect its owned service and journal.", []string{"status"}
 			if m.checkOwnedService(current) == nil && m.loadedUpdateService(ctx, current, false) == nil {
 				r.Actions = []string{"status", "remove"}
