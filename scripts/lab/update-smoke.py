@@ -178,19 +178,21 @@ def seed(args, draft):
     state["private_asset_sha256"] = digest(site.request("GET", "/admin/media/read/" + state["asset"]))
     if state["private_asset_sha256"] != digest(PNG):
         raise ValueError("uploaded original bytes differ")
-    state["state"] = "verified"
+    state["state"] = "seeded"
     save(args.receipt, state)
     check(args, draft, state)
     return state
 
 
 def check(args, draft, state):
-    if state.get("state") != "verified":
+    if (state.get("state") not in ("seeded", "verified")
+            or not state.get("attempts")
+            or any(value.get("status") != "acknowledged" for value in state["attempts"].values())):
         raise ValueError("seed mutation unresolved; inspect retained attempt IDs")
     site = retained_client(draft["site_origin"], args.ca, state["site_session"])
     control = retained_client(draft["control_origin"], args.ca, state["control_session"])
     revoked = retained_client(draft["site_origin"], args.ca, state["revoked_session"])
-    assert b'/admin/sites/account-create' in control.request("GET", "/admin")
+    assert b'/admin/sites/account-create' in control.request("GET", "/admin/sites/")
     assert b"<!doctype html" in site.request("GET", "/admin/content").lower()
     preview = "/admin/content/preview/" + state["id"] + "/" + state["revision"]
     assert b"Retained native guest publication proof." in site.request("GET", preview)
@@ -212,6 +214,9 @@ def check(args, draft, state):
     expect_denied(bad_csrf, "/admin/content/create", {}, 401)
     member = retained_client(draft["site_origin"], args.ca, state["member_session"])
     expect_denied(member, "/admin/content/create", {}, 403)
+    if state["state"] != "verified":
+        state["state"] = "verified"
+        save(args.receipt, state)
     return state
 
 
