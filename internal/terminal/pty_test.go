@@ -170,11 +170,12 @@ func TestTerminalPTYCorrectionBackResumeResizeAndSecrets(t *testing.T) {
 	position = p.await(t, position, "Use a distinct HTTPS")
 	p.send(t, "\x15https://control.rixa.test:8443\r")
 	position = p.await(t, position, "Site URL")
+	backPosition := position
 	p.send(t, "\x1b")
-	position = p.await(t, position, "Control URL")
-	if !strings.Contains(p.text()[max(0, position-500):], "control.rixa.test") {
-		t.Fatal("corrected input was not retained on Back")
-	}
+	p.await(t, backPosition, "Control URL")
+	// A PTY read can end between the field label and its retained value.
+	// Observe both in this Back rendering before sending the next input.
+	position = p.await(t, backPosition, "https://control.rixa.test:8443")
 	p.send(t, "\r")
 	position = p.await(t, position, "Site URL")
 	// All remaining values were restored privately. Enter keeps secret values.
