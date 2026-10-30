@@ -37,7 +37,7 @@ The reported Rixa version must match the release tag and `BUILDINFO.json`; the C
 
 ## Choose the operation profile
 
-A trusted build containing `rixa manage` provides the [native operator path](server-management.md) on its explicitly supported Debian/systemd profile. It guides configuration, supervises installation independently of SSH, and provides retained status, supported reconciliation and ordinary runtime/service removal. PostgreSQL databases, TLS material and a trusted supported verifier remain explicit prerequisites; this is not automatic host provisioning, a one-line bootstrap, a managed updater or panel installation.
+A trusted build containing `rixa manage` provides the [native operator path](server-management.md) on its explicitly supported Debian/systemd profile. It guides configuration, supervises installation independently of SSH, and provides retained status, supported compatible update/recovery and ordinary runtime/service removal. PostgreSQL databases, TLS material and a trusted supported verifier remain explicit prerequisites; this is not automatic host provisioning, a one-line bootstrap, an unattended updater or panel installation.
 
 Use that guide for native management. The following steps are the separate manual foreground development path. Do not pre-create the manual layout below and then ask the native manager to adopt it; native installation refuses unrelated existing material.
 

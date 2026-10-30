@@ -2,7 +2,7 @@
 
 The `manage` commands provide one concrete infrastructure-operator path: a verified Rixa archive, private guided configuration, explicit migration and administrator bootstrap, and a persistent systemd service. Use a trusted executable that actually contains these commands. Historical packages do not gain management commands from newer documentation.
 
-This is a **development profile**, separate from production support, automatic PostgreSQL provisioning, certificate issuance, executable updates, destructive purge and panel/web setup. The [installation and management contract](installation-and-management.md) describes that broader journey; [manual development installation](release-install.md) remains available for other documented runtime profiles.
+This is a **development profile**, separate from production support, automatic PostgreSQL provisioning, certificate issuance, destructive purge and panel/web setup. The [installation and management contract](installation-and-management.md) describes that broader journey; [manual development installation](release-install.md) remains available for other documented runtime profiles.
 
 ## Supported inputs and authority
 
@@ -105,4 +105,71 @@ sudo rixa manage remove --operation first-install --confirm-remove
 
 Removal verifies the static and loaded service definition, drop-ins and any live executable/user before stopping the service. It removes the positively owned runtime executable and service unit, while retaining databases, configuration, Media, published site state, service credentials, the account/group, legal notices and management/recovery evidence. It does not recursively erase directories, remove PostgreSQL or alter an unrelated service. Changed or unknown ownership blocks removal.
 
-There is no automatic executable updater or destructive purge command in this profile. A binary reversal does not undo schema/data changes; those broader lifecycle paths need their own implementation, recovery evidence and applicable approval.
+Use the separately reviewed update operation below for a supported compatible replacement. There is no unattended updater or destructive purge command. A binary reversal does not undo schema/data changes.
+
+
+## Compatible native update
+
+Use a trusted manager that actually implements `manage update`. An older installed runtime or its frozen installation manager does not acquire this capability from newer documentation. The updater freezes its own image and verifier separately and preserves the original installation journal, manager and helper. Keep those original files for ownership and recovery evidence.
+
+This development adapter accepts the positively owned native Debian 13/systemd installation above, with its original control and initial site, PostgreSQL 18 physical targets, service authority, TLS, listener, private roots and credentials. It preserves the actual valid runtime configuration, including supported presentation, catalog and resource settings. Changed topology, database targets, principals, roots, TLS or service ownership require explicit operator reconciliation; the updater does not regenerate retained configuration from an old draft or adopt unrelated services.
+
+Prepare a new root-owned `0600` JSON file with only:
+
+| Field | Meaning |
+| --- | --- |
+| `operation_id` | A new stable update ID; keep it through inspection and recovery |
+| `installation_operation` | The original native installation operation ID |
+| `archive`, `bundle` | Exact candidate archive and provenance bundle paths |
+| `release`, `source_commit` | Exact candidate release tag and full source commit |
+
+No replacement administrator passwords, bootstrap inputs or new database credentials are accepted. Do not edit the original installation journal or replace its frozen manager.
+
+```bash
+sudo /usr/local/bin/rixa manage update menu --operation first-update --installation first-install
+```
+
+The update menu can fetch an authenticated release or use protected local inputs. It distinguishes the executing manager, original installation, active release and selected candidate. Plain/no-color/noninteractive behavior follows the installation interface. Direct commands never prompt:
+
+```bash
+sudo rixa manage update draft --source /root/private/first-update.json
+sudo rixa manage update review --operation first-update
+sudo rixa manage update apply --operation first-update --review-token <token-from-update-review>
+sudo rixa manage update status --operation first-update
+```
+
+Review binds the manager/helper, authenticated candidate, current owned runtime/configuration/environment and physical databases. Apply requires the exact current update review token under the shared lifecycle lock. It queues a fixed independent executor; a queued result is not completion. Inputs or ownership drift require inspection and a new review before execution, rather than reuse of an old confirmation.
+
+The executor authenticates and stages the candidate before downtime. It disables and quiesces the exact old service, then runs the authenticated candidate's `check` as the non-login runtime account **before any migration**. The supported profile requires the candidate already to understand the retained schema and configuration. A candidate needing an unsupported schema transition is rejected; this is not a general schema-changing upgrade mechanism.
+
+After that precheck, the candidate's own explicit `migrate` and `check` run against the retained stores. The exact candidate service is activated and enabled, and completion verifies loaded process/executable identity, readiness and strict local TLS/login/private-access boundaries. There is no rebootstrap, password reset, database major upgrade or automatic database restore. Original accounts, credentials, sessions, site content/revisions, Media, appearance, publication and private language packs remain retained. Actual continued authentication and populated-state compatibility are acceptance requirements for each delivered update profile; operational postflight does not recollect administrator passwords or create new administrator sessions.
+
+### Update interruption and recovery
+
+Inspect the retained operation and the exact executor named `rixa-update-<operation>-<generation>.service`. Bounded private diagnostics remain under `/var/lib/rixa-manager`; never publish these records or private configuration/environment files.
+
+```bash
+sudo rixa manage update status --operation first-update
+sudo journalctl -u rixa-update-first-update-1.service
+```
+
+Only when Status explicitly offers Resume, run the same retained update manager:
+
+```bash
+sudo /opt/rixa-manager/<recorded-manager-sha256> manage update resume --operation first-update
+```
+
+Resume requires positive executor acknowledgement and a quiescent cgroup, intact frozen images/intent, unchanged physical/configuration bindings and an exact supported old-or-candidate service identity. Timeout or missing acknowledgement does not prove no effect. The shared lifecycle lock and durable pending/active update records serialize new lifecycle work; stale old-manager actions are rechecked against current ownership before any continuation.
+
+Before migration intent, failed compatibility may restore and verify only the exact unchanged prior service. After migration intent, recovery is forward-only with the same authenticated candidate and immutable migration ledgers. The previous service stays disabled while migration/activation is unresolved, including after reboot. There is no automatic old-binary or database rollback. Unknown or changed ownership remains an operator-required result; do not delete journals, invent a new operation or replay an arbitrary stage.
+
+### Status and removal after update
+
+The current manager's ordinary installation Status/Remove follows the active update receipt. You can also inspect/remove through the successful update ID:
+
+```bash
+sudo rixa manage update status --operation first-update
+sudo rixa manage update remove --operation first-update --confirm-remove
+```
+
+Removal checks the current candidate's static/loaded service and executable ownership, stops serving and removes only its positively owned runtime executable/unit. It retains databases, configuration, credentials, accounts, original Media, published files, legal material, prerequisites and original/update recovery evidence. Purge remains a separate unimplemented destructive operation.
