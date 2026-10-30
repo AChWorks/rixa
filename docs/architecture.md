@@ -57,6 +57,10 @@ Never expose private StorageRoot or change authenticated attachment headers into
 
 Content references, publication copies and deletion/retention must agree. A private original may need to remain retained independently of a published representation; withdrawal/export cleanup and stale artifact behavior require explicit supported semantics.
 
+## Interface localization
+
+Use the optional released AChrix Admin `localize` package for product and shared presentation catalogs. Product domain resources are composed once per immutable instance, with an optional dedicated private operator catalog root. Locale metadata drives interface language and direction; English is the default/fallback, and installed data-only UI languages require reconstruction rather than rebuilding. UI preferences do not alter site content language, formatting or authorization. The operator CLI/terminal always use English. The [localization guide](localization.md) owns selection, installation and recovery instructions. No new Core locale service, copied browser runtime, watcher or preference database is implied.
+
 ## Finite demand-based resources
 
 Foundation database Modules use finite per-instance connection/admission defaults owned by the AChrix operations contract. Those limits are neither user/site counts nor a fleet budget; changing a DSN does not override typed Module bounds. Native pools acquire/reuse/prune connections under their bounds, and started Modules still retain lifecycle resources. Construction itself may also cost work.

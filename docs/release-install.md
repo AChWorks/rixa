@@ -57,7 +57,7 @@ Keep database DSNs and bootstrap passwords outside the JSON configuration. Expor
 
 ## Initialize and verify
 
-Edit `/etc/rixa/rixa.json` for the selected listener profile, exact HTTPS origins, database environment names, TLS paths and private roots. Direct TLS requires an explicit profile, matching listener/origin ports, a currently valid server certificate covering control and every enabled site, and a protected private key. Rixa serves the validated keypair without trusting forwarded headers.
+Edit `/etc/rixa/rixa.json` for the selected listener profile, exact HTTPS origins, database environment names, TLS paths and private roots. `language` chooses the default web interface (English when omitted); the CLI and terminal remain English. The optional private `catalog_root` enables [post-build interface language installation](localization.md). Site content language remains a separate Appearance setting. Direct TLS requires an explicit profile, matching listener/origin ports, a currently valid server certificate covering control and every enabled site, and a protected private key. Rixa serves the validated keypair without trusting forwarded headers.
 
 Where supplied by the selected binary, [shared setup commands in the source guide](https://github.com/AChWorks/rixa/blob/HEAD/docs/setup-operations.md) assess prerequisites and create a new protected configuration without overwriting an existing target. This bounded preparation precedes the explicit steps below; it is not the complete installer or an existing-configuration updater.
 
