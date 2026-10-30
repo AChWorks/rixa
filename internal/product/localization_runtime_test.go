@@ -5,7 +5,7 @@ package product
 import (
 	"encoding/json"
 	"errors"
-	"io/fs"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -120,19 +120,30 @@ func TestInstalledLocaleReconstructionUsesWholeProductComposition(t *testing.T) 
 		t.Fatalf("complete pack must be usable at control and site origins: %v", err)
 	}
 	for _, runtime := range []*Runtime{before, after} {
+		server := httptest.NewTLSServer(runtime.Handler)
+		client := server.Client()
+		client.Timeout = 5 * time.Second
 		for _, host := range []string{"control.rixa.test", "a.rixa.test"} {
-			response := httptest.NewRecorder()
-			runtime.Handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "https://"+host+"/admin/login", nil))
-			expected := "en"
-			label := "Sign in"
-			if runtime == after {
-				expected = "de"
-				label = "Anmelden"
+			request, err := http.NewRequest(http.MethodGet, server.URL+"/admin/login", nil)
+			if err != nil {
+				t.Fatal(err)
 			}
-			if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `lang="`+expected+`"`) || !strings.Contains(response.Body.String(), label) {
-				t.Fatalf("runtime snapshot mismatch at %s: status%d", host, response.Code)
+			request.Host = host
+			response, err := client.Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, readErr := io.ReadAll(io.LimitReader(response.Body, 1<<20))
+			_ = response.Body.Close()
+			expected, label := "en", "Sign in"
+			if runtime == after {
+				expected, label = "de", "Anmelden"
+			}
+			if readErr != nil || response.StatusCode != http.StatusOK || !strings.Contains(string(body), `lang="`+expected+`"`) || !strings.Contains(string(body), label) {
+				t.Fatalf("runtime snapshot mismatch at %s: status%d", host, response.StatusCode)
 			}
 		}
+		server.Close()
 	}
 	sources, err := config.Config.catalogSources()
 	if err != nil {
@@ -229,5 +240,4 @@ func TestContentLocaleMetadataComesFromCatalog(t *testing.T) {
 			t.Fatal("content metadata was invented separately")
 		}
 	}
-	var _ fs.FS = bundledProductCatalogs()
 }
