@@ -390,6 +390,24 @@ func (m *Manager) Status(ctx context.Context, id string) (Result, error) {
 	if e != nil {
 		return Result{}, e
 	}
+	if j.State == "installed" {
+		if pending, pe := m.updateMarker("pending-update"); pe != nil {
+			return Result{}, pe
+		} else if pending != "" {
+			u, ue := m.loadUpdate(pending)
+			if ue != nil {
+				return Result{}, ue
+			}
+			if u.Draft.InstallationOperation == id {
+				return m.updateStatus(ctx, u)
+			}
+		}
+		if u, ue := m.installationUpdate(id); ue != nil {
+			return Result{}, ue
+		} else if u != nil {
+			return m.updateStatus(ctx, u)
+		}
+	}
 	r := result(j)
 	r.ReviewToken = ""
 	if j.State == "applying" || j.State == "reconciliation-required" {
