@@ -4,6 +4,8 @@ package product
 import (
 	"context"
 	"encoding/json"
+	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -23,8 +25,9 @@ type draftControlCall struct {
 	site, action, cursor string
 }
 type draftControlStub struct {
-	calls []draftControlCall
-	err   error
+	calls    []draftControlCall
+	err      error
+	revision *ContentRevision
 }
 
 func (s *draftControlStub) record(a achrix.Principal, site, action, cursor string) error {
@@ -43,6 +46,9 @@ func (s *draftControlStub) ListSiteContentPage(c context.Context, a achrix.Princ
 }
 func (s *draftControlStub) HeadSiteContent(c context.Context, a achrix.Principal, site, id string) (ContentRevision, error) {
 	e := s.record(a, site, "head", id)
+	if s.revision != nil {
+		return *s.revision, e
+	}
 	return draftTestRevision(), e
 }
 func (s *draftControlStub) PreviewSiteContent(c context.Context, a achrix.Principal, site, id string, n int64) (ContentRevision, error) {
@@ -197,5 +203,52 @@ func TestSelectedPrivatePreviewResolvesOnlyCanonicalRelativeLinks(t *testing.T) 
 	original, e := trustedPreviewHTML(source, "")
 	if e != nil || string(original) != source {
 		t.Fatal("direct-site link meaning changed")
+	}
+}
+
+// Use the real released shell buffer/admission and TLS transport, rather than
+// claiming a standalone template proves a complete administration response.
+type draftRenderAuth struct{}
+
+func (draftRenderAuth) AuthenticateRequest(*http.Request, bool) (achrix.Principal, error) {
+	return "control-actor", nil
+}
+
+type draftRenderPolicy struct{}
+
+func (draftRenderPolicy) Authorize(context.Context, achrix.Principal, string, string) error {
+	return nil
+}
+func TestSelectedDraftLargestSourceFitsReleasedShell(t *testing.T) {
+	rich := `<h2 dir="auto">عنوان English</h2><p dir="auto"><strong>متن</strong> <em>mixed</em> <a href="/posts/example/?q=1&amp;x=2">پیوند</a></p><figure data-media-id="AAAAAAAAAAAAAAAAAAAAAAAAAA"><figcaption dir="auto">توضیح Media</figcaption></figure>`
+	body := rich + `<p dir="auto">` + strings.Repeat("x", maxEditorialBodyBytes-len(rich)-18) + `</p>`
+	canonical, _, err := canonicalBody(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	revision := draftTestRevision()
+	revision.BodyHTML = canonical
+	service := &draftControlStub{revision: &revision}
+	server := httptest.NewUnstartedServer(nil)
+	origin := "https://" + server.Listener.Addr().String()
+	admin, err := shell.New(shell.Config{Origin: origin, AuthPath: "/auth", Language: "en", Catalogs: []fs.FS{bundledProductCatalogs()}}, draftRenderAuth{}, draftRenderPolicy{}, newControlSurface([]SiteConfig{{ID: "site-a", Origin: "https://a.rixa.test"}}, service, localize.Locale{Tag: "en", Direction: "ltr"}, localize.Locale{Tag: "fa", Direction: "rtl"}))
+	if err != nil {
+		server.Close()
+		t.Fatal(err)
+	}
+	server.Config.Handler = admin.Handler()
+	server.StartTLS()
+	defer server.Close()
+	response, err := server.Client().Get(origin + "/admin/sites/site/site-a/content/edit/" + draftTestID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	output, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != 200 || !strings.Contains(string(output), canonical) || strings.Count(string(output), canonical) != 1 {
+		t.Fatalf("accepted source could not be edited through released shell: status=%d bytes=%d", response.StatusCode, len(output))
 	}
 }
