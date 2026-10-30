@@ -137,14 +137,14 @@ async function rixaLocalizationBrowser({browser, context, page, fixture, phase, 
   await page.goto(fixture.site_a+"/admin/content/edit/"+fixture.sites[0].content_id);
   await page.waitForFunction(()=>Boolean(window.AChrixI18n));
   check(await page.locator("html").getAttribute("lang")===selected,"product navigation lost locale");
-  await page.locator("[data-media-id]").fill("bad");
+  await page.locator("input[data-media-id]").fill("bad");
   await page.locator("[data-add-media]").click();
   const editorError=await page.evaluate(()=>window.AChrixI18n.text("rixa","editor_invalid_media"));
   check(await page.locator("#status").textContent()===editorError,"actual editor validation did not use catalog");
   await noMarkup();
   const title='Browser فارسی English <img id="user-title-probe"> '+phase;
   await page.locator("[data-content-save] input[name=title]").fill(title);
-  await page.locator("[data-media-id]").fill("");
+  await page.locator("input[data-media-id]").fill("");
   const before=await page.locator("[data-current-revision]").textContent();
   const operation=await page.locator("[data-content-save] input[name=operation_id]").inputValue();
   await page.locator("[data-content-save] button[type=submit]").click();
