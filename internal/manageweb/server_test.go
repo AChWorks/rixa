@@ -199,7 +199,7 @@ func certFiles(t *testing.T, dir string) (string, string, tls.Certificate) {
 	}
 	return certificate, keyPath, pair
 }
-func fixture(t *testing.T, modify func(*Options, *dependencies, *fakeNative)) *harness {
+func fixture(t *testing.T, modify func(*Options, *dependencies, *fakeNative), http2 ...bool) *harness {
 	t.Helper()
 	root := t.TempDir()
 	if e := os.Chmod(root, 0700); e != nil {
@@ -245,6 +245,7 @@ func fixture(t *testing.T, modify func(*Options, *dependencies, *fakeNative)) *h
 	h.permit = strings.TrimSpace(string(b))
 	server.Config.Handler = c.Handler()
 	server.TLS = &tls.Config{Certificates: []tls.Certificate{pair}}
+	server.EnableHTTP2 = len(http2) == 1 && http2[0]
 	server.StartTLS()
 	h.client = server.Client()
 	jar, _ := cookiejar.New(nil)
@@ -660,6 +661,25 @@ func (f *fakeNative) strictEffect(action, id string) (serverinstall.Result, erro
 	return f.result, nil
 }
 
+// This fake-only facade lets Chromium exercise its real form request timer.
+// It cannot construct a native executor, manager, package or database effect.
+type delayedBrowserNative struct{ *fakeNative }
+
+func (f *delayedBrowserNative) Apply(ctx context.Context, id, token string) (serverinstall.Result, error) {
+	f.get("apply_attempt")
+	timer := time.NewTimer(17 * time.Second)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return f.fakeNative.Apply(ctx, id, token)
+	case <-ctx.Done():
+		return f.get("interrupted"), ctx.Err()
+	}
+}
+func (f *delayedBrowserNative) ApplyUpdate(ctx context.Context, id, token string) (serverinstall.Result, error) {
+	return f.Apply(ctx, id, token)
+}
+
 // TestConsoleBrowserPreview is a source-only, fake-native TLS fixture. Its local
 // control file is never an HTTP route and cannot invoke a native executor.
 func TestConsoleBrowserPreview(t *testing.T) {
@@ -677,7 +697,7 @@ func TestConsoleBrowserPreview(t *testing.T) {
 		}
 	}
 	previewKind := os.Getenv("RIXA_MANAGEWEB_PREVIEW_KIND")
-	if previewKind != "" && previewKind != "update-cleanup" && previewKind != "artifact-install" && previewKind != "artifact-update" {
+	if previewKind != "" && previewKind != "update-cleanup" && previewKind != "artifact-install" && previewKind != "artifact-update" && previewKind != "request-budget-install" && previewKind != "request-budget-update" {
 		t.Fatal("unknown fake preview kind")
 	}
 	var h *harness
@@ -717,7 +737,7 @@ func TestConsoleBrowserPreview(t *testing.T) {
 				return fetch(ctx, request)
 			}
 		}
-		if previewKind == "artifact-update" {
+		if previewKind == "artifact-update" || previewKind == "request-budget-update" {
 			o.Scope = Scope{Kind: "update", Operation: "fixture-update", Installation: "fixture-install", Actions: []string{"configure", "review", "apply", "status"}}
 			f.result = serverinstall.Result{OperationKind: "update", OperationID: "fixture-update", InstallationOperation: "fixture-install", State: "not-installed", Code: "not-installed", Actions: []string{"configure", "status"}}
 		}
@@ -738,6 +758,21 @@ func TestConsoleBrowserPreview(t *testing.T) {
 		}
 		o.CatalogRoot = root
 	})
+	if previewKind == "request-budget-install" || previewKind == "request-budget-update" {
+		h.backend.draft = serverinstall.Draft{OperationID: "fixture-install", Release: "v1.2.3"}
+		h.backend.result.State = "draft"
+		h.backend.result.Code = "draft-saved"
+		h.backend.result.Actions = []string{"configure", "review", "status"}
+		if previewKind == "request-budget-update" {
+			h.backend.updated = serverinstall.UpdateDraft{OperationID: "fixture-update", InstallationOperation: "fixture-install", Release: "v1.2.3"}
+			h.backend.result.OperationID = "fixture-update"
+			h.backend.result.OperationKind = "update"
+			h.backend.result.InstallationOperation = "fixture-install"
+		}
+		delayed := &delayedBrowserNative{h.backend}
+		h.console.backend = delayed
+		h.console.updater = delayed
+	}
 	b, e := json.Marshal(map[string]string{"schema": "rixa.manageweb-preview.v1",
 		"origin": h.console.origin, "permit": h.permit, "operation": h.console.options.Scope.Operation, "profile": previewKind})
 	if e != nil {

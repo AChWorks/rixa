@@ -22,8 +22,17 @@
   const result=await response.json();if(typeof result.csrf!=="string")throw {status:0,unknown:false};
   return result.csrf;
  }
+ // DOM form.action is absolute; literals and forms must share one policy.
+ function requestTarget(path,origin){
+  let url;
+  try{if(typeof path!=="string"||!path)throw {};url=new URL(path,origin);}catch(_){throw {status:400,unknown:false};}
+  if(url.origin!==origin||url.protocol!=="https:"||url.username||url.password||url.search||url.hash||url.href!==origin+url.pathname)throw {status:400,unknown:false};
+  const pathname=url.pathname;
+  return {path:pathname,timeout:pathname.startsWith("/artifact/")?190000:pathname.startsWith("/admin/operation/")?130000:15000};
+ }
  async function request(path,body,readOnly=false,login=false,artifactAttempt=""){
-  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),path.startsWith("/artifact/")?190000:path.startsWith("/admin/operation/")?130000:15000);
+  const target=requestTarget(path,location.origin);path=target.path;
+  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),target.timeout);
   let sent=false;
   try{
    const headers={"X-Identity-Request":"1"};

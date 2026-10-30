@@ -59,7 +59,7 @@ func (f *waitingNative) ReviewUpdate(ctx context.Context, id string) (serverinst
 func (f *waitingNative) ApplyUpdate(ctx context.Context, id, token string) (serverinstall.Result, error) {
 	return f.Apply(ctx, id, token)
 }
-func budgetFixture(t *testing.T, kind string, delay time.Duration) (*harness, *waitingNative) {
+func budgetFixture(t *testing.T, kind string, delay time.Duration, http2 ...bool) (*harness, *waitingNative) {
 	t.Helper()
 	h := fixture(t, func(o *Options, _ *dependencies, f *fakeNative) {
 		f.draft = serverinstall.Draft{OperationID: o.Scope.Operation, Release: "v1.2.3"}
@@ -72,7 +72,7 @@ func budgetFixture(t *testing.T, kind string, delay time.Duration) (*harness, *w
 			f.result.OperationKind = "update"
 			f.result.InstallationOperation = o.Scope.Installation
 		}
-	})
+	}, http2...)
 	h.login(t)
 	f := &waitingNative{fakeNative: h.backend, delay: delay, entered: make(chan time.Duration, 1), finished: make(chan error, 1)}
 	h.console.backend = f
@@ -409,6 +409,39 @@ func TestNativeLatePresentationCannotIssueSuccess(t *testing.T) {
 			if code != 503 || json.Unmarshal(data, &result) != nil || result.State != "ready" || result.ReviewToken != "" || result.Review != nil {
 				t.Fatal("presentation issued success or confirmation after authority expired")
 			}
+		})
+	}
+}
+
+// Negotiate each real TLS protocol explicitly: HTTP/1-only httptest defaults
+// cannot establish the lifetime of an HTTP/2 stream after body completion.
+func TestNativeCompletedBodyReadDeadlineProtocols(t *testing.T) {
+	for _, h2 := range []bool{false, true} {
+		name, want := "HTTP1", 1
+		if h2 {
+			name, want = "HTTP2", 2
+		}
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			h, f := budgetFixture(t, "update", 10200*time.Millisecond, h2)
+			h.client.Timeout = 20 * time.Second
+			started := time.Now()
+			code, data, raw := h.call(t, "POST", "/admin/operation/apply", `{"review_token":"`+strings.Repeat("a", 64)+`"}`, true)
+			var result response
+			elapsed := time.Since(started)
+			if raw.ProtoMajor != want {
+				t.Fatalf("negotiated protocol %s", raw.Proto)
+			}
+			if code != 200 || json.Unmarshal(data, &result) != nil || result.State != "applying" {
+				t.Fatalf("protocol=%s status=%d elapsed=%s body=%s", raw.Proto, code, elapsed, data)
+			}
+			if err := <-f.finished; err != nil {
+				t.Fatalf("protocol=%s facade cancelled: %v", raw.Proto, err)
+			}
+			if elapsed < 10*time.Second {
+				t.Fatal("native operation did not cross the8s read deadline")
+			}
+			t.Logf("protocol=%s elapsed=%s state=%s", raw.Proto, elapsed, result.State)
 		})
 	}
 }

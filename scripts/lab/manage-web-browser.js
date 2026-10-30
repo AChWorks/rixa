@@ -8,11 +8,13 @@ async function rixaManageWebBrowser({context,page,fixture,checkpoint,control,mod
  check(fixture?.schema==="rixa.manageweb-preview.v1","unexpected fake preview schema");
  const origin=new URL(fixture.origin);
  check(origin.protocol==="https:"&&origin.hostname==="127.0.0.1"&&!origin.username&&!origin.password&&!origin.search&&origin.pathname==="/","only loopback TLS fake preview allowed");
+ const budgetMode=mode==="request-budget-install"||mode==="request-budget-update";
+ if(budgetMode)check(fixture.profile===mode,"request budget proof requires its exact fake profile");
  const artifactMode=mode==="artifact-install"||mode==="artifact-update";
  if(artifactMode)check(fixture.profile===mode,"artifact proof requires its exact fake profile");
- check(fixture.operation===((mode==="cleanup"||mode==="artifact-update")?"fixture-update":"fixture-install")&&typeof fixture.permit==="string"&&fixture.permit.length===43,"unexpected fake preview identity");
+ check(fixture.operation===((mode==="cleanup"||mode==="artifact-update"||mode==="request-budget-update")?"fixture-update":"fixture-install")&&typeof fixture.permit==="string"&&fixture.permit.length===43,"unexpected fake preview identity");
  check(typeof checkpoint==="function"&&typeof control==="function","private checkpoint/control callbacks required");
- check(["journey","expiry","cleanup","artifact-install","artifact-update"].includes(mode),"unsupported bounded browser mode");
+ check(["journey","expiry","cleanup","artifact-install","artifact-update","request-budget-install","request-budget-update"].includes(mode),"unsupported bounded browser mode");
  const checks=[],errors=[],counts={configure:0,apply:0,review:0,resume:0,status:0,artifact:0};
  const configureBodies=[];
  let reviewedToken="",applyUsesReview=false,artifactResponseLost=false;
@@ -23,6 +25,7 @@ async function rixaManageWebBrowser({context,page,fixture,checkpoint,control,mod
   check(url.origin===origin.origin&&!url.search,"unexpected browser destination");
   const action=url.pathname.split("/").pop();
   if(url.pathname.startsWith("/admin/operation/")&&Object.hasOwn(counts,action))counts[action]++;
+  if(budgetMode){await route.continue();return;}
   if(url.pathname.startsWith("/artifact/")&&request.method()==="POST"){
    counts.artifact++;
    if(artifactMode&&action==="fetch"&&JSON.parse(request.postData()).release==="v1.2.4"){
@@ -115,6 +118,45 @@ async function rixaManageWebBrowser({context,page,fixture,checkpoint,control,mod
   check(denied===401,"browser mutation accepted an invalid CSRF token");
   await noStorage();
  });
+
+
+ if(budgetMode) {
+  let policyCases=0,elapsed=0;
+  await step("relative-and-absolute-request-policy",async()=>{
+   const source=await (await context.request.get(origin.origin+"/console-assets/console.js")).text();
+   const start=source.indexOf(" function requestTarget("),end=source.indexOf("\n async function request(",start);
+   check(start>=0&&end>start,"served request policy missing");
+   const policy=new Function(source.slice(start,end)+";return requestTarget;")();
+   const paths=new Map([["/admin/operation/configure",130000],["/admin/operation/apply",130000],["/admin/operation/remove",130000],["/admin/operation/review",130000],["/admin/operation/status",130000],["/artifact/fetch",190000],["/artifact/upload",190000],["/console-auth/login",15000]]);
+   for(const [path,budget] of paths)for(const input of [path,origin.origin+path]){
+    const result=policy(input,origin.origin);
+    check(result.path===path&&result.timeout===budget,"relative/absolute request policy differs");policyCases++;
+   }
+   const forms=await page.locator("form[action]").evaluateAll(forms=>forms.map(form=>form.action));
+   check(forms.length===5,"expected five affected actual DOM actions");
+   for(const action of forms){const result=policy(action,origin.origin);check(result.timeout===paths.get(new URL(action).pathname),"actual DOM action used fallback budget");policyCases++;}
+   for(const input of ["https://foreign.invalid/admin/operation/apply","//foreign.invalid/admin/operation/apply",origin.origin.replace("https:","http:")+"/admin/operation/apply",origin.origin.replace("https://","https://operator@")+"/admin/operation/apply",origin.origin.replace("https://","https://operator:password@")+"/artifact/upload","/admin/operation/apply?x=1","/admin/operation/apply?","/artifact/fetch#x","/artifact/fetch#","https://[invalid", "",null]){
+    let denied=false;try{policy(input,origin.origin);}catch(error){denied=error.status===400&&error.unknown===false;}
+    check(denied,"invalid request target was not rejected before mutation");policyCases++;
+   }
+  });
+  await step("actual-delayed-form-apply-without-replay",async()=>{
+   await page.locator("[data-action=review]").click();
+   await page.locator("[data-review]").waitFor({state:"visible"});
+   const apply=page.locator("[data-action-form=apply]");
+   check((await apply.evaluate(form=>form.action)).startsWith(origin.origin+"/admin/operation/"),"Apply action was not absolute");
+   await apply.locator("[name=confirm_apply]").check();
+   const responsePromise=page.waitForResponse(response=>new URL(response.url()).pathname==="/admin/operation/apply"&&response.request().method()==="POST",{timeout:25000});
+   const started=Date.now();await apply.locator("button").click();
+   const response=await responsePromise,result=await response.json();elapsed=Date.now()-started;
+   check(response.status()===200&&result.operation_id===fixture.operation&&result.state==="applying","delayed Apply acknowledgement missing");
+   check(elapsed>15000&&elapsed<25000,"fake Apply did not cross original client timer");
+   await page.waitForFunction(()=>document.querySelector("[data-code]").textContent.includes("applying"));
+   check(counts.apply===1&&await page.locator("[data-pending]").isHidden(),"delayed Apply was uncertain or replayed");
+   await noStorage();
+  });
+  return {...await finish(),elapsed_ms:elapsed,policy_cases:policyCases};
+ }
 
  if(artifactMode) {
   const apply=()=>page.locator("[data-action-form=apply]");

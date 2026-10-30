@@ -137,3 +137,16 @@ observes completion revocation. The displayed digest must fit narrow/wide layout
 These fixtures authenticate tiny bytes only through their deliberately fake
 verification seam. They do not prove real publisher authentication, networking,
 native installation/update/recovery or panel support.
+
+## Absolute form request budget regression
+
+Start a fresh preview with `RIXA_MANAGEWEB_PREVIEW_KIND=request-budget-install`
+or `request-budget-update` and use the same driver mode. Each exact fake profile
+starts with a saved draft and delays only its fake Apply facade for 17 seconds.
+The normal Chromium form submission must receive its acknowledgement beyond the
+previous 15-second fallback, without inspection, replay or a real native effect.
+The driver also runs the actual served pure URL policy against relative paths,
+absolute URLs and all five real DOM form actions; foreign origins, credentials,
+queries and fragments fail before a mutation. Existing 130/190-second budgets are
+unchanged. Check the final fixture receipt for one Apply attempt, one Apply,
+exact review forwarding and normal private-state/permit teardown.
