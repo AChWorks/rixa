@@ -369,3 +369,23 @@ func TestMigrationRequiresDisabledAndPositivelyQuiescentService(t *testing.T) {
 		})
 	}
 }
+
+func TestOrdinaryResumeUsesPendingUpdateReceiptAndItsUnknownStartFence(t *testing.T) {
+	m := testManager(t)
+	parent := installedParent(t, m)
+	u := frozenUpdate()
+	u.ExecutorAcknowledged = false
+	if e := m.saveUpdate(u); e != nil {
+		t.Fatal(e)
+	}
+	if e := m.claimUpdate(u.Draft.OperationID); e != nil {
+		t.Fatal(e)
+	}
+	r, e := m.Resume(context.Background(), parent.Draft.OperationID)
+	if !errors.Is(e, ErrState) || r.OperationKind != "update" || r.OperationID != u.Draft.OperationID || r.InstallationOperation != parent.Draft.OperationID {
+		t.Fatalf("ordinary resume bypassed pending update protocol: %+v %v", r, e)
+	}
+	if len(r.Actions) != 1 || r.Actions[0] != "status" {
+		t.Fatal("unknown start offered an invented continuation")
+	}
+}

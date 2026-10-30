@@ -58,6 +58,17 @@ func (m *Manager) Resume(ctx context.Context, id string) (Result, error) {
 	if e != nil {
 		return Result{}, e
 	}
+	if pending, pe := m.updateMarker("pending-update"); pe != nil {
+		return Result{}, pe
+	} else if pending != "" {
+		u, ue := m.loadUpdate(pending)
+		if ue != nil {
+			return Result{}, ue
+		}
+		if u.Draft.InstallationOperation == id {
+			return m.resumeUpdate(ctx, u)
+		}
+	}
 	if !m.resumable(ctx, j) {
 		return result(j), ErrState
 	}

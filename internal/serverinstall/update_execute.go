@@ -116,6 +116,9 @@ func (m *Manager) ResumeUpdate(ctx context.Context, id string) (Result, error) {
 	if e != nil {
 		return Result{}, e
 	}
+	return m.resumeUpdate(ctx, u)
+}
+func (m *Manager) resumeUpdate(ctx context.Context, u *updateJournal) (Result, error) {
 	if u.State == "installed" {
 		return m.finishUpdateClaim(ctx, u)
 	}
