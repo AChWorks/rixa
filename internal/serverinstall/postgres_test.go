@@ -20,7 +20,9 @@ func postgresTestDraft() PostgresDraft {
 }
 func postgresFrozenFixture() *postgresJournal {
 	h := strings.Repeat("a", 64)
-	j := &postgresJournal{Schema: postgresSchema, Draft: postgresTestDraft(), State: "applying", Stage: "executor", Code: "queued", Token: strings.Repeat("b", 64), ControlPassword: strings.Repeat("c", 64), SitePassword: strings.Repeat("d", 64), ReviewToken: strings.Repeat("e", 64), ReviewedAt: time.Now().UTC().Format(time.RFC3339Nano), ReviewedManagerSHA256: h, ManagerSHA256: h, Baseline: map[string]string{"base": "1.0"}, HostSHA256: h, KeySHA256: h, ListsSHA256: h, Helpers: map[string]string{"/usr/bin/apt-get": h, "/usr/bin/dpkg-query": h, "/usr/bin/dpkg-deb": h, "/usr/share/keyrings/debian-archive-keyring.gpg": h}, Packages: []PostgresPackage{{"postgresql-18", "18.6-1.pgdg13+1"}, {"postgresql-client-18", "18.6-1.pgdg13+1"}, {"postgresql-common", "290.pgdg13+1"}}, CommonPackages: []PostgresPackage{{"postgresql-common", "290.pgdg13+1"}}, ExecutorGeneration: 1, ExecutorAcknowledged: true, Attempts: map[string]string{"executor": "attempted"}}
+	j := &postgresJournal{Schema: postgresSchema, Draft: postgresTestDraft(), State: "applying", Stage: "executor", Code: "queued", Token: strings.Repeat("b", 64), ControlPassword: strings.Repeat("c", 64), SitePassword: strings.Repeat("d", 64), ReviewToken: strings.Repeat("e", 64), ReviewedAt: time.Now().UTC().Format(time.RFC3339Nano), ReviewedManagerSHA256: h, ManagerSHA256: h, Baseline: map[string]string{"base": "1.0"}, HostSHA256: h, DpkgConfigSHA256: h, KeySHA256: h, ListsSHA256: h, Helpers: map[string]string{"/usr/bin/apt-get": h, "/usr/bin/dpkg-query": h, "/usr/bin/dpkg-deb": h, "/usr/share/keyrings/debian-archive-keyring.gpg": h}, Packages: []PostgresPackage{{"postgresql-18", "18.6-1.pgdg13+1"}, {"postgresql-client-18", "18.6-1.pgdg13+1"}, {"postgresql-common", "290.pgdg13+1"}}, CommonPackages: []PostgresPackage{{"postgresql-common", "290.pgdg13+1"}}, ExecutorGeneration: 1, ExecutorAcknowledged: true, Attempts: map[string]string{"executor": "attempted"}}
+	j.ControlVerifier, _ = postgresSCRAMVerifier(j.ControlPassword, []byte("0123456789abcdef"))
+	j.SiteVerifier, _ = postgresSCRAMVerifier(j.SitePassword, []byte("0123456789abcdef"))
 	j.AssessmentID = postgresPublicPlan(j).Assessment.ID()
 	j.Progress.PlanID = j.AssessmentID
 	j.Frozen = postgresIntentDigest(j)
@@ -359,5 +361,110 @@ func TestPostgresUnknownExecutorStartAndForeignGuardNeverReplayEffects(t *testin
 	}
 	if e = m.RunPostgresPackageGuard(context.Background(), j.Draft.OperationID, "shell", strings.NewReader("")); !errors.Is(e, ErrInput) {
 		t.Fatalf("guard widened fixed phase: %v", e)
+	}
+}
+
+func TestPostgresSCRAMVerifierHasIndependentReferenceAndNeverEntersPlaintextSQL(t *testing.T) {
+	password := strings.Repeat("c", 64)
+	// Independent Python hashlib/hmac reference for this fixed synthetic fixture.
+	expected := "SCRAM-SHA-256$4096:MDEyMzQ1Njc4OWFiY2RlZg==$gVrUnYguuAZ8vD0G+UDGY21Om/UMEhj9vYTnJj9vgtw=:nVqyMYCIYyvaz2i49CQUbxzxELLpYNJQkLnI8GZ9T5g="
+	got, e := postgresSCRAMVerifier(password, []byte("0123456789abcdef"))
+	if e != nil || got != expected || !validPostgresVerifier(password, got) {
+		t.Fatalf("SCRAM reference mismatch: %v", e)
+	}
+	if validPostgresVerifier(strings.Repeat("d", 64), got) || validPostgresVerifier(password, strings.Replace(got, "4096", "1", 1)) {
+		t.Fatal("mismatched verifier accepted")
+	}
+	j := postgresFrozenFixture()
+	for _, scope := range []string{"control", "site"} {
+		query, e := postgresRoleCreationSQL(j, scope)
+		if e != nil {
+			t.Fatal(e)
+		}
+		if strings.Contains(query, j.ControlPassword) || strings.Contains(query, j.SitePassword) || strings.Contains(query, j.Token) {
+			t.Fatal("plaintext secret entered SQL")
+		}
+		if !strings.Contains(query, "SCRAM-SHA-256$") || !strings.Contains(query, "log_statement='none'") || !strings.Contains(query, "NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS") {
+			t.Fatal("role creation lost its bounded privilege/logging contract")
+		}
+	}
+	if _, e = postgresRoleCreationSQL(j, "foreign"); !errors.Is(e, ErrInput) {
+		t.Fatal("arbitrary role scope accepted")
+	}
+}
+func TestPostgresDiagnosticsRedactPasswordsAndVerifiers(t *testing.T) {
+	m := testManager(t)
+	preparePostgresState(t, m)
+	j := postgresFrozenFixture()
+	cause := fmt.Errorf("fixture %s %s %s", j.ControlPassword, j.ControlVerifier, j.SiteVerifier)
+	if _, e := m.postgresFail(j, "stage-outcome-unknown", "Inspect protected diagnostics.", cause); !errors.Is(e, ErrState) {
+		t.Fatal(e)
+	}
+	data, e := readPrivate(filepath.Join(m.postgresStateDir(), j.Draft.OperationID+".diagnostic"), m.ownerUID, 64<<10)
+	if e != nil {
+		t.Fatal(e)
+	}
+	for _, secret := range []string{j.ControlPassword, j.SitePassword, j.ControlVerifier, j.SiteVerifier} {
+		if bytes.Contains(data, []byte(secret)) {
+			t.Fatal("credential material entered retained diagnostics")
+		}
+	}
+	if !bytes.Contains(data, []byte("fixture")) {
+		t.Fatal("useful non-secret diagnostic was erased")
+	}
+}
+func TestPostgresNamespaceNeverClaimsExistingForeignData(t *testing.T) {
+	for _, name := range []string{"empty", "foreign-data", "wrong-marker"} {
+		t.Run(name, func(t *testing.T) {
+			m := testManager(t)
+			b := newPostgresBackend(m)
+			b.sysroot = t.TempDir()
+			j := postgresFrozenFixture()
+			if e := os.MkdirAll(b.namespace(j), 0755); e != nil {
+				t.Fatal(e)
+			}
+			if name == "foreign-data" {
+				if e := os.Mkdir(b.data(j), 0700); e != nil {
+					t.Fatal(e)
+				}
+			}
+			marker := filepath.Join(b.namespace(j), "owner")
+			if name == "wrong-marker" {
+				if e := os.WriteFile(marker, []byte("foreign\n"), 0600); e != nil {
+					t.Fatal(e)
+				}
+			}
+			e := b.claimClusterNamespace(j)
+			if (e == nil) != (name == "empty") {
+				t.Fatalf("namespace ownership %s: %v", name, e)
+			}
+			if name == "foreign-data" {
+				if _, e = os.Lstat(marker); !errors.Is(e, os.ErrNotExist) {
+					t.Fatal("our marker was written around foreign data")
+				}
+				if _, e = os.Stat(b.data(j)); e != nil {
+					t.Fatal("foreign data was removed")
+				}
+			}
+		})
+	}
+}
+func TestPostgresProcessCredentialsBindApprovedSupplementaryGroups(t *testing.T) {
+	status := []byte("Uid: 1001 1001 1001 1001\nGid: 1002 1002 1002 1002\nGroups: 107 1002\n")
+	if !postgresProcessCredentials(status, 1001, 1002, []uint32{107, 1002}) {
+		t.Fatal("recorded PostgreSQL/ssl-cert group identity rejected")
+	}
+	if postgresProcessCredentials(status, 1001, 1002, []uint32{1002}) || postgresProcessCredentials(bytes.ReplaceAll(status, []byte("107 1002"), []byte("0 1002")), 1001, 1002, []uint32{0, 1002}) {
+		t.Fatal("unexpected/root supplementary group accepted")
+	}
+}
+func TestPostgresNativePackageConfigurationRejectsForeignEffects(t *testing.T) {
+	if !postgresDefaultDpkgConfiguration([]byte("# Debian defaults\nno-debsig\nlog /var/log/dpkg.log\n")) {
+		t.Fatal("standard base configuration rejected")
+	}
+	for _, line := range []string{"pre-invoke=unrelated-command", "post-invoke=unrelated-command", "admindir /foreign/state", "force-unsafe-io", "force-overwrite"} {
+		if postgresDefaultDpkgConfiguration([]byte(line + "\n")) {
+			t.Fatalf("foreign package effect accepted: %s", line)
+		}
 	}
 }

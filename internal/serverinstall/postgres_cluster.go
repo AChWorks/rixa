@@ -171,6 +171,15 @@ func (b *postgresBackend) observeCluster(ctx context.Context, j *postgresJournal
 			return ErrState
 		}
 	}
+	confDirectory := filepath.Join(b.configDir(j), "conf.d")
+	actualConf, ce := filepath.EvalSymlinks(confDirectory)
+	if ce != nil || actualConf != confDirectory {
+		return ErrAuthority
+	}
+	confEntries, ce := os.ReadDir(confDirectory)
+	if ce != nil || len(confEntries) != 0 {
+		return ErrAuthority
+	}
 	config, e := readRegular(filepath.Join(b.configDir(j), "postgresql.conf"), 1<<20)
 	if e != nil {
 		return e
@@ -261,15 +270,15 @@ func (b *postgresBackend) start(ctx context.Context, j *postgresJournal) error {
 	if _, e = b.m.run(ctx, "/usr/bin/systemctl", "daemon-reload"); e != nil {
 		return e
 	}
-	if b.loaded(ctx, j) == nil {
+	if b.loaded(ctx, j) == nil && b.physicalSQLProof(ctx, j) == nil {
 		return nil
 	}
-	if _, e = b.m.run(ctx, "/usr/bin/systemctl", "start", unit); e != nil {
+	if _, e = b.m.run(ctx, "/usr/bin/systemctl", "enable", "--now", unit); e != nil {
 		return e
 	}
 	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
-		if b.loaded(ctx, j) == nil {
+		if b.loaded(ctx, j) == nil && b.physicalSQLProof(ctx, j) == nil {
 			return nil
 		}
 		select {
@@ -283,8 +292,12 @@ func (b *postgresBackend) start(ctx context.Context, j *postgresJournal) error {
 func (b *postgresBackend) loaded(ctx context.Context, j *postgresJournal) error {
 	cluster, _, _ := postgresNames(j)
 	unit := "postgresql@18-" + cluster + ".service"
-	out, e := b.m.run(ctx, "/usr/bin/systemctl", "show", "--property=FragmentPath", "--property=DropInPaths", "--property=ActiveState", "--property=MainPID", unit)
+	out, e := b.m.run(ctx, "/usr/bin/systemctl", "show", "--property=FragmentPath", "--property=DropInPaths", "--property=ActiveState", "--property=MainPID", "--property=ExecStart", "--property=UnitFileState", unit)
 	p := properties(out)
+	expected := "/usr/bin/pg_ctlcluster --skip-systemctl-redirect 18-" + cluster + " start ;"
+	if p["UnitFileState"] != "enabled" || strings.Count(p["ExecStart"], "argv[]=") != 1 || !strings.Contains(p["ExecStart"], "path=/usr/bin/pg_ctlcluster ;") || !strings.Contains(p["ExecStart"], "argv[]="+expected) {
+		return ErrAuthority
+	}
 	if e != nil || p["DropInPaths"] != "" || p["ActiveState"] != "active" || (p["FragmentPath"] != "/usr/lib/systemd/system/postgresql@.service" && p["FragmentPath"] != "/lib/systemd/system/postgresql@.service") {
 		return ErrState
 	}
@@ -323,6 +336,12 @@ func (b *postgresBackend) loaded(ctx context.Context, j *postgresJournal) error 
 	return nil
 }
 func (b *postgresBackend) sql(ctx context.Context, j *postgresJournal, database, query string) ([]byte, error) {
+	if e := b.physicalSQLProof(ctx, j); e != nil {
+		return nil, e
+	}
+	return b.sqlCommand(ctx, j, database, query)
+}
+func (b *postgresBackend) sqlCommand(ctx context.Context, j *postgresJournal, database, query string) ([]byte, error) {
 	if !b.toolsIntact(j) || b.loaded(ctx, j) != nil {
 		return nil, ErrAuthority
 	}
@@ -332,7 +351,7 @@ func (b *postgresBackend) sql(ctx context.Context, j *postgresJournal, database,
 	cmd.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: j.PostgresUID, Gid: j.PostgresGID, Groups: []uint32{j.PostgresGID}}}
 	cmd.Env = []string{"PATH=/usr/sbin:/usr/bin:/sbin:/bin", "LANG=C.UTF-8", "LC_ALL=C.UTF-8", "HOME=/var/lib/postgresql"}
 	cmd.Dir = "/var/lib/postgresql"
-	cmd.Stdin = strings.NewReader(query)
+	cmd.Stdin = strings.NewReader("SET search_path=pg_catalog;\n" + query)
 	var output, diagnostic boundedOutput
 	cmd.Stdout = &output
 	cmd.Stderr = &diagnostic
@@ -343,7 +362,7 @@ func (b *postgresBackend) sql(ctx context.Context, j *postgresJournal, database,
 	return bytes.TrimSpace(output.Bytes()), nil
 }
 func postgresOwnership(j *postgresJournal) string {
-	return postgresSchema + ":" + j.Draft.OperationID + ":" + j.Token
+	return postgresSchema + ":" + j.Draft.OperationID + ":" + digest([]byte(j.Token))
 }
 func postgresRoleName(j *postgresJournal, scope string) string {
 	_, control, site := postgresNames(j)
@@ -391,12 +410,10 @@ func (b *postgresBackend) role(ctx context.Context, j *postgresJournal, scope st
 	if !errors.Is(e, os.ErrNotExist) {
 		return e
 	}
-	name := postgresRoleName(j, scope)
-	password := j.ControlPassword
-	if scope == "site" {
-		password = j.SitePassword
+	query, qe := postgresRoleCreationSQL(j, scope)
+	if qe != nil {
+		return qe
 	}
-	query := "BEGIN; SET LOCAL password_encryption='scram-sha-256'; CREATE ROLE \"" + name + "\" LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD '" + password + "'; COMMENT ON ROLE \"" + name + "\" IS '" + postgresOwnership(j) + "'; COMMIT;"
 	if _, e = b.sql(ctx, j, "postgres", query); e != nil {
 		return e
 	}
@@ -495,7 +512,7 @@ func postgresConnect(parent context.Context, dsn string) (*pgx.Conn, error) {
 		return nil, ErrInput
 	}
 	config.ConnectTimeout = 2 * time.Second
-	config.RuntimeParams = map[string]string{"application_name": "rixa-native-postgresql-proof"}
+	config.RuntimeParams = map[string]string{"application_name": "rixa-native-postgresql-proof", "search_path": "pg_catalog"}
 	config.Fallbacks = nil
 	ctx, cancel := context.WithTimeout(parent, 4*time.Second)
 	defer cancel()
@@ -519,7 +536,7 @@ func (b *postgresBackend) verify(ctx context.Context, j *postgresJournal) error 
 		var version int
 		var server, database string
 		queryCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
-		e = conn.QueryRow(queryCtx, "SELECT current_setting('server_version_num')::int, c.system_identifier::text, d.oid::text FROM pg_control_system() c JOIN pg_database d ON d.datname=current_database()").Scan(&version, &server, &database)
+		e = conn.QueryRow(queryCtx, "SELECT current_setting('server_version_num')::int, c.system_identifier::text, d.oid::text FROM pg_catalog.pg_control_system() c JOIN pg_catalog.pg_database d ON d.datname=pg_catalog.current_database()").Scan(&version, &server, &database)
 		_ = conn.Close(context.WithoutCancel(ctx))
 		cancel()
 		if e != nil || version/10000 != 18 || server+":"+database != j.DatabaseTargets[v.key] {
@@ -612,4 +629,24 @@ func postgresProcessCredentials(status []byte, uid, gid uint32, groups []uint32)
 	}
 	sort.Slice(actual, func(i, j int) bool { return actual[i] < actual[j] })
 	return seen && reflect.DeepEqual(actual, groups) && runtimeCredentialsMatch([]byte(strings.Join(lines, "\n")), uid, gid)
+}
+
+func (b *postgresBackend) physicalSQLProof(ctx context.Context, j *postgresJournal) error {
+	if e := b.observeCluster(ctx, j); e != nil {
+		return e
+	}
+	out, e := b.sqlCommand(ctx, j, "postgres", "SELECT json_build_object('system',(pg_catalog.pg_control_system()).system_identifier::text,'data',current_setting('data_directory'),'listen',current_setting('listen_addresses'),'port',current_setting('port')); ")
+	if e != nil {
+		return e
+	}
+	var actual struct {
+		System string `json:"system"`
+		Data   string `json:"data"`
+		Listen string `json:"listen"`
+		Port   string `json:"port"`
+	}
+	if json.Unmarshal(out, &actual) != nil || actual.System != j.ClusterID || actual.Data != b.data(j) || actual.Listen != "127.0.0.1" || actual.Port != strconv.Itoa(j.Draft.Port) {
+		return ErrAuthority
+	}
+	return nil
 }

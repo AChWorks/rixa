@@ -34,6 +34,8 @@ type postgresJournal struct {
 	Token                 string                      `json:"token"`
 	ControlPassword       string                      `json:"control_password"`
 	SitePassword          string                      `json:"site_password"`
+	ControlVerifier       string                      `json:"control_verifier"`
+	SiteVerifier          string                      `json:"site_verifier"`
 	ReviewToken           string                      `json:"review_token,omitempty"`
 	ReviewedAt            string                      `json:"reviewed_at,omitempty"`
 	ReviewedManagerSHA256 string                      `json:"reviewed_manager_sha256,omitempty"`
@@ -42,6 +44,7 @@ type postgresJournal struct {
 	Baseline              map[string]string           `json:"baseline,omitempty"`
 	HostSHA256            string                      `json:"host_sha256,omitempty"`
 	Helpers               map[string]string           `json:"helpers,omitempty"`
+	DpkgConfigSHA256      string                      `json:"dpkg_config_sha256,omitempty"`
 	KeySHA256             string                      `json:"key_sha256,omitempty"`
 	ListsSHA256           string                      `json:"lists_sha256,omitempty"`
 	Packages              []PostgresPackage           `json:"packages,omitempty"`
@@ -117,7 +120,10 @@ func validPostgresJournal(j *postgresJournal) bool {
 			return false
 		}
 	}
-	for _, v := range []string{j.ReviewToken, j.ReviewedManagerSHA256, j.ManagerSHA256, j.Frozen, j.HostSHA256, j.KeySHA256, j.ListsSHA256, j.ConfigSHA256, j.HBASHA256, j.BinarySHA256, j.AssessmentID} {
+	if !validPostgresVerifier(j.ControlPassword, j.ControlVerifier) || !validPostgresVerifier(j.SitePassword, j.SiteVerifier) {
+		return false
+	}
+	for _, v := range []string{j.ReviewToken, j.ReviewedManagerSHA256, j.ManagerSHA256, j.Frozen, j.HostSHA256, j.KeySHA256, j.ListsSHA256, j.ConfigSHA256, j.HBASHA256, j.BinarySHA256, j.AssessmentID, j.DpkgConfigSHA256} {
 		if v != "" && !hashSyntax.MatchString(v) {
 			return false
 		}
@@ -232,7 +238,7 @@ func validPostgresJournal(j *postgresJournal) bool {
 			return false
 		}
 	} else {
-		if j.Frozen != postgresIntentDigest(j) || j.ManagerSHA256 == "" || j.ManagerSHA256 != j.ReviewedManagerSHA256 || j.ReviewToken == "" || j.HostSHA256 == "" || j.KeySHA256 == "" || j.ListsSHA256 == "" || len(j.Packages) == 0 || len(j.Helpers) == 0 || j.ExecutorGeneration < 1 || j.Attempts["executor"] == "" {
+		if j.Frozen != postgresIntentDigest(j) || j.ManagerSHA256 == "" || j.ManagerSHA256 != j.ReviewedManagerSHA256 || j.ReviewToken == "" || j.HostSHA256 == "" || j.DpkgConfigSHA256 == "" || j.KeySHA256 == "" || j.ListsSHA256 == "" || len(j.Packages) == 0 || len(j.Helpers) == 0 || j.ExecutorGeneration < 1 || j.Attempts["executor"] == "" {
 			return false
 		}
 		if j.State != "applying" && j.State != "reconciliation-required" && j.State != "installed" {
@@ -328,7 +334,7 @@ func (m *Manager) postgresFail(j *postgresJournal, code, message string, cause e
 		old, e := readPrivate(path, m.ownerUID, 64<<10)
 		if e == nil || errors.Is(e, os.ErrNotExist) {
 			text := string(old) + "\nstage=" + j.Stage + " code=" + code + " cause=" + cause.Error()
-			for _, s := range []string{j.Token, j.ControlPassword, j.SitePassword} {
+			for _, s := range []string{j.Token, j.ControlPassword, j.SitePassword, j.ControlVerifier, j.SiteVerifier} {
 				text = strings.ReplaceAll(text, s, "[redacted]")
 			}
 			if len(text) > 64<<10 {

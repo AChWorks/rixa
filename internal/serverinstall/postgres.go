@@ -63,7 +63,15 @@ func (m *Manager) SavePostgresDraft(ctx context.Context, d PostgresDraft) (Postg
 	if e != nil {
 		return PostgresResult{}, e
 	}
-	j := &postgresJournal{Schema: postgresSchema, Draft: d, Token: token, ControlPassword: control, SitePassword: site, State: "draft", Code: "draft-saved", Message: "Private PostgreSQL prerequisite draft saved. Review the exact dedicated-host package effects before applying.", Attempts: map[string]string{}}
+	controlVerifier, e := newPostgresVerifier(control)
+	if e != nil {
+		return PostgresResult{}, e
+	}
+	siteVerifier, e := newPostgresVerifier(site)
+	if e != nil {
+		return PostgresResult{}, e
+	}
+	j := &postgresJournal{Schema: postgresSchema, Draft: d, Token: token, ControlPassword: control, SitePassword: site, ControlVerifier: controlVerifier, SiteVerifier: siteVerifier, State: "draft", Code: "draft-saved", Message: "Private PostgreSQL prerequisite draft saved. Review the exact dedicated-host package effects before applying.", Attempts: map[string]string{}}
 	if e = m.savePostgres(j); e != nil {
 		return PostgresResult{}, e
 	}
@@ -143,6 +151,11 @@ func (b *postgresBackend) review(ctx context.Context, j *postgresJournal) []Prob
 	if len(helpers) != 4 {
 		return fail("base-tools-required", "Trusted apt-get, dpkg-query, dpkg-deb and Debian archive keyring are required on this supported base.")
 	}
+	dpkgConfig, de := b.dpkgConfiguration()
+	if de != nil {
+		return fail("dpkg-configuration-unsupported", "This clean profile requires standard dpkg configuration without foreign hooks, forced effects or relocated package state.")
+	}
+	j.DpkgConfigSHA256 = dpkgConfig
 	j.Baseline, j.HostSHA256, j.Helpers, j.ReviewedManagerSHA256 = baseline, host, helpers, digest(image)
 	if e = b.prepareAPT(ctx, j); e != nil {
 		return fail("authenticated-apt-required", "Official PGDG key or scoped signed Debian/PGDG metadata could not be authenticated. Inspect connectivity, base CA trust and protected planning cache; insecure repositories are never accepted.")
@@ -336,5 +349,5 @@ func (m *Manager) PostgresStatus(ctx context.Context, id string) (PostgresResult
 }
 
 func postgresIntentDigest(j *postgresJournal) string {
-	return digest([]byte(postgresReviewEvidence(j) + ":" + j.Token + ":" + j.ControlPassword + ":" + j.SitePassword + ":" + j.ReviewToken + ":" + j.AssessmentID))
+	return digest([]byte(postgresReviewEvidence(j) + ":" + j.Token + ":" + j.ControlPassword + ":" + j.SitePassword + ":" + j.ReviewToken + ":" + j.AssessmentID + ":" + j.DpkgConfigSHA256 + ":" + j.ControlVerifier + ":" + j.SiteVerifier))
 }

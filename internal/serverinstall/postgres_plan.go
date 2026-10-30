@@ -198,7 +198,7 @@ func parsePostgresAPTPlan(text []byte, baseline map[string]string) ([]PostgresPa
 	return result, nil
 }
 func (b *postgresBackend) inventory(ctx context.Context) (map[string]string, error) {
-	out, e := b.m.run(ctx, "/usr/bin/dpkg-query", "--show", "--showformat=${binary:Package}\t${Version}\t${db:Status-Status}\n")
+	out, e := b.m.run(ctx, "/usr/bin/dpkg-query", "--admindir="+b.path("/var/lib/dpkg"), "--show", "--showformat=${binary:Package}\t${Version}\t${db:Status-Status}\n")
 	if e != nil {
 		return nil, e
 	}
@@ -304,7 +304,7 @@ func (b *postgresBackend) cleanHost(ctx context.Context, j *postgresJournal) (ma
 	return baseline, digest(state), nil
 }
 func postgresBaseServices(out []byte) bool {
-	allowed := map[string]bool{"ssh.service": true, "sshd.service": true, "dbus.service": true, "systemd-journald.service": true, "systemd-udevd.service": true, "systemd-logind.service": true, "systemd-timesyncd.service": true, "systemd-resolved.service": true, "networking.service": true, "systemd-networkd.service": true, "cron.service": true, "rsyslog.service": true, "qemu-guest-agent.service": true, "getty@tty1.service": true, "serial-getty@ttyS0.service": true, "polkit.service": true}
+	allowed := map[string]bool{"ssh.service": true, "sshd.service": true, "dbus.service": true, "systemd-journald.service": true, "systemd-udevd.service": true, "systemd-logind.service": true, "systemd-timesyncd.service": true, "systemd-resolved.service": true, "networking.service": true, "systemd-networkd.service": true, "cron.service": true, "rsyslog.service": true, "qemu-guest-agent.service": true, "getty@tty1.service": true, "serial-getty@ttyS0.service": true, "polkit.service": true, "user@0.service": true}
 	for _, line := range strings.Split(string(out), "\n") {
 		if strings.TrimSpace(line) == "" {
 			continue
@@ -434,6 +434,10 @@ func postgresListsDigest(dir string) (string, error) {
 	return digest(b), nil
 }
 func (b *postgresBackend) reviewedAPT(j *postgresJournal) bool {
+	configuration, ce := b.dpkgConfiguration()
+	if ce != nil || configuration != j.DpkgConfigSHA256 {
+		return false
+	}
 	if !b.verifyHelpers(j) {
 		return false
 	}
@@ -452,4 +456,49 @@ func (b *postgresBackend) reviewedAPT(j *postgresJournal) bool {
 	}
 	h, e := postgresListsDigest(filepath.Join(b.cache(j), "lists"))
 	return e == nil && h == j.ListsSHA256
+}
+
+func (b *postgresBackend) dpkgConfiguration() (string, error) {
+	paths := []string{b.path("/etc/dpkg/dpkg.cfg")}
+	entries, e := os.ReadDir(b.path("/etc/dpkg/dpkg.cfg.d"))
+	if e != nil && !errors.Is(e, os.ErrNotExist) {
+		return "", e
+	}
+	if len(entries) > 32 {
+		return "", ErrState
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			return "", ErrAuthority
+		}
+		paths = append(paths, filepath.Join(b.path("/etc/dpkg/dpkg.cfg.d"), entry.Name()))
+	}
+	state := map[string]string{}
+	for _, path := range paths {
+		data, e := readRegular(path, 64<<10)
+		if errors.Is(e, os.ErrNotExist) && path == b.path("/etc/dpkg/dpkg.cfg") {
+			continue
+		}
+		if e != nil {
+			return "", e
+		}
+		if !postgresDefaultDpkgConfiguration(data) {
+			return "", ErrAuthority
+		}
+		state[path] = digest(data)
+	}
+	encoded, _ := json.Marshal(state)
+	return digest(encoded), nil
+}
+func postgresDefaultDpkgConfiguration(data []byte) bool {
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(strings.SplitN(line, "#", 2)[0])
+		if line == "" {
+			continue
+		}
+		if line != "no-debsig" && line != "log /var/log/dpkg.log" {
+			return false
+		}
+	}
+	return true
 }
