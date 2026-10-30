@@ -67,6 +67,11 @@ func (b *bootstrapBackend) prepare(ctx context.Context, request BootstrapRequest
 		r.Code = "retained-operation-required"
 		return r, ErrState
 	}
+	for _, pg := range discovery.Postgres {
+		if request.OperationID != "" && request.OperationID == pg.OperationID {
+			return r, ErrInput
+		}
+	}
 	if request.OperationID == discovery.InstallationOperation && request.OperationID != "" {
 		return r, ErrInput
 	}
@@ -189,6 +194,11 @@ func (b *bootstrapBackend) prepare(ctx context.Context, request BootstrapRequest
 		id, e = bootstrapID(prefix)
 		if e != nil {
 			return r, e
+		}
+	}
+	for _, pg := range discovery.Postgres {
+		if id == pg.OperationID {
+			return r, ErrState
 		}
 	}
 	if _, e = os.Lstat(b.m.statePath(id)); !errors.Is(e, os.ErrNotExist) {

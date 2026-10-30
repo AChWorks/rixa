@@ -133,6 +133,13 @@ func (b *bootstrapBackend) discover(ctx context.Context) (r BootstrapDiscovery, 
 	if err = privateDir(b.m.stateRoot, b.m.ownerUID, false); err != nil {
 		return r, err
 	}
+	postgresIDs := map[string]bool{}
+	for _, pg := range r.Postgres {
+		if !operationSyntax.MatchString(pg.OperationID) || postgresIDs[pg.OperationID] {
+			return r, ErrState
+		}
+		postgresIDs[pg.OperationID] = true
+	}
 	entries, e := os.ReadDir(b.m.stateRoot)
 	if e != nil || len(entries) > 512 {
 		return r, ErrState
@@ -189,6 +196,16 @@ func (b *bootstrapBackend) discover(ctx context.Context) (r BootstrapDiscovery, 
 				return r, ErrState
 			}
 			installs[id] = j
+		}
+	}
+	for id := range installs {
+		if postgresIDs[id] {
+			return r, ErrState
+		}
+	}
+	for id := range updates {
+		if postgresIDs[id] || installs[id] != nil {
+			return r, ErrState
 		}
 	}
 	if owner != "" && installs[owner] == nil {

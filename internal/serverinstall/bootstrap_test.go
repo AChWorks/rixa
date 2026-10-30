@@ -318,3 +318,28 @@ func TestBootstrapDelegatesPrerequisiteDiscoveryAndKeepsCredentialsPrivate(t *te
 		t.Fatal("unsafe prerequisite discovery became a clean host")
 	}
 }
+
+func TestBootstrapRejectsCrossTypeOperationIDAmbiguity(t *testing.T) {
+	b := bootstrapTestBackend(t)
+	if _, e := b.m.SaveDraft(context.Background(), validDraft()); e != nil {
+		t.Fatal(e)
+	}
+	b.postgres = func(context.Context) ([]PostgresDiscovery, error) {
+		return []PostgresDiscovery{{OperationID: "first-install", State: "installed"}}, nil
+	}
+	if d, e := b.discover(context.Background()); e == nil || bootstrapAllowed(d, "install") {
+		t.Fatal("ambiguous native/PostgreSQL operation ID accepted")
+	}
+	b = bootstrapTestBackend(t)
+	b.postgres = func(context.Context) ([]PostgresDiscovery, error) {
+		return []PostgresDiscovery{{OperationID: "pg-case", State: "installed"}}, nil
+	}
+	calls := 0
+	b.fetch = func(context.Context, releaseartifact.FetchRequest) (releaseartifact.FetchResult, error) {
+		calls++
+		return releaseartifact.FetchResult{}, ErrState
+	}
+	if _, e := b.prepare(context.Background(), BootstrapRequest{OperationID: "pg-case"}); e == nil || calls != 0 {
+		t.Fatal("cross-type operation ID reached preparation effects")
+	}
+}
