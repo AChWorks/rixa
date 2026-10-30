@@ -12,9 +12,9 @@
 - Use separate control and site logins. From the control interface, select one site to create and edit saved content, browse its history and preview revisions without another site login; site accounts remain independent.
 - Capture one quiesced site and restore it into a separate compatible empty target in the documented development profile.
 
-The runnable profiles are for **development** on Linux amd64 with PostgreSQL and private local storage. The manual runtime offers loopback HTTPS or explicit direct TLS. Builds containing `rixa manage` also provide a guided terminal and JSON CLI for a prepared Debian 13/systemd server: authenticate a selected release, configure and install its service, inspect progress, continue safely fenced operations and remove the owned runtime while retaining data. The [native operator guide](docs/server-management.md) defines its required local PostgreSQL 18 databases, TLS material, trusted verifier and infrastructure authority.
+The runnable profiles are for **development** on Linux amd64 with PostgreSQL and private local storage. The manual runtime offers loopback HTTPS or explicit direct TLS. Builds containing `rixa manage` also provide a guided terminal and JSON CLI for a prepared Debian 13/systemd server: authenticate a selected release, configure and install its service, inspect progress, apply a compatible retained-state update, continue safely fenced operations and remove the owned runtime while retaining data. The [native operator guide](docs/server-management.md) defines its required local PostgreSQL 18 databases, TLS material, trusted verifier and infrastructure authority.
 
-Production hosting, a complete trusted one-line bootstrap, automatic prerequisite provisioning, panel/web setup, executable updates and destructive purge remain separate development work.
+Production hosting, a complete trusted one-line bootstrap, automatic prerequisite provisioning, panel/web setup, unattended updates and destructive purge remain separate development work.
 
 ## Get started
 

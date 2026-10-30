@@ -46,16 +46,19 @@ type Problem struct {
 }
 
 type Result struct {
-	ReviewToken string    `json:"review_token,omitempty"`
-	OperationID string    `json:"operation_id"`
-	State       string    `json:"state"`
-	Stage       string    `json:"stage,omitempty"`
-	Code        string    `json:"code"`
-	Message     string    `json:"message,omitempty"`
-	Release     string    `json:"release,omitempty"`
-	AdminURL    string    `json:"admin_url,omitempty"`
-	Problems    []Problem `json:"problems,omitempty"`
-	Actions     []string  `json:"actions,omitempty"`
+	OperationKind         string    `json:"operation_kind,omitempty"`
+	InstallationOperation string    `json:"installation_operation,omitempty"`
+	ActiveRelease         string    `json:"active_release,omitempty"`
+	ReviewToken           string    `json:"review_token,omitempty"`
+	OperationID           string    `json:"operation_id"`
+	State                 string    `json:"state"`
+	Stage                 string    `json:"stage,omitempty"`
+	Code                  string    `json:"code"`
+	Message               string    `json:"message,omitempty"`
+	Release               string    `json:"release,omitempty"`
+	AdminURL              string    `json:"admin_url,omitempty"`
+	Problems              []Problem `json:"problems,omitempty"`
+	Actions               []string  `json:"actions,omitempty"`
 }
 
 // Facade is the single backend consumed by direct CLI and terminal presentation.

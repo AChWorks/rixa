@@ -363,6 +363,16 @@ func (m *Manager) Remove(ctx context.Context, id string) (Result, error) {
 		return Result{}, e
 	}
 	defer unlock()
+	if pending, pe := m.updateMarker("pending-update"); pe != nil {
+		return Result{}, pe
+	} else if pending != "" {
+		return Result{}, ErrBusy
+	}
+	if u, ue := m.installationUpdate(id); ue != nil {
+		return Result{}, ue
+	} else if u != nil {
+		return m.removeUpdatedInstallation(ctx, u)
+	}
 	j, e := m.load(id)
 	if e != nil {
 		return Result{}, e

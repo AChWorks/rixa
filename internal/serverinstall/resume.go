@@ -3,7 +3,6 @@ package serverinstall
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -19,29 +18,7 @@ func (m *Manager) executorFenced(ctx context.Context, j *journal) bool {
 	if j.ExecutorGeneration < 1 || j.ExecutorGeneration > 16 || !j.ExecutorAcknowledged && j.Attempts["executor"] != "verified" {
 		return false
 	}
-	unit := executorName(j)
-	b, commandErr := m.run(ctx, "/usr/bin/systemctl", "show", "--property=LoadState", "--property=ActiveState", "--property=MainPID", "--property=ControlGroup", unit)
-	p := properties(b)
-	if commandErr != nil && !(p["LoadState"] == "not-found" && errors.Is(commandErr, ErrPrerequisite)) {
-		return false
-	}
-	if p["ActiveState"] != "inactive" && p["ActiveState"] != "failed" {
-		return false
-	}
-	if p["MainPID"] != "0" {
-		return false
-	}
-	if group := p["ControlGroup"]; group != "" {
-		// Kernel populated=0 covers descendants too, not only the former main PID.
-		if group != "/system.slice/"+unit {
-			return false
-		}
-		events, e := os.ReadFile(filepath.Join("/sys/fs/cgroup", group, "cgroup.events"))
-		if e != nil || !strings.Contains("\n"+string(events), "\npopulated 0\n") {
-			return false
-		}
-	}
-	return p["LoadState"] == "loaded" || p["LoadState"] == "not-found"
+	return m.unitQuiesced(ctx, executorName(j), true)
 }
 func (m *Manager) resumable(ctx context.Context, j *journal) bool {
 	if j.Frozen == "" || j.ExecutorGeneration >= 16 || j.State != "applying" && j.State != "reconciliation-required" || !m.executorFenced(ctx, j) {
@@ -80,6 +57,17 @@ func (m *Manager) Resume(ctx context.Context, id string) (Result, error) {
 	j, e := m.load(id)
 	if e != nil {
 		return Result{}, e
+	}
+	if pending, pe := m.updateMarker("pending-update"); pe != nil {
+		return Result{}, pe
+	} else if pending != "" {
+		u, ue := m.loadUpdate(pending)
+		if ue != nil {
+			return Result{}, ue
+		}
+		if u.Draft.InstallationOperation == id {
+			return m.resumeUpdate(ctx, u)
+		}
 	}
 	if !m.resumable(ctx, j) {
 		return result(j), ErrState

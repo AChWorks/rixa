@@ -42,6 +42,16 @@ func runManage(parent context.Context, args []string, input *os.File, output *os
 		}
 		return err
 	}
+	if len(args) > 0 && args[0] == "internal-update-apply" {
+		if len(args) != 2 {
+			return errors.New("internal-update-apply requires one operation ID")
+		}
+		result, err := serverinstall.New().RunUpdateOperation(ctx, args[1])
+		if encodeErr := json.NewEncoder(output).Encode(result); encodeErr != nil {
+			return encodeErr
+		}
+		return err
+	}
 	if os.Geteuid() != 0 {
 		return serverinstall.ErrAuthority
 	}
@@ -53,6 +63,13 @@ func manageWithFacade(ctx context.Context, args []string, input *os.File, output
 	if len(args) > 0 && len(args[0]) > 0 && args[0][0] != '-' {
 		action = args[0]
 		args = args[1:]
+	}
+	if action == "update" {
+		updater, ok := backend.(serverinstall.UpdateFacade)
+		if !ok {
+			return errors.New("this manager does not support native update; use a compatible manager and retain the original installation manager")
+		}
+		return manageUpdateWithFacade(ctx, args, input, output, updater)
 	}
 	if action != "menu" && action != "draft" && action != "review" && action != "apply" && action != "resume" && action != "status" && action != "remove" {
 		return errors.New("usage: rixa manage <menu|draft|review|apply|resume|status|remove> [--operation <id>]; draft also needs --source <private-json>")
@@ -163,37 +180,44 @@ func manageWithFacade(ctx context.Context, args []string, input *os.File, output
 // O_NONBLOCK and O_NOFOLLOW make FIFOs/final symlinks fail without prompting.
 func readManageDraft(path string) (serverinstall.Draft, error) {
 	var draft serverinstall.Draft
+	if err := readManagePrivateJSON(path, &draft); err != nil {
+		return serverinstall.Draft{}, err
+	}
+	return draft, nil
+}
+
+func readManagePrivateJSON(path string, destination any) error {
 	if !filepath.IsAbs(path) || filepath.Clean(path) != path {
-		return draft, errors.New("draft source must be an absolute clean private JSON path")
+		return errors.New("draft source must be an absolute clean private JSON path")
 	}
 	fd, err := unix.Open(path, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0)
 	if err != nil {
-		return draft, errors.New("private draft source is unavailable")
+		return errors.New("private draft source is unavailable")
 	}
 	f := os.NewFile(uintptr(fd), "private-draft")
 	defer f.Close()
 	info, err := f.Stat()
 	if err != nil || !info.Mode().IsRegular() || info.Size() == 0 || info.Size() > 128<<10 || info.Mode().Perm()&0077 != 0 {
-		return draft, errors.New("draft source must be a private regular JSON file of at most 128 KiB")
+		return errors.New("draft source must be a private regular JSON file of at most 128 KiB")
 	}
 	stat, ok := info.Sys().(*syscall.Stat_t)
 	if !ok || int(stat.Uid) != os.Geteuid() {
-		return draft, errors.New("draft source must belong to the executing operator")
+		return errors.New("draft source must belong to the executing operator")
 	}
 	data, err := io.ReadAll(io.LimitReader(f, (128<<10)+1))
 	if err != nil || len(data) > 128<<10 {
-		return draft, errors.New("private draft source could not be read within its bound")
+		return errors.New("private draft source could not be read within its bound")
 	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
-	if decoder.Decode(&draft) != nil {
-		return serverinstall.Draft{}, errors.New("private draft JSON is malformed or contains unknown fields")
+	if decoder.Decode(destination) != nil {
+		return errors.New("private draft JSON is malformed or contains unknown fields")
 	}
 	var extra any
 	if decoder.Decode(&extra) != io.EOF {
-		return serverinstall.Draft{}, errors.New("private draft JSON must contain exactly one document")
+		return errors.New("private draft JSON must contain exactly one document")
 	}
-	return draft, nil
+	return nil
 }
 
 // fetchForManage delegates the entire channel/tag/producer policy. Presentation
@@ -218,7 +242,9 @@ const manageHelp = "Rixa native operator management\n\n" +
 	"  rixa manage draft --source <private-json> [--operation <matching-id>]\n" +
 	"  rixa manage <review|resume|status> --operation <id>\n" +
 	"  rixa manage apply --operation <id> --review-token <from-review>\n" +
-	"  rixa manage remove --operation <id> --confirm-remove\n\n" +
+	"  rixa manage remove --operation <id> --confirm-remove\n" +
+	"  rixa manage update <menu|draft|review|apply|resume|status|remove> [flags]\n" +
+	"  rixa manage update --help\n\n" +
 	"Direct commands emit safe JSON and never prompt. --non-interactive rejects the menu.\n" +
 	"Draft/prefill JSON contains credentials: same-operator private regular files only.\n" +
 	"Apply queues a fixed persistent operation; inspect status before claiming completion.\n" +
