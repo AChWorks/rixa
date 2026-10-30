@@ -136,7 +136,13 @@ It does not create new sessions or successful writes.
 
 Use a real served browser separately for the menu-to-web journey, both control
 and site surfaces, English/LTR default, selectable Persian/RTL, keyboard/reflow
-and relevant errors. This stdlib HTTP helper does not establish browser or
+and relevant errors. The optional `update-browser.js` driver accepts existing
+isolated Playwright objects, private credentials and a durable checkpoint writer.
+It preserves the canonical product origins while routing only that ephemeral
+context's transport through the owned loopback HTTPS forward; it changes no host
+DNS/network settings. Label its explicit context TLS exception accurately and
+retain independent strict CA/TLS verification. Never log the private fixture,
+cookie state or filled credential fields. This stdlib HTTP helper does not establish browser or
 accessibility conformance.
 
 Finally exercise `manage update remove` through its normal explicit confirmation
