@@ -143,12 +143,14 @@ async function rixaSelectedSiteBrowser({browser, context, page, fixture, private
       for(;;) {
         pages++;
         const links=await page.locator("table a[href^='"+base(site)+"/edit/']").evaluateAll(elements=>elements.map(e=>e.getAttribute("href")));
-        check(links.length>0&&links.length<=50,"content page exceeded bounded size");
+        check(links.length>0&&links.length<=50,"content page size="+links.length+" exceeded bounded range1..50");
         for(const link of links) {check(!ids.has(link),"content pagination repeated an item");ids.add(link);}
         const next=page.locator("a[href^='"+base(site)+"/page/']");
         if(await next.count()===0) break;
         check(pages<4,"content pagination did not terminate");
-        await next.click();
+        const [navigation]=await Promise.all([page.waitForNavigation({waitUntil:"domcontentloaded"}),next.click()]);
+        check(navigation?.status()===200,"content continuation HTTP status="+navigation?.status());
+        await page.locator("table").waitFor({state:"attached"});
       }
       check(ids.size===site.content_count&&ids.size>100&&pages===3,"content discovery incomplete beyond100");
       await page.goto(fixture.control+base(site)+"/edit/"+site.content_id);
@@ -157,12 +159,14 @@ async function rixaSelectedSiteBrowser({browser, context, page, fixture, private
       for(;;) {
         historyPages++;
         const links=await page.locator("ol a[href^='"+base(site)+"/preview/"+site.content_id+"/']").evaluateAll(elements=>elements.map(e=>e.getAttribute("href")));
-        check(links.length>0&&links.length<=25,"history page exceeded bounded size");
+        check(links.length>0&&links.length<=25,"history page size="+links.length+" exceeded bounded range1..25");
         links.forEach(link=>{check(!revisions.has(link),"history pagination repeated revision");revisions.add(link);});
         const next=page.locator("a[href^='"+base(site)+"/history/"+site.content_id+"/before/']");
         if(await next.count()===0) break;
         check(historyPages<4,"history pagination did not terminate");
-        await next.click();
+        const [navigation]=await Promise.all([page.waitForNavigation({waitUntil:"domcontentloaded"}),next.click()]);
+        check(navigation?.status()===200,"history continuation HTTP status="+navigation?.status());
+        await page.locator("ol").waitFor({state:"attached"});
       }
       check(revisions.size===site.history_count&&revisions.size>50&&historyPages===3,"history discovery incomplete beyond50");
       await page.goto(fixture.control+base(site)+"/edit/"+site.content_id);
