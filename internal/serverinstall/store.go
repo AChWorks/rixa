@@ -158,6 +158,34 @@ func writeAtomic(path string, b []byte, mode os.FileMode) error {
 	}
 	return nil
 }
+
+// Validate the public draft request before an absent state root can classify it
+// as missing. Existing state still uses the same ownership checks and lock.
+func (m *Manager) lockDraftRead(ctx context.Context, id string) (func(), error) {
+	if e := m.authorize(); e != nil {
+		return nil, e
+	}
+	if e := ctx.Err(); e != nil {
+		return nil, e
+	}
+	if !operationSyntax.MatchString(id) {
+		return nil, ErrInput
+	}
+	if _, missing := os.Lstat(m.stateRoot); errors.Is(missing, os.ErrNotExist) {
+		if !safePath(m.stateRoot) || (m.ownerUID == 0 && !trustedRootParent(m.stateRoot)) {
+			return nil, ErrState
+		}
+		// Only a missing leaf under an existing canonical parent is absent.
+		// Existing/dangling links and redirected parents use normal refusal.
+		parent := filepath.Dir(m.stateRoot)
+		if real, e := filepath.EvalSymlinks(parent); e != nil || real != parent {
+			return nil, ErrState
+		}
+		return nil, missing
+	}
+	return m.lock(ctx, false)
+}
+
 func (m *Manager) lock(ctx context.Context, create bool) (func(), error) {
 	if e := m.authorize(); e != nil {
 		return nil, e
