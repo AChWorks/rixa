@@ -3,6 +3,7 @@ import argparse
 import hashlib
 import importlib.util
 import json
+import io
 from pathlib import Path
 import tempfile
 import unittest
@@ -76,7 +77,7 @@ class CloudTrustAndSeedTests(unittest.TestCase):
             args = argparse.Namespace(lab=str(target), trust_method=lab.TRUST, build="20261026-2643",
                 image_sha512=selected, manifest_sha256=hashlib.sha256(manifest).hexdigest(),
                 instance="rixa-bootstrap-clean", scope_record="fixture")
-            def download(url, path, maximum):
+            def download(url, path, maximum, image_sha512=None):
                 content = manifest if url.endswith("SHA512SUMS") else metadata if url.endswith(".json") else b"corrupt image"
                 path.write_bytes(content)
             with patch.object(lab, "download", side_effect=download), patch.object(lab.subprocess, "run") as execute:
@@ -86,6 +87,47 @@ class CloudTrustAndSeedTests(unittest.TestCase):
             self.assertEqual(json.loads((target / "attempt.json").read_text())["state"],
                              "official-image-download-attempted")
             self.assertFalse((target / "guest.qcow2").exists())
+
+    def test_redirected_image_transport_is_not_metadata_authority(self):
+        mirror = "https://saimei.ftp.acc.umu.se/images/cloud/trixie/image.qcow2"
+        self.assertEqual(lab.validate_image_transport(mirror), mirror)
+        with self.assertRaises(ValueError):
+            lab.validate_url(mirror)
+        with self.assertRaises(ValueError):
+            lab.OfficialRedirects("not-a-sha512")
+        for url in ("http://mirror.test/image", "https://localhost/image", "https://127.0.0.1/image",
+                    "https://user@mirror.test/image", "https://10.0.0.1/image"):
+            with self.subTest(url=url), self.assertRaises(ValueError):
+                lab.validate_image_transport(url)
+
+    def test_redirected_corrupt_image_fails_mandatory_pin_before_return(self):
+        class Response(io.BytesIO):
+            headers = {"Content-Length": "3"}
+            def geturl(self):
+                return "https://mirror.example.net/image.qcow2"
+        with tempfile.TemporaryDirectory() as root, patch.object(lab, "build_opener") as build:
+            build.return_value.open.return_value = Response(b"bad")
+            with self.assertRaisesRegex(ValueError, "image checksum failed"):
+                lab.download("https://cloud.debian.org/images/cloud/image.qcow2",
+                             Path(root) / "image", 1024, hashlib.sha512(b"good").hexdigest())
+
+    def test_continuation_refuses_partial_image_or_later_effects(self):
+        with tempfile.TemporaryDirectory() as root:
+            target = Path(root) / "existing"
+            target.mkdir(mode=0o700)
+            for name in ("official-policy.html", "SHA512SUMS", "image-metadata.json", "partial-image.qcow2"):
+                (target / name).write_text("retained")
+            state = {"state": "official-image-download-attempted", "build": "20261026-2643", "trust_method": lab.TRUST}
+            (target / "attempt.json").write_text(json.dumps(state))
+            args = argparse.Namespace(lab=str(target), trust_method=lab.TRUST, build="20261026-2643",
+                image_sha512="a" * 128, manifest_sha256="b" * 64, instance="rixa-bootstrap-clean",
+                scope_record="fixture", continue_image_download=True)
+            with patch.object(lab, "download") as download, patch.object(lab.subprocess, "run") as execute:
+                with self.assertRaisesRegex(ValueError, "exact metadata-only"):
+                    lab.prepare(args)
+                download.assert_not_called()
+                execute.assert_not_called()
+            self.assertEqual((target / "partial-image.qcow2").read_text(), "retained")
 
     def test_existing_state_is_never_overwritten_on_prepare(self):
         with tempfile.TemporaryDirectory() as root:

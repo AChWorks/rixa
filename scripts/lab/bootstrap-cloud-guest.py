@@ -5,6 +5,7 @@ import argparse
 import fcntl
 import hashlib
 import importlib.util
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -58,17 +59,43 @@ def validate_url(url):
     return url
 
 
+def validate_image_transport(url):
+    parsed = urlsplit(url)
+    if (parsed.scheme != "https" or not parsed.hostname or parsed.port not in (None, 443)
+            or parsed.username or parsed.fragment or len(url) > 4096
+            or parsed.hostname in ("localhost", "localhost.localdomain")
+            or parsed.hostname.endswith((".localhost", ".local"))):
+        raise ValueError("pinned image transport requires bounded credential-free HTTPS")
+    try:
+        address = ipaddress.ip_address(parsed.hostname)
+    except ValueError:
+        address = None
+    if address is not None and not address.is_global:
+        raise ValueError("pinned image transport may not target private host addresses")
+    return url
+
+
 class OfficialRedirects(HTTPRedirectHandler):
+    max_redirections = 4
+    max_repeats = 2
+
+    def __init__(self, image_sha512=None):
+        super().__init__()
+        if image_sha512 is not None and not re.fullmatch("[a-f0-9]{128}", image_sha512):
+            raise ValueError("image redirects require an already selected SHA512 pin")
+        self.image_sha512 = image_sha512
+
     def redirect_request(self, request, fp, code, message, headers, new_url):
-        validate_url(new_url)
+        (validate_image_transport if self.image_sha512 else validate_url)(new_url)
         return super().redirect_request(request, fp, code, message, headers, new_url)
 
 
-def download(url, destination, maximum):
-    validate_url(url)
-    opener = build_opener(OfficialRedirects())
+def download(url, destination, maximum, image_sha512=None):
+    validate_url(url)  # Every initial request starts at official Debian authority.
+    opener = build_opener(OfficialRedirects(image_sha512))
     with opener.open(Request(url, headers={"User-Agent": "Rixa-owned-cloud-lab/1"}), timeout=60) as response:
-        validate_url(response.geturl())
+        resolved = response.geturl()
+        (validate_image_transport if image_sha512 else validate_url)(resolved)
         length = response.headers.get("Content-Length")
         if length and int(length) > maximum:
             raise ValueError("official download exceeds its bound")
@@ -90,6 +117,9 @@ def download(url, destination, maximum):
             os.fsync(output.fileno())
         if total == 0:
             raise ValueError("empty official download")
+    if image_sha512 and digest(destination, "sha512") != image_sha512:
+        raise ValueError("image checksum failed before any image parsing")
+    return resolved
 
 
 def manifest_digest(text, filename):
@@ -171,20 +201,36 @@ def prepare(args):
             or not re.fullmatch("[a-f0-9]{128}", args.image_sha512)
             or not re.fullmatch("[a-f0-9]{64}", args.manifest_sha256)):
         raise ValueError("explicit official HTTPS trust, immutable build and selected digests required")
-    lab = directory(args.lab, create=True)
+    continuing = getattr(args, "continue_image_download", False)
+    lab = directory(args.lab, create=not continuing)
     attempt = {"schema": SCHEMA, "uid": os.getuid(), "state": "prepare-attempted",
                "build": args.build, "trust_method": TRUST, "policy_url": POLICY,
                "scope_record": args.scope_record,
                "openpgp_signature": "not published for current official cloud images; not claimed"}
-    save(lab / "attempt.json", attempt, initial=True)
+    if continuing:
+        previous = json.loads(small_text(lab / "attempt.json", 65536))
+        required = {"attempt.json", "official-policy.html", "SHA512SUMS", "image-metadata.json"}
+        if (set(path.name for path in lab.iterdir()) != required
+                or previous.get("state") != "official-image-download-attempted"
+                or previous.get("build") != args.build or previous.get("trust_method") != TRUST):
+            raise ValueError("only exact metadata-only failed image phase may be continued")
+        for name in required:
+            regular(lab / name)
+        attempt = previous
+        attempt["state"] = "image-download-continuation-recorded"
+        attempt["download_continuation_scope_record"] = args.scope_record
+        save(lab / "attempt.json", attempt)
+    else:
+        save(lab / "attempt.json", attempt, initial=True)
     def stage(name):
         attempt["state"] = name + "-attempted"
         save(lab / "attempt.json", attempt)
     prefix = ORIGIN + "/images/cloud/trixie/" + args.build + "/"
     name = "debian-13-genericcloud-amd64-" + args.build
     stage("official-policy-and-manifest")
-    download(POLICY, lab / "official-policy.html", 131072)
-    download(prefix + "SHA512SUMS", lab / "SHA512SUMS", 65536)
+    if not continuing:
+        download(POLICY, lab / "official-policy.html", 131072)
+        download(prefix + "SHA512SUMS", lab / "SHA512SUMS", 65536)
     if digest(lab / "SHA512SUMS") != args.manifest_sha256:
         raise ValueError("versioned manifest differs from independently selected bytes")
     manifest = small_text(lab / "SHA512SUMS", 65536)
@@ -192,13 +238,14 @@ def prepare(args):
     if selected != args.image_sha512:
         raise ValueError("selected image digest differs from official versioned manifest")
     stage("official-metadata")
-    download(prefix + name + ".json", lab / "image-metadata.json", 65536)
+    if not continuing:
+        download(prefix + name + ".json", lab / "image-metadata.json", 65536)
     if digest(lab / "image-metadata.json", "sha512") != manifest_digest(manifest, name + ".json"):
         raise ValueError("official metadata checksum failed before JSON parsing")
     info, packages = metadata_info(small_text(lab / "image-metadata.json", 65536), args.build)
     stage("official-image-download")
     image = lab / (name + ".qcow2")
-    download(prefix + image.name, image, 3 << 30)
+    resolved_image_url = download(prefix + image.name, image, 3 << 30, selected)
     if digest(image, "sha512") != selected:
         raise ValueError("official image checksum failed; image will not be parsed or booted")
     image.chmod(0o400)
@@ -225,7 +272,9 @@ def prepare(args):
                    check=True, capture_output=True)
     (lab / "guest.qcow2").chmod(0o600)
     receipt = dict(attempt, state="prepared", image={"filename": image.name, "url": prefix + image.name,
-                   "sha512": selected, "sha256": digest(image), "virtual_size": qinfo["virtual-size"]},
+                   "sha512": selected, "sha256": digest(image), "virtual_size": qinfo["virtual-size"],
+                   "resolved_byte_transport_url": resolved_image_url,
+                   "authentication_authority": "official Debian HTTPS manifest and selected SHA512, not the transport mirror"},
                    manifest_sha256=args.manifest_sha256, metadata=info,
                    official_package_count=len(packages), instance_id=args.instance,
                    files={name: digest(lab / name) for name in
@@ -281,6 +330,8 @@ def owned_qemu():
 
 def boot(args):
     lab, _ = load(args.lab)
+    if (lab / "clean-baseline.json").exists():
+        raise ValueError("sealed clean baseline is immutable; future phases require a new owned overlay")
     if not re.fullmatch("[a-z][a-z0-9-]{0,62}", args.attempt):
         raise ValueError("stable ASCII launch attempt identifier required")
     with _common.launch_lock(lab) as lock:
@@ -344,6 +395,7 @@ def main():
     prep.add_argument("--instance", required=True)
     prep.add_argument("--trust-method", choices=(TRUST,), required=True)
     prep.add_argument("--scope-record", default="")
+    prep.add_argument("--continue-image-download", action="store_true")
     start = actions.add_parser("boot")
     start.add_argument("--lab", required=True)
     start.add_argument("--attempt", required=True)
