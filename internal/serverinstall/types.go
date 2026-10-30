@@ -71,3 +71,15 @@ type Facade interface {
 	Status(context.Context, string) (Result, error)
 	Remove(context.Context, string) (Result, error)
 }
+
+// InstallationEffects is the optional strict effect seam for callers authorized
+// only for one original installation operation. Unlike Facade's CLI convenience
+// methods, these methods never follow a pending or active child update. The
+// operation binding is checked while holding the native lifecycle effect lock.
+// Callers requiring this scope must fail closed when the seam is unavailable.
+type InstallationEffects interface {
+	ResumeInstallation(context.Context, string) (Result, error)
+	RemoveInstallation(context.Context, string) (Result, error)
+}
+
+var _ InstallationEffects = (*Manager)(nil)
