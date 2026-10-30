@@ -30,7 +30,7 @@ async function rixaLocalizationBrowser({browser, context, page, fixture, phase, 
     target.hostname="127.0.0.1";
     const headers={...options.headers,Host:host};
     if(!Object.keys(headers).some(key=>key.toLowerCase()==="cookie")) {
-      const cookies=await owner.cookies(original);
+      const cookies=await owner.cookies(address);
       if(cookies.length) headers.Cookie=cookies.map(cookie=>cookie.name+"="+cookie.value).join("; ");
     }
     try { return await owner.request[method](target.href,{...options,headers}); }
@@ -204,7 +204,7 @@ async function rixaLocalizationBrowser({browser, context, page, fixture, phase, 
   await page.reload();
   check(await page.locator("[data-current-revision]").textContent()===current,"denial changed revision");
   check(await page.locator("[data-content-save] input[name=title]").inputValue()===title,"denial changed title");
-  const cookies=await context.cookies(fixture.site_a);
+  const cookies=await context.cookies(fixture.site_a+"/admin/");
   const identity=cookies.find(cookie=>cookie.httpOnly&&cookie.name!=="rixa-ui-language");
   const preference=cookies.find(cookie=>cookie.name==="rixa-ui-language");
   check(identity&&preference&&preference.domain==="a.localhost"&&preference.secure&&preference.httpOnly&&preference.sameSite==="Lax"&&preference.path==="/admin","preference cookie scope weakened");
