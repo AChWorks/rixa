@@ -33,8 +33,21 @@ async function rixaLocalizationBrowser({browser, context, page, fixture, phase, 
   async function locale(origin, tag) {
     await page.goto(origin+"/admin/language/");
     await page.locator("select[name=ui_language]").selectOption(tag);
-    await Promise.all([page.waitForURL(url=>url.searchParams.get("ui_language")===tag),page.locator("form:has(select[name=ui_language]) button[type=submit]").click()]);
-    await page.waitForFunction(tag=>document.documentElement.lang===tag,tag);
+    const [response]=await Promise.all([page.waitForNavigation({waitUntil:"domcontentloaded"}),page.locator("form:has(select[name=ui_language]) button[type=submit]").click()]);
+    if(!response || response.status()!==200) {
+      let detail="no response body";
+      if(response) {
+        const body=(await response.text()).slice(0,2048);
+        try {
+          const value=JSON.parse(body);
+          detail=typeof value.code==="string"?"code="+value.code:"JSON response without error code";
+        } catch (_) {
+          detail=body.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,"").replace(/<[^>]*>/g,"").replace(/[\u0000-\u001f\u007f]+/g," ").replace(/\s+/g," ").trim().slice(0,240);
+        }
+      }
+      throw new Error("locale navigation status="+(response?response.status():"none")+"; "+detail);
+    }
+    check(await page.locator("html").getAttribute("lang")===tag,"locale navigation200 did not select requested language");
     check(await page.locator("html").getAttribute("dir")===(tag==="en"?"ltr":"rtl"),"selected direction incorrect");
   }
   async function responsive(name) {
@@ -50,6 +63,17 @@ async function rixaLocalizationBrowser({browser, context, page, fixture, phase, 
     await page.setViewportSize({width:1366,height:900});
     if(screenshotRoot) await page.screenshot({path:screenshotRoot+"/"+phase+"-"+name+"-wide.png",fullPage:true});
     mark(name+"-keyboard-390-wide");
+  }
+  // Exact released AChrix v0.2.0 title references and catalog values.
+  const sharedTitles={
+    media:{domain:"media",key:"library.title",fa:"کتابخانهٔ فایل‌ها",en:"File library"},
+    identity:{domain:"identity",key:"accounts.title",fa:"حساب‌ها",en:"Accounts"}
+  };
+  async function moduleTitle(surface, tag) {
+    const reference=sharedTitles[surface];
+    const expected=reference[tag==="fa"?"fa":"en"];
+    check(await page.evaluate(({domain,key})=>window.AChrixI18n.text(domain,key),reference)===expected,surface+" selected shared title catalog mismatch");
+    check((await page.locator("h1").textContent()).trim()===expected,surface+" visible localized/fallback title mismatch");
   }
   async function noMarkup() {
     check(await page.locator("#catalog-server-probe,#catalog-browser-probe,#catalog-parts-probe,#user-title-probe").count()===0,"catalog/user text became markup");
@@ -83,6 +107,7 @@ async function rixaLocalizationBrowser({browser, context, page, fixture, phase, 
   for(const surface of ["media","identity"]) {
     await page.goto(fixture.site_a+"/admin/"+surface+"/");
     check(await page.locator("html").getAttribute("lang")==="fa",surface+" lost locale");
+    await moduleTitle(surface,"fa");
   }
   mark("site-fa-content-appearance-media-identity");
 
@@ -104,6 +129,7 @@ async function rixaLocalizationBrowser({browser, context, page, fixture, phase, 
     for(const surface of ["media","identity"]) {
       await page.goto(fixture.site_a+"/admin/"+surface+"/");
       check(await page.locator("html").getAttribute("lang")==="ar","third locale unavailable on "+surface);
+      await moduleTitle(surface,"en"); // Partial third pack deliberately uses English Module fallback.
     }
     mark("third-direction-fallback-server-browser-plural-content-separation");
   }
