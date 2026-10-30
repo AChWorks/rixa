@@ -267,6 +267,10 @@ func (b *postgresBackend) cleanHost(ctx context.Context, j *postgresJournal) (ma
 	if e != nil || !postgresBaseServices(services) {
 		return nil, "", ErrPrerequisite
 	}
+	shutdown, e := b.shutdownMonitor(ctx, services)
+	if e != nil {
+		return nil, "", e
+	}
 	listeners, e := b.m.run(ctx, "/usr/bin/ss", "--no-header", "--listening", "--tcp", "--udp", "--numeric", "--processes", "--extended")
 	if e != nil {
 		return nil, "", ErrPrerequisite
@@ -291,6 +295,9 @@ func (b *postgresBackend) cleanHost(ctx context.Context, j *postgresJournal) (ma
 			normalizedServices = append(normalizedServices, strings.Join(f[:4], " "))
 		}
 	}
+	if shutdown != "" {
+		normalizedServices = append(normalizedServices, "stock-shutdown-monitor:"+shutdown)
+	}
 	sort.Strings(normalizedServices)
 	state, _ := json.Marshal(struct {
 		Machine             string
@@ -300,7 +307,7 @@ func (b *postgresBackend) cleanHost(ctx context.Context, j *postgresJournal) (ma
 	return baseline, digest(state), nil
 }
 func postgresBaseServices(out []byte) bool {
-	allowed := map[string]bool{"ssh.service": true, "sshd.service": true, "dbus.service": true, "systemd-journald.service": true, "systemd-udevd.service": true, "systemd-logind.service": true, "systemd-timesyncd.service": true, "systemd-resolved.service": true, "networking.service": true, "systemd-networkd.service": true, "cron.service": true, "rsyslog.service": true, "qemu-guest-agent.service": true, "getty@tty1.service": true, "serial-getty@ttyS0.service": true, "polkit.service": true, "user@0.service": true}
+	allowed := map[string]bool{postgresShutdownUnit: true, "ssh.service": true, "sshd.service": true, "dbus.service": true, "systemd-journald.service": true, "systemd-udevd.service": true, "systemd-logind.service": true, "systemd-timesyncd.service": true, "systemd-resolved.service": true, "networking.service": true, "systemd-networkd.service": true, "cron.service": true, "rsyslog.service": true, "qemu-guest-agent.service": true, "getty@tty1.service": true, "serial-getty@ttyS0.service": true, "polkit.service": true, "user@0.service": true}
 	for _, line := range strings.Split(string(out), "\n") {
 		if strings.TrimSpace(line) == "" {
 			continue
