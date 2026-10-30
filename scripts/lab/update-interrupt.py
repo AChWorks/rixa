@@ -132,10 +132,15 @@ def main():
         population = cgroup_population(before["ControlGroup"])
         if (after.get("MainPID") == "0" and after.get("ActiveState") in ("inactive", "failed")
                 and population in ("0", "absent")):
-            state.update(state="fenced", after=after, cgroup_population=population)
+            final_record = proof.private_json(path)
+            state.update(state="fenced", after=after, cgroup_population=population,
+                         stage_after_fence=final_record.get("stage"),
+                         attempts_after_fence=final_record.get("attempts", {}))
             proof.save(args.receipt, state)
             print(json.dumps({"status": "fenced", "unit": unit, "stage": record["stage"],
-                              "cgroup_population": population, "main_pid": 0}))
+                              "cgroup_population": population, "main_pid": 0,
+                              "stage_after_fence": final_record.get("stage"),
+                              "requested_attempt_after_fence": final_record.get("attempts", {}).get(args.stage)}))
             return 0
         time.sleep(0.05)
     raise ValueError("executor fence remains uncertain; inspect exact private receipt/unit")
