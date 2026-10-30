@@ -80,3 +80,7 @@ python3 /root/lab/content-smoke.py check --draft /root/lab/draft.json \
 Prove real installation, protected configuration, service restart, TLS and administrator login, interrupted-operation reconciliation and ordinary removal/data preservation against the exact candidate. Record source/artifact identities, real exits, checks and remaining limits in the owning Issue/PR; mock checks or an SSH-ready guest do not establish product acceptance.
 
 Shut down the owned guest via `systemctl poweroff` over that SSH connection, then verify the QEMU task exited. If SSH is unavailable, reconcile the exact owned QMP/job before requesting ACPI shutdown or a bounded task stop. Never kill unrelated QEMU processes. Retain unique failure evidence while needed; remove the private guest disk, credentials, ISO and extracted keyring only after no consumer needs them. No automatic recursive deletion or guest reuse as production is provided.
+
+## Native update and retained-state proof
+
+The [native update laboratory](UPDATE.md) describes genuine published baseline installation, the separate reviewed source fixture manager, durable mutation attempts, retained HTTP sessions and physical state snapshots, real executor interruption/recovery, browser acceptance and ordinary retained-data removal. Keep its private receipts outside Git; a queued job or mock test is not delivery evidence.

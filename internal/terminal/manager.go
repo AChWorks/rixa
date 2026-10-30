@@ -33,7 +33,11 @@ type Options struct {
 
 // Run shows only actions supplied by the shared native backend. Closing this
 // facade does not cancel a previously queued persistent installation operation.
-func Run(ctx context.Context, backend serverinstall.Facade, options Options) (err error) {
+func Run(ctx context.Context, backend serverinstall.Facade, options Options) error {
+	return runManagement(ctx, backend, options, nil)
+}
+
+func runManagement(ctx context.Context, backend serverinstall.Facade, options Options, update *updateAdapter) (err error) {
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	defer stop()
 
@@ -51,9 +55,16 @@ func Run(ctx context.Context, backend serverinstall.Facade, options Options) (er
 		if _, err = rand.Read(b); err != nil {
 			return err
 		}
-		id = "install-" + hex.EncodeToString(b)
+		prefix := "install-"
+		if update != nil {
+			prefix = "update-"
+		}
+		id = prefix + hex.EncodeToString(b)
 	}
 	draft := serverinstall.Draft{OperationID: id, Listen: "0.0.0.0:8443", Language: "en", ControlLogin: "admin", SiteLogin: "admin"}
+	if update != nil {
+		draft = serverinstall.Draft{OperationID: id}
+	}
 	if options.Prefill != nil {
 		draft = *options.Prefill
 		if draft.OperationID != "" {
@@ -63,10 +74,10 @@ func Run(ctx context.Context, backend serverinstall.Facade, options Options) (er
 			id = draft.OperationID
 		}
 		draft.OperationID = id
-		if draft.Listen == "" {
+		if update == nil && draft.Listen == "" {
 			draft.Listen = "0.0.0.0:8443"
 		}
-		if draft.Language == "" {
+		if update == nil && draft.Language == "" {
 			draft.Language = "en"
 		}
 	}
@@ -77,6 +88,9 @@ func Run(ctx context.Context, backend serverinstall.Facade, options Options) (er
 	}
 
 	current := serverinstall.Result{OperationID: id, State: "not checked", Code: "not_checked", Actions: []string{"configure", "status"}}
+	if update != nil {
+		current = update.annotate(current)
+	}
 	notice := ""
 	if options.OperationID != "" {
 		current, err = backend.Status(ctx, id)
@@ -110,6 +124,9 @@ func Run(ctx context.Context, backend serverinstall.Facade, options Options) (er
 			}
 		}
 		actions := menuActions(allowed)
+		if update != nil {
+			actions = updateMenuActions(allowed)
+		}
 		if selected >= len(actions) {
 			selected = 0
 		}
@@ -118,7 +135,11 @@ func Run(ctx context.Context, backend serverinstall.Facade, options Options) (er
 			displayNotice = "Unsaved edits: Configure to save before Review/Apply. " + displayNotice
 		}
 		lines := menuLines(s, options.Version, current, displayNotice, draft, actions, selected)
-		if err = s.paint("RIXA / Server management", lines, "Up/Down or Tab · Enter · F1 help · Ctrl-C exit"); err != nil {
+		title := "RIXA / Server management"
+		if update != nil {
+			title = "RIXA / Update management"
+		}
+		if err = s.paint(title, lines, "Up/Down or Tab · Enter · F1 help · Ctrl-C exit"); err != nil {
 			return err
 		}
 		k, readErr := s.readKey(ctx)
@@ -152,15 +173,29 @@ func Run(ctx context.Context, backend serverinstall.Facade, options Options) (er
 			selected = (selected + 1) % len(actions)
 			continue
 		case "help":
-			if err = s.paint("RIXA / Help", []string{
+			help := []string{
 				"Configure stores inputs privately; Review checks prerequisites.",
 				"Apply queues the exact reviewed operation. A queue is not success.",
 				"Refresh inspects actual retained progress and service observations.",
 				"Closing the menu leaves an already queued operation running.",
 				"Removal preserves configuration, credentials, databases and site data.",
-				"No updater, purge, PostgreSQL provisioner or panel adapter is offered here.",
+				"Use manage update --help to inspect the separate update interface.",
+				"No purge, PostgreSQL provisioner or panel adapter is offered here.",
 				"The terminal interface always uses English, independently of web language.",
-			}, "Enter / Escape returns"); err != nil {
+			}
+			if update != nil {
+				help = []string{
+					"Configure selects a candidate for one existing owning installation.",
+					"Review binds active state, candidate, manager and recovery conditions.",
+					"Apply queues the exact reviewed update; a queue is not success.",
+					"Refresh inspects retained progress; uncertain effects require inspection.",
+					"Resume is offered only after the backend proves it is safe.",
+					"Keep the original installation and its frozen manager.",
+					"A binary reversal does not roll back database changes.",
+					"The terminal interface always uses English, independently of web language.",
+				}
+			}
+			if err = s.paint("RIXA / Help", help, "Enter / Escape returns"); err != nil {
 				return err
 			}
 			if err = s.wait(ctx); err != nil {
@@ -203,7 +238,11 @@ func Run(ctx context.Context, backend serverinstall.Facade, options Options) (er
 					notice = "Download skipped. You may supply already downloaded archive and bundle paths."
 				}
 			}
-			current, completed, err = configure(ctx, s, backend, &draft, current)
+			if update == nil {
+				current, completed, err = configure(ctx, s, backend, &draft, current)
+			} else {
+				current, completed, err = update.configure(ctx, s, &draft, current)
+			}
 			if err != nil {
 				return err
 			}
@@ -240,7 +279,7 @@ func Run(ctx context.Context, backend serverinstall.Facade, options Options) (er
 				title = "Resume the retained installation?"
 				word = "RESUME"
 			}
-			yes, confirmErr := confirm(ctx, s, title, []string{
+			confirmation := []string{
 				"Operation: " + SafeText(id), "Release: " + SafeText(current.Release),
 				"Control: " + SafeText(draft.ControlOrigin),
 				"Site: " + SafeText(draft.SiteOrigin),
@@ -251,7 +290,11 @@ func Run(ctx context.Context, backend serverinstall.Facade, options Options) (er
 				"This creates the reviewed user, protected files and persistent service.",
 				"Only the exact reviewed operation will be queued.",
 				"Closing this menu does not stop an already queued operation.",
-			}, word)
+			}
+			if update != nil {
+				title, word, confirmation = updateConfirmation(action, id, current, update.installation)
+			}
+			yes, confirmErr := confirm(ctx, s, title, confirmation, word)
 			if confirmErr != nil {
 				return confirmErr
 			}
@@ -264,12 +307,20 @@ func Run(ctx context.Context, backend serverinstall.Facade, options Options) (er
 				notice = resultNotice(current, err, draft)
 			}
 		case "remove":
-			yes, confirmErr := confirm(ctx, s, "Remove Rixa executable and service?", []string{
+			removal := []string{
 				"Operation: " + SafeText(id),
 				"Remove only the positively identified Rixa executable/service material.",
 				"Keep configuration, credentials, databases, site data and prerequisites.",
 				"This stops serving. A separate purge is not available.",
-			}, "REMOVE")
+			}
+			if update != nil {
+				removal = append([]string{
+					"Update operation: " + SafeText(id),
+					"Installation operation: " + SafeText(current.InstallationOperation),
+					"Active release: " + SafeText(current.ActiveRelease),
+				}, removal[1:]...)
+			}
+			yes, confirmErr := confirm(ctx, s, "Remove Rixa executable and service?", removal, "REMOVE")
 			if confirmErr != nil {
 				return confirmErr
 			}
@@ -284,8 +335,12 @@ func Run(ctx context.Context, backend serverinstall.Facade, options Options) (er
 type menuAction struct{ id, label string }
 
 func menuActions(allowed []string) []menuAction {
-	var result []menuAction
 	choices := []menuAction{{"configure", "Configure installation"}, {"review", "Review prerequisites"}, {"apply", "Apply reviewed installation"}, {"resume", "Resume retained installation"}, {"status", "Refresh status"}, {"remove", "Remove executable and service"}}
+	return filterMenuActions(allowed, choices)
+}
+
+func filterMenuActions(allowed []string, choices []menuAction) []menuAction {
+	var result []menuAction
 	for _, choice := range choices {
 		for _, action := range allowed {
 			if choice.id == action {
@@ -316,6 +371,9 @@ func overview(version string, r serverinstall.Result, notice string) []string {
 		state = "not checked"
 	}
 	lines := []string{"Manager: " + SafeText(version) + "  |  Operation: " + SafeText(r.OperationID), "Recorded release: " + SafeText(r.Release), "State: " + SafeText(state) + "  |  Stage: " + SafeText(r.Stage)}
+	if r.OperationKind == "update" {
+		lines = []string{"Executing manager: " + SafeText(version) + "  |  Update operation: " + SafeText(r.OperationID), "Installation operation: " + SafeText(r.InstallationOperation), "Active release: " + SafeText(r.ActiveRelease), "Candidate release: " + SafeText(r.Release), "State: " + SafeText(state) + "  |  Stage: " + SafeText(r.Stage)}
+	}
 	if r.AdminURL != "" {
 		lines = append(lines, "Administration: "+SafeText(r.AdminURL))
 	}
@@ -382,7 +440,10 @@ func draftFields(d *serverinstall.Draft) []field {
 
 func configure(ctx context.Context, s *session, backend serverinstall.Facade, d *serverinstall.Draft, current serverinstall.Result) (serverinstall.Result, bool, error) {
 	fields := draftFields(d)
-	index := initialField(fields, *d)
+	return configureFields(ctx, s, backend, d, current, fields, initialField(fields, *d), func() []serverinstall.Problem { return serverinstall.ValidateDraft(*d) })
+}
+
+func configureFields(ctx context.Context, s *session, backend serverinstall.Facade, d *serverinstall.Draft, current serverinstall.Result, fields []field, index int, validate func() []serverinstall.Problem) (serverinstall.Result, bool, error) {
 	notice := ""
 	for {
 		f := fields[index]
@@ -500,7 +561,7 @@ func configure(ctx context.Context, s *session, backend serverinstall.Facade, d 
 				if !f.secret || value != "" {
 					*f.value = value
 				}
-				problems := serverinstall.ValidateDraft(*d)
+				problems := validate()
 				bad := ""
 				for _, p := range problems {
 					if p.Field == f.key {
@@ -644,6 +705,9 @@ func menuLines(s *session, version string, r serverinstall.Result, notice string
 	}
 	if len(header)+len(actions) > budget {
 		header = []string{"Recorded release: " + SafeText(r.Release) + " · Manager: " + SafeText(version), "State: " + SafeText(r.State) + " · Stage: " + SafeText(r.Stage)}
+		if r.OperationKind == "update" {
+			header = []string{"Active: " + SafeText(r.ActiveRelease) + " · Candidate: " + SafeText(r.Release), "Installation: " + SafeText(r.InstallationOperation) + " · Manager: " + SafeText(version), "State: " + SafeText(r.State) + " · Stage: " + SafeText(r.Stage)}
+		}
 		if r.AdminURL != "" && budget >= 10 {
 			header = append(header, "Administration: "+SafeText(r.AdminURL))
 		}

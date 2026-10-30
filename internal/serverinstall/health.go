@@ -20,6 +20,9 @@ import (
 )
 
 func (m *Manager) checkOwnedService(j *journal) error {
+	if !trustedRootParent(unitPath) || !trustedRootParent("/etc/rixa/service.env") {
+		return ErrState
+	}
 	if e := m.observeAccount(j); e != nil {
 		return e
 	}
