@@ -77,7 +77,7 @@ func (m *Manager) ReviewUpdate(ctx context.Context, id string) (Result, error) {
 		return updateResult(u), ErrState
 	}
 	problems := m.reviewUpdate(ctx, u)
-	u.State, u.Stage, u.Code, u.Message, u.ReviewToken = "ready", "review", "ready", "Compatible native update reviewed. Apply stages the authenticated candidate before stopping the owned service.", ""
+	u.State, u.Stage, u.Code, u.Message, u.ReviewToken = "ready", "review", "ready", "Native update inputs reviewed; compatibility will be checked before migration. Apply stages the authenticated candidate before stopping the owned service.", ""
 	if len(problems) > 0 {
 		u.State, u.Code, u.Message = "blocked", "prerequisite-required", "Correct the reported prerequisites and review this same update again."
 	} else {
