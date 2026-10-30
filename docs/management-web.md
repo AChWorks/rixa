@@ -3,15 +3,66 @@
 Use this development adapter only in a build that exposes **rixa manage web --help**.
 It presents the same native installation/update operations as the CLI and terminal.
 Native ownership records, review tokens, executors and recovery gates remain
-authoritative. This guide does not establish tested aaPanel, Go Project,
-reverse-proxy, shared-hosting or production support.
+authoritative. The [native operator guide](server-management.md) defines those
+operations and their supplied PostgreSQL, TLS and verifier requirements. Use the
+guide at the selected package's source version; historical binaries do not gain
+commands from newer documentation.
 
-The first panel profile is **aaPanel-assisted native development installation**:
-an explicitly authorized root host operator, Debian 13 / Linux amd64 / systemd,
-compatible existing PostgreSQL 18, private inputs and Rixa direct TLS on an
-explicit separate port. Panel mapping is disabled for Rixa; preserve existing
-80/443 sites. Do not register two supervisors for one Rixa process. A constrained
-website/PHP account needs its provider's help rather than escalation.
+## aaPanel-assisted native profile
+
+This profile runs Rixa as a native systemd service alongside aaPanel. An explicitly
+authorized root infrastructure operator prepares the host and opens the temporary
+console through SSH. aaPanel continues to own its web stack and existing sites;
+Rixa has its own direct TLS listener. Use the selected release's linked evidence
+in [panel installation work](https://github.com/AChWorks/rixa/issues/30) and
+[the browser implementation](https://github.com/AChWorks/rixa/pull/46) to check
+whether your exact panel/web-stack combination has completed acceptance. This
+guide alone is not compatibility evidence.
+
+| Capability | Required arrangement |
+| --- | --- |
+| Host and authority | Debian 13, Linux amd64, systemd and an authorized root operator with SSH access. A website/PHP account alone is insufficient. |
+| Rixa supervision | Native `rixa.service` is the sole supervisor. Do not also register the process in Go Project or another panel supervisor. |
+| PostgreSQL | Supplied compatible PostgreSQL 18, separate control/site databases and owners, explicit loopback TCP password connections and the native guide's migration/physical-identity authority. |
+| Private files | Trusted manager/verifier under root-owned non-writable paths; protected TLS, permits, database secrets, data and recovery records outside panel web roots. |
+| Runtime ingress | Distinct control/site HTTPS hostnames on an explicitly available matching port, such as `9443`, with supplied matching certificates. Rixa panel mapping is disabled; existing 80/443 sites are preserved. |
+| Browser management | A separate loopback TLS console, normally `127.0.0.1:9444`, reached only through the operator's SSH tunnel and fresh operation-scoped permit. |
+
+The clean-host PostgreSQL prerequisite operation intentionally refuses a panel
+host. Have the hosting administrator supply compatible databases through normal
+supported PostgreSQL administration before using this console. Do not hide panel
+state, replace a shared database service or upgrade its major version to force
+that assessment to pass.
+
+Prepare and use the profile in this order:
+
+1. Inspect the panel version, web stack, listeners, existing sites, PostgreSQL and
+   ownership. Retain the unrelated sites' configuration, certificates, content
+   and response baseline so later Rixa effects can be checked against it.
+2. Authenticate the selected Rixa package using its
+   [publisher verification guide](release-verification.md), then prepare the
+   trusted manager and verifier in an appropriate private location. Uploading or
+   extracting a package does not establish trust or start a persistent service.
+   Keep archives, secrets, permits and management records out of `/www/wwwroot`
+   and every other public web root.
+3. Supply the two databases and protected TLS files. The infrastructure operator
+   separately establishes authorized DNS, certificate trust and reachability of
+   the chosen runtime port. The console does not issue certificates, alter a
+   firewall, configure panel mapping or infer client authority from forwarded
+   headers.
+4. [Open scoped access](#open-scoped-access), authenticate the package in the
+   console, and complete Save, Review and explicit Apply. For a runtime on 9443,
+   both HTTPS origins include `:9443` and the listener uses that same port.
+   Console login, control login and site login are separate authorities.
+5. Inspect the same operation until native completion and working administrator
+   URLs are verified. Compare the unrelated-site baseline after installation,
+   update and ordinary removal. Keep the exact recorded managers and private
+   recovery evidence; the CLI remains available when browser access is closed.
+
+Go Project execution, reverse-proxy ingress, constrained shared hosting,
+production and other control panels require their own supported profiles and
+real evidence. Missing mandatory capabilities require provider action rather
+than a privilege bypass.
 
 ## Open scoped access
 
@@ -32,7 +83,7 @@ configuration or administrator passwords.
 The listener defaults to loopback TLS 127.0.0.1:9444. Reach it through an
 authorized SSH tunnel, for example:
 
-    ssh -L 9444:127.0.0.1:9444 operator@host
+    ssh -N -L 127.0.0.1:9444:127.0.0.1:9444 operator@host
 
 Open the displayed HTTPS URL. Do not expose the console through public mapping,
 wildcard listening or forwarded-header trust.
@@ -101,10 +152,11 @@ private catalog data through **--catalog-root**. Its product domain is
 locale metadata. Installing valid data-only languages before reconstructing a
 console needs no executable rebuild. CLI/TUI always remains English.
 
-Actual support still requires a fresh owned aaPanel host journey, strict TLS/
-session/Origin/privacy proof, concurrent CLI/web recovery and populated signed
-update/removal evidence, required CI and independent review. Fake-facade/browser
-evidence is not a substitute for those delivery gates.
+A supported panel combination requires a real owned host journey: strict TLS,
+session/Origin/privacy boundaries, shared CLI/web operation truth and recovery,
+populated signed update/removal retention, required CI and independent review.
+Use the selected release's linked acceptance evidence for those results.
+Fake-facade/browser checks do not establish a panel delivery profile.
 
 The [source-only browser driver](../scripts/lab/manage-web-browser.md) reproduces
 fake-native TLS interaction, recovery, locale and privacy checks. A fresh review
