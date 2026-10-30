@@ -37,6 +37,8 @@ class BootstrapProofTests(unittest.TestCase):
     def test_configuration_requires_exact_provenance_scope_and_distinct_operations(self):
         c = config()
         self.assertEqual(proof.validate_config(c), c)
+        scoped = dict(c, scope_record="https://github.com/AChWorks/rixa/pull/45#issuecomment-123")
+        self.assertEqual(proof.validate_config(scoped), scoped)
         for key, value in (("runtime_sha256", "unpublished"), ("source_commit", "main"),
                            ("pg_port", True), ("installation_operation", c["pg_operation"]),
                            ("scope_record", "https://evil.test"), ("fixture", "/root/../tmp/rixa"),
@@ -122,6 +124,17 @@ class BootstrapProofTests(unittest.TestCase):
                     driver.run("pg-resume", "check")
                 self.assertEqual(run.call_count, 1)
                 self.assertEqual(run.call_args.args[2][2], "status")
+
+
+    def test_install_resume_requires_fresh_product_offer_before_effect(self):
+        with tempfile.TemporaryDirectory() as root:
+            driver = proof.Driver(config(root))
+            with patch.object(driver, "frozen", return_value=(Path("/frozen"), {"executor_generation": 1})), \
+                 patch.object(driver, "call", return_value={"state": "applying", "actions": ["status"]}) as call:
+                with self.assertRaises(ValueError):
+                    driver.run("install-resume", "check")
+                self.assertEqual(call.call_count, 1)
+                self.assertEqual(call.call_args.args[2], ["manage", "status", "--operation", "bootstrap-install"])
 
 
 if __name__ == "__main__":

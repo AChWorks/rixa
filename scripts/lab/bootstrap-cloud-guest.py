@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import re
 import shlex
+import shutil
 import socket
 import stat
 import subprocess
@@ -289,6 +290,62 @@ def prepare(args):
                       "trust_method": TRUST, "detached_signature_claimed": False}))
 
 
+def sealed_baseline(raw, pin):
+    if not re.fullmatch("[a-f0-9]{64}", pin):
+        raise ValueError("exact sealed baseline SHA256 required")
+    base, data = load(raw)
+    if data.get("baseline"):
+        raise ValueError("journeys cannot become clean baselines")
+    seal = json.loads(small_text(base / "clean-baseline.json", 65536))
+    image = regular(base / "guest.qcow2")
+    if (seal.get("schema") != "rixa.bootstrap-clean-baseline.v1" or seal.get("status") != "sealed"
+            or seal.get("baseline_image") != str(image) or seal.get("baseline_sha256") != pin
+            or seal.get("product_tools_injected") is not False or seal.get("actual_qemu_exit") != 0
+            or seal.get("instance_id") != data["instance_id"]
+            or stat.S_IMODE(image.stat().st_mode) != 0o400 or digest(image) != pin):
+        raise ValueError("sealed clean baseline identity changed")
+    return base, data, image
+
+
+def journey(args):
+    # This creates a fixture only. Boot, clean inspection and product effects
+    # remain separate, explicit steps with their own before-effect receipts.
+    if not re.fullmatch(r"https://github[.]com/AChWorks/rixa/(?:issues/29|pull/[0-9]+)#issuecomment-[0-9]+",
+                        args.scope_record):
+        raise ValueError("exact owning effect scope locator required")
+    base, data, image = sealed_baseline(args.baseline_lab, args.baseline_sha256)
+    target = Path(args.lab)
+    if target.parent != base or target == base:
+        raise ValueError("new journey must be a direct child of the sealed task root")
+    with _common.launch_lock(base) as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        if owned_qemu() or any((base / n).exists() for n in ("qmp.sock", "console.sock")):
+            raise ValueError("reconcile existing guest before preparing a journey")
+        for port in (SSH_PORT, HTTPS_PORT, 22680):
+            with socket.socket() as probe:
+                probe.bind(("127.0.0.1", port))
+        lab = directory(args.lab, create=True)
+        state = {"schema": SCHEMA, "state": "journey-overlay-attempted",
+                 "baseline_lab": str(base), "baseline_sha256": args.baseline_sha256,
+                 "scope_record": args.scope_record}
+        save(lab / "journey-attempt.json", state, initial=True)
+        for name in (*data["files"], "id_ed25519", "known_hosts"):
+            source = regular(base / name)
+            shutil.copyfile(source, lab / name)
+            (lab / name).chmod(0o600)
+        subprocess.run(["qemu-img", "create", "-f", "qcow2", "-F", "qcow2", "-b",
+                        str(image), str(lab / "guest.qcow2")], check=True, capture_output=True)
+        (lab / "guest.qcow2").chmod(0o600)
+        receipt = dict(data, baseline={"lab": str(base), "sha256": args.baseline_sha256},
+                       scope_record=args.scope_record)
+        save(lab / "cloud-lab.json", receipt, initial=True)
+        state["state"] = "journey-prepared"
+        save(lab / "journey-attempt.json", state)
+        load(str(lab))
+        print(json.dumps({"state": state["state"], "baseline_sha256": args.baseline_sha256,
+                          "image": str(lab / "guest.qcow2"), "product_tools_injected": False}))
+
+
 def load(raw):
     lab = directory(raw)
     data = json.loads(small_text(lab / "cloud-lab.json", 65536))
@@ -305,7 +362,19 @@ def load(raw):
             raise ValueError("unexpected cloud laboratory input name")
         if digest(regular(lab / name)) != wanted:
             raise ValueError("cloud laboratory fixture changed")
-    image = regular(lab / data["image"]["filename"])
+    baseline = data.get("baseline")
+    if baseline:
+        base, original, backing = sealed_baseline(baseline["lab"], baseline["sha256"])
+        if lab.parent != base or any(data.get(k) != original.get(k) for k in ("files", "image", "instance_id")):
+            raise ValueError("journey does not preserve original clean fixture identity")
+        image = regular(base / data["image"]["filename"])
+        # Read-only backing/header metadata also supports an already owned running guest.
+        info = json.loads(subprocess.run(["qemu-img", "info", "--force-share", "--output=json", str(regular(lab / "guest.qcow2"))],
+                                        check=True, capture_output=True, text=True).stdout)
+        if info.get("format") != "qcow2" or info.get("backing-filename") != str(backing) or info.get("virtual-size") != 8 << 30:
+            raise ValueError("journey overlay is not backed by the exact sealed clean baseline")
+    else:
+        image = regular(lab / data["image"]["filename"])
     if image.stat().st_mode & 0o222 or digest(image, "sha512") != data["image"]["sha512"]:
         raise ValueError("official immutable backing image changed")
     regular(lab / "guest.qcow2")
@@ -396,11 +465,16 @@ def main():
     prep.add_argument("--trust-method", choices=(TRUST,), required=True)
     prep.add_argument("--scope-record", default="")
     prep.add_argument("--continue-image-download", action="store_true")
+    clone = actions.add_parser("journey")
+    clone.add_argument("--lab", required=True)
+    clone.add_argument("--baseline-lab", required=True)
+    clone.add_argument("--baseline-sha256", required=True)
+    clone.add_argument("--scope-record", required=True)
     start = actions.add_parser("boot")
     start.add_argument("--lab", required=True)
     start.add_argument("--attempt", required=True)
     args = parser.parse_args()
-    prepare(args) if args.action == "prepare" else boot(args)
+    {"prepare": prepare, "journey": journey, "boot": boot}[args.action](args)
 
 
 if __name__ == "__main__":

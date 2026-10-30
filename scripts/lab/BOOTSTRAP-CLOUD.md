@@ -106,3 +106,55 @@ before injecting product tools or provisioning PostgreSQL.
 Keep private keys/logs outside Git and GitHub. Persist sanitized source, image,
 trust, job and readiness identities through the owning Issue/Master. Retain all
 resources until their consumers release them; unrelated cleanup is out of scope.
+
+## New acceptance journey
+
+After a separate exact runtime-effect grant, prepare a NEW overlay as a direct
+child of the sealed task root. This preserves the original seed, key, known-host
+file and immutable clean baseline; it does not inject product tools:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/lab/bootstrap-cloud-guest.py journey \
+  --lab /private/new-bootstrap-lab/journey1 \
+  --baseline-lab /private/new-bootstrap-lab \
+  --baseline-sha256 EXACT_SEALED_BASELINE_SHA256 --scope-record EXACT_EFFECT_GRANT
+```
+
+The new overlay is backed directly by the exact sealed clean disk. Each load
+rechecks its baseline digest/mode, official image identity, original fixture
+inventory and overlay backing/size. Read-only `qemu-img info --force-share`
+observes backing/header metadata when the positively owned guest is running;
+it is not an online consistency check. Reuse the existing boot and clean-inspect
+commands with the journey path and a new launch attempt. Fresh inspection must
+pass before source-fixture injection or product provisioning. Preserve failed
+attempts and the new disk; do not recreate a journey to conceal partial effects.
+
+Only the separately reviewed grant can authorize fixture injection, PostgreSQL
+and native installation effects through `bootstrap-proof.py`. Its private
+configuration pins the source fixture, official helper and genuine public
+archive/runtime/source identities. A fixture remains source-only; it does not
+establish a published starter or public one-line installation.
+
+Read-only inspection retries are spaced15seconds apart so stock startup work can
+settle on the1vCPU TCG guest. If a bounded observation expires, inspect its
+retained evidence first. A separately justified read-only observation can use
+`--observation NEW_OBSERVATION_ID` with the same positively owned launch attempt;
+this creates new receipts and never overwrites the previous observation.
+
+For a separately granted interruption experiment, the existing lifecycle watcher
+also has two fixed bootstrap profiles: `--kind postgres --stage download` and
+`--kind install --stage payload`. Arm one bounded guest watcher before the
+corresponding single Apply. Other stages for those profiles are refused. It
+binds the protected journal, acknowledged generation, actual frozen process
+image, systemd invocation and full cgroup; records freeze intent; observes kernel
+freeze/population; rechecks the same attempted stage; then records and sends a
+whole-unit kill. A missed boundary is recorded without a kill. A `finally`
+recovery thaws only the same positively identified live invocation or records its
+already observed quiescence. Unknown identity/recovery remains a visible failure
+requiring inspection.
+
+Only ordinary product Status can offer Resume, and only the operation's frozen
+manager may perform it. Download/payload experiments do not establish recovery
+of partial dpkg configuration, initialization, unmarked SQL ownership or unknown
+authentication. Preserve all receipts and actual outcomes; a queued watcher,
+signal request or unit disappearance alone is insufficient evidence.

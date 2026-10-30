@@ -38,10 +38,13 @@ def positive_launch(lab, attempt):
 def inspect(args):
     lab, data = cloud.load(args.lab)
     launch = positive_launch(lab, args.attempt)
-    target = lab / (args.attempt + ".inspection.json")
+    observed = getattr(args, "observation", None) or args.attempt
+    if not re.fullmatch("[a-z][a-z0-9-]{0,62}", observed):
+        raise ValueError("stable read-only observation identifier required")
+    target = lab / (observed + ".inspection.json")
     if target.exists():
         raise ValueError("an inspection receipt already exists; inspect retained evidence")
-    record = lab / (args.attempt + ".inspection-attempt.json")
+    record = lab / (observed + ".inspection-attempt.json")
     cloud.save(record, {"state": "read-only-inspection-attempted", "attempt": args.attempt,
                        "launch_pid": launch["pid"]}, initial=True)
     source = Path(__file__).with_name("bootstrap-cloud-inspect.py").read_text()
@@ -57,11 +60,11 @@ def inspect(args):
         except subprocess.TimeoutExpired:
             # Only read-only OS observations may be repeated. No product login,
             # mutation, package installation or service restart is present.
-            time.sleep(1)
+            time.sleep(15)
             continue
-        (lab / (args.attempt + ".inspection-last.stderr")).write_bytes(result.stderr)
+        (lab / (observed + ".inspection-last.stderr")).write_bytes(result.stderr)
         if result.returncode:
-            time.sleep(2)
+            time.sleep(15)
             continue
         value = json.loads(result.stdout)
         if (value.get("schema") != "rixa.bootstrap-clean-inspection.v1" or value.get("status") != "verified"
@@ -133,6 +136,7 @@ def main():
     parser.add_argument("action", choices=("inspect", "seal"))
     parser.add_argument("--lab", required=True)
     parser.add_argument("--attempt", required=True)
+    parser.add_argument("--observation", help="new read-only inspection receipt identity; preserves prior attempts")
     args = parser.parse_args()
     inspect(args) if args.action == "inspect" else seal(args)
 

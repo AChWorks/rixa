@@ -73,7 +73,7 @@ def validate_config(c):
         raise ValueError("explicit unprivileged guest PostgreSQL port required")
     if not re.fullmatch(r"v[0-9]+[.][0-9]+[.][0-9]+(?:-[A-Za-z0-9.-]+)?", c["release"]):
         raise ValueError("exact public release required; no implicit channel selection")
-    if not c["scope_record"].startswith("https://github.com/AChWorks/rixa/issues/29#issuecomment-"):
+    if not re.fullmatch(r"https://github[.]com/AChWorks/rixa/(?:issues/29|pull/[0-9]+)#issuecomment-[0-9]+", c["scope_record"]):
         raise ValueError("exact owning scope record required")
     for key in ("fixture", "helper", "receipts", "operator_draft"):
         p = Path(c[key])
@@ -279,7 +279,12 @@ class Driver:
         elif verb == "remove":
             args += ["--confirm-remove"]
         elif verb == "resume":
-            raise ValueError("use the exact frozen normal manager after explicit status/reconciliation; no blind driver retry")
+            _, j = self.frozen(install, "install")
+            prior = self.call("install-resume-check-" + str(j["executor_generation"]), manager,
+                              ["manage", "status", "--operation", install])
+            if "resume" not in prior.get("actions", []):
+                raise ValueError("product did not offer Resume; preserve exact executor and effects")
+            key += "-" + str(j["executor_generation"] + 1)
         return safe_result(self.call(key, manager, args))
 
     def pg_evidence(self, key):

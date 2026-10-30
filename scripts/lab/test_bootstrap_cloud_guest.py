@@ -141,5 +141,66 @@ class CloudTrustAndSeedTests(unittest.TestCase):
             self.assertEqual((target / "owned").read_text(), "preserve")
 
 
+    def test_sealed_baseline_requires_exact_bytes_mode_and_clean_evidence(self):
+        with tempfile.TemporaryDirectory() as root:
+            base = Path(root)
+            image = base / "guest.qcow2"
+            image.write_bytes(b"sealed clean disk")
+            image.chmod(0o400)
+            pin = hashlib.sha256(image.read_bytes()).hexdigest()
+            data = {"instance_id": "clean-instance"}
+            seal = {"schema": "rixa.bootstrap-clean-baseline.v1", "status": "sealed",
+                    "baseline_image": str(image), "baseline_sha256": pin,
+                    "product_tools_injected": False, "actual_qemu_exit": 0,
+                    "instance_id": "clean-instance"}
+            (base / "clean-baseline.json").write_text(json.dumps(seal))
+            with patch.object(lab, "load", return_value=(base, data)):
+                self.assertEqual(lab.sealed_baseline(str(base), pin)[2], image)
+                for field, value in (("product_tools_injected", True), ("actual_qemu_exit", 1),
+                                     ("instance_id", "another-instance"), ("baseline_sha256", "a" * 64)):
+                    (base / "clean-baseline.json").write_text(json.dumps(dict(seal, **{field: value})))
+                    with self.subTest(field=field), self.assertRaises(ValueError):
+                        lab.sealed_baseline(str(base), pin)
+                (base / "clean-baseline.json").write_text(json.dumps(seal))
+                image.chmod(0o600)
+                with self.assertRaises(ValueError):
+                    lab.sealed_baseline(str(base), pin)
+                image.write_bytes(b"changed disk")
+                image.chmod(0o400)
+                with self.assertRaises(ValueError):
+                    lab.sealed_baseline(str(base), pin)
+
+    def test_journey_refuses_existing_state_before_overlay_effect(self):
+        with tempfile.TemporaryDirectory() as root:
+            base = Path(root)
+            target = base / "journey1"
+            target.mkdir(mode=0o700)
+            marker = target / "preserve"
+            marker.write_text("failed prior evidence")
+            args = argparse.Namespace(lab=str(target), baseline_lab=str(base), baseline_sha256="a" * 64,
+                    scope_record="https://github.com/AChWorks/rixa/pull/45#issuecomment-123")
+            with patch.object(lab, "sealed_baseline", return_value=(base, {}, base / "guest.qcow2")), \
+                 patch.object(lab, "owned_qemu", return_value=[]), patch.object(lab.socket, "socket"), \
+                 patch.object(lab.subprocess, "run") as execute:
+                with self.assertRaises(FileExistsError):
+                    lab.journey(args)
+                execute.assert_not_called()
+            self.assertEqual(marker.read_text(), "failed prior evidence")
+
+    def test_journey_rejects_unrelated_target_and_unscoped_locator(self):
+        args = argparse.Namespace(lab="/outside/journey1", baseline_lab="/private/base",
+                baseline_sha256="a" * 64, scope_record="https://github.com/AChWorks/rixa/pull/45#issuecomment-123")
+        with patch.object(lab, "sealed_baseline", return_value=(Path("/private/base"), {}, Path("/private/base/guest.qcow2"))), \
+             patch.object(lab.subprocess, "run") as execute:
+            with self.assertRaisesRegex(ValueError, "direct child"):
+                lab.journey(args)
+            execute.assert_not_called()
+        args.scope_record = "https://evil.test/pull/45#issuecomment-123"
+        with patch.object(lab, "sealed_baseline") as baseline:
+            with self.assertRaisesRegex(ValueError, "scope locator"):
+                lab.journey(args)
+            baseline.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()
