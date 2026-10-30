@@ -293,6 +293,91 @@
     "saved_content_count": {
       "one": "{Count} saved item",
       "other": "{Count} saved items"
+    },
+    "workspace_breadcrumb": {
+      "other": "Site workspace"
+    },
+    "selected_site": {
+      "other": "Selected site"
+    },
+    "save_recovery": {
+      "other": "Resolve this save"
+    },
+    "retry_exact_save": {
+      "other": "Retry the same submitted change"
+    },
+    "sign_in_new_tab": {
+      "other": "Sign in in another tab"
+    },
+    "return_and_retry": {
+      "other": "Return here and retry deliberately; your input stays in this page."
+    },
+    "view_latest_new_tab": {
+      "other": "View the latest saved revision in another tab"
+    },
+    "conflict_keep_input": {
+      "other": "Keep your text here and compare changes before saving again."
+    },
+    "older_revisions": {
+      "other": "Older revisions"
+    },
+    "next_content_page": {
+      "other": "Next content page"
+    },
+    "first_content_page": {
+      "other": "First content page"
+    },
+    "manage_content": {
+      "other": "Manage content"
+    },
+    "save_source_notice": {
+      "other": "Saving creates a source revision. It does not publish, correct or withdraw public content."
+    },
+    "draft_working": {
+      "other": "Saving or inspecting the selected site's content…"
+    },
+    "draft_saved": {
+      "other": "The source revision is saved. Public content has not changed."
+    },
+    "draft_unknown": {
+      "other": "The save outcome is uncertain. Keep this page and operation ID. Inspect the result, or retry exactly the same submitted change under the same ID."
+    },
+    "draft_inspection_missing": {
+      "other": "No result was found yet. This does not prove that the save did not commit. Keep the operation ID and inspect again or retry the same submitted change."
+    },
+    "draft_inspection_failed": {
+      "other": "The result could not be inspected. Your pending change remains unresolved."
+    },
+    "draft_result_mismatch": {
+      "other": "The response does not match this operation and selected site. Keep the pending operation for inspection; do not start a new save."
+    },
+    "draft_conflict": {
+      "other": "The saved revision changed or this operation conflicts. Your input is preserved. View the latest saved revision and reconcile the changes before trying again."
+    },
+    "draft_session_expired": {
+      "other": "Your session expired. Sign in in another tab, return here and retry. Your input and pending operation stay in this page."
+    },
+    "draft_unavailable": {
+      "other": "The service is unavailable. Your input is preserved; retry when it is available."
+    },
+    "draft_invalid": {
+      "other": "Check the title, content and submitted values. Your input is preserved."
+    },
+    "draft_denied": {
+      "other": "You no longer have permission for this selected-site action. Your input is preserved."
+    },
+    "draft_missing": {
+      "other": "The selected saved content is unavailable. Your input is preserved."
+    },
+    "draft_limited": {
+      "other": "The service is busy. Your input is preserved; try again shortly."
+    },
+    "draft_navigation_loss": {
+      "other": "Leaving this page will discard unsaved input or lose this page's pending-operation recovery. Copy the operation ID and any text you need before leaving. Leave this page?"
+    },
+    "content_page_count": {
+      "one": "Entries shown on this page: {Count}",
+      "other": "Entries shown on this page: {Count}"
     }
   }
 }

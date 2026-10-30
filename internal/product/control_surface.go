@@ -9,6 +9,7 @@ import (
 	"html/template"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/AChWorks/achrix"
 	shell "github.com/AChWorks/achrix/admin"
@@ -32,12 +33,31 @@ type inventoryView struct {
 	Sites  []inventoryItem
 }
 
-func newControlSurface(sites []SiteConfig, service controlSiteManager) shell.Surface {
+func newControlSurface(sites []SiteConfig, service controlSiteManager, languages ...localize.Locale) shell.Surface {
 	return shell.Surface{
 		ID:         "sites",
 		Title:      shell.Text{Domain: "rixa", Key: "sites"},
 		Capability: CapabilityControlInventoryRead,
 		Handler: func(w http.ResponseWriter, r *http.Request, view shell.Request) {
+			if r.Method == http.MethodGet && (r.URL.Path == "/editor.js" || r.URL.Path == "/editor.css") {
+				if r.URL.Path == "/editor.js" {
+					w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+					_, _ = io.WriteString(w, contentEditorJS)
+				} else {
+					w.Header().Set("Content-Type", "text/css; charset=utf-8")
+					_, _ = io.WriteString(w, contentEditorCSS)
+				}
+				return
+			}
+			if strings.HasPrefix(r.URL.Path, "/site/") {
+				manager, ok := service.(controlDraftManager)
+				if !ok {
+					editorialHTTPFail(w, ErrEditorialUnavailable, "")
+					return
+				}
+				serveSelectedContent(manager, sites, languages, w, r, view)
+				return
+			}
 			serveControlSurface(service, sites, w, r, view)
 		},
 	}
@@ -137,7 +157,7 @@ var inventoryTemplate = template.Must(template.New("inventory").Parse(`{{define 
 <p>{{.Locale.Text "rixa" "sites_notice" nil}}</p>
 <table>
 <thead><tr><th>{{.Locale.Text "rixa" "id" nil}}</th><th>{{.Locale.Text "rixa" "origin" nil}}</th><th>{{.Locale.Text "rixa" "state" nil}}</th></tr></thead>
-<tbody>{{range .Sites}}<tr><td dir="ltr">{{.ID}}</td><td dir="ltr">{{.Origin}}</td><td>{{if .Disabled}}{{$.Locale.Text "rixa" "disabled" nil}}{{else}}{{$.Locale.Text "rixa" "enabled" nil}}{{end}}</td></tr>
+<tbody>{{range .Sites}}<tr><td dir="ltr"><bdi>{{.ID}}</bdi>{{if .CanManage}}<br><a href="/admin/sites/site/{{.ID}}/content/">{{$.Locale.Text "rixa" "manage_content" nil}}</a>{{end}}</td><td dir="ltr">{{.Origin}}</td><td>{{if .Disabled}}{{$.Locale.Text "rixa" "disabled" nil}}{{else}}{{$.Locale.Text "rixa" "enabled" nil}}{{end}}</td></tr>
 {{if .CanManage}}<tr><td colspan="3"><form data-admin-form action="/admin/sites/account-create" method="post">
 <input type="hidden" name="site_id" value="{{.ID}}">
 <label>{{$.Locale.Text "rixa" "login" nil}} <input name="login" dir="ltr" maxlength="64" autocomplete="off" required></label>
