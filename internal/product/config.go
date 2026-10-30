@@ -133,6 +133,7 @@ type Config struct {
 	Listen          string         `json:"listen"`
 	TLS             TLSConfig      `json:"tls"`
 	Language        string         `json:"language,omitempty"`
+	CatalogRoot     string         `json:"catalog_root,omitempty"`
 	StartupTimeout  time.Duration  `json:"-"`
 	ShutdownTimeout time.Duration  `json:"-"`
 	Resources       ResourceConfig `json:"resources,omitempty"`
@@ -145,6 +146,7 @@ type fileConfig struct {
 	Listen          string         `json:"listen"`
 	TLS             TLSConfig      `json:"tls"`
 	Language        string         `json:"language,omitempty"`
+	CatalogRoot     string         `json:"catalog_root,omitempty"`
 	StartupTimeout  string         `json:"startup_timeout,omitempty"`
 	ShutdownTimeout string         `json:"shutdown_timeout,omitempty"`
 	Resources       ResourceConfig `json:"resources,omitempty"`
@@ -214,6 +216,7 @@ func ParseConfig(data []byte) (Config, error) {
 		Listen:          raw.Listen,
 		TLS:             raw.TLS,
 		Language:        raw.Language,
+		CatalogRoot:     raw.CatalogRoot,
 		StartupTimeout:  startup,
 		ShutdownTimeout: shutdown,
 		Resources:       raw.Resources,
@@ -253,8 +256,11 @@ func (c Config) validateStructure() error {
 	if err := c.Resources.validate(); err != nil {
 		return fmt.Errorf("%w: resources", ErrConfiguration)
 	}
-	if c.Language != "en" && c.Language != "fa" {
-		return fmt.Errorf("%w: language", ErrConfiguration)
+	if len(c.Language) > 63 || strings.ContainsAny(c.Language, " \t\r\n/\\") {
+		return fmt.Errorf("%w: language must identify an installed interface locale", ErrConfiguration)
+	}
+	if c.CatalogRoot != "" && (!filepath.IsAbs(c.CatalogRoot) || filepath.Clean(c.CatalogRoot) != c.CatalogRoot || c.CatalogRoot == "/") {
+		return fmt.Errorf("%w: catalog_root must be a private absolute directory", ErrConfiguration)
 	}
 	controlAuthority, controlHostname, err := originParts(c.Control.Origin)
 	if err != nil || !envNameSyntax.MatchString(c.Control.DatabaseEnv) {

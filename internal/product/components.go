@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"sort"
@@ -23,17 +24,18 @@ import (
 )
 
 type SiteRuntime struct {
-	ID        string
-	Origin    string
-	App       *achrix.Application
-	Identity  *identity.Service
-	Media     *media.Service
+	ID          string
+	Origin      string
+	App         *achrix.Application
+	Identity    *identity.Service
+	Media       *media.Service
 	Editorial   *EditorialService
 	Publication *PublicationService
 	Handler     http.Handler
 
 	adminPrincipal achrix.Principal
 	operator       achrix.Principal
+	catalogs       []fs.FS
 }
 
 type ControlRuntime struct {
@@ -67,6 +69,10 @@ type Runtime struct {
 func BuildRuntime(config RuntimeConfig, logger *slog.Logger) (*Runtime, error) {
 	if logger == nil {
 		logger = slog.Default()
+	}
+	sources, err := config.Config.catalogSources()
+	if err != nil {
+		return nil, err
 	}
 	controlAdmin, err := Principal(config.Control.AdminPrincipal)
 	if err != nil {
@@ -103,7 +109,7 @@ func BuildRuntime(config RuntimeConfig, logger *slog.Logger) (*Runtime, error) {
 			return nil, e
 		}
 		operator := operatorPrincipal(controlAdmin, site.ID)
-		s, e := buildSite(config.Config, site, adminPrincipal, operator, logger)
+		s, e := buildSite(config.Config, site, adminPrincipal, operator, logger, sources)
 		if e != nil {
 			return nil, fmt.Errorf("site %s: %w", site.ID, e)
 		}
@@ -121,11 +127,25 @@ func BuildRuntime(config RuntimeConfig, logger *slog.Logger) (*Runtime, error) {
 	}
 	r.controlService = &ControlService{control: control, sites: r.Sites}
 	controlSurface := newControlSurface(config.Config.Sites, r.controlService)
+	controlSources := append([]fs.FS(nil), sources...)
+	// Reuse resources from real, already-composed public Module constructors.
+	// Each site consumes the same immutable compatible component build.
+	for _, site := range config.Sites {
+		if active := r.Sites[site.ID]; active != nil {
+			controlSources = append(controlSources, active.catalogs...)
+			break
+		}
+	}
+	controlCatalog, err := presentationCatalog(controlSources)
+	if err != nil {
+		return nil, err
+	}
 	controlShell, err := shell.New(
-		shell.Config{Origin: config.Control.Origin, AuthPath: "/auth", Language: config.Language},
+		shell.Config{Origin: config.Control.Origin, AuthPath: "/auth", Language: config.Language, Catalogs: controlSources, SelectLanguage: selectInterfaceLanguage},
 		control.authenticator,
 		control.App,
 		controlSurface,
+		interfaceLanguageSurface(CapabilityControlInventoryRead, "", controlCatalog.Locales),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("control admin: %w", err)
@@ -184,7 +204,7 @@ func buildControl(config RuntimeConfig, adminPrincipal achrix.Principal, readabl
 	}, nil
 }
 
-func buildSite(config Config, site ResolvedSite, adminPrincipal, operator achrix.Principal, logger *slog.Logger) (*SiteRuntime, error) {
+func buildSite(config Config, site ResolvedSite, adminPrincipal, operator achrix.Principal, logger *slog.Logger, sources []fs.FS) (*SiteRuntime, error) {
 	auditModule, err := audit.NewPostgres(site.DSN, audit.Config{
 		MaxConns: config.Resources.Audit.MaxConns, MaxOperations: config.Resources.Audit.MaxOperations,
 	}, logger)
@@ -199,7 +219,7 @@ func buildSite(config Config, site ResolvedSite, adminPrincipal, operator achrix
 	}
 	mediaModule, err := media.NewPostgres(site.DSN, media.Config{
 		StorageRoot: site.MediaRoot,
-		MaxConns: config.Resources.Media.MaxConns, MaxOperations: config.Resources.Media.MaxOperations,
+		MaxConns:    config.Resources.Media.MaxConns, MaxOperations: config.Resources.Media.MaxOperations,
 	}, logger)
 	if err != nil {
 		return nil, fmt.Errorf("media: %w", err)
@@ -232,10 +252,6 @@ func buildSite(config Config, site ResolvedSite, adminPrincipal, operator achrix
 	if err != nil {
 		return nil, fmt.Errorf("editorial service: %w", err)
 	}
-	publicationService, err := newPublicationService(site, app, editorialService, mediaService)
-	if err != nil {
-		return nil, fmt.Errorf("publication service: %w", err)
-	}
 	web, err := identity.NewWeb(identityService, site.Origin)
 	if err != nil {
 		return nil, fmt.Errorf("identity web: %w", err)
@@ -252,22 +268,31 @@ func buildSite(config Config, site ResolvedSite, adminPrincipal, operator achrix
 	if err != nil {
 		return nil, fmt.Errorf("media surface: %w", err)
 	}
-	contentSurface, err := newContentSurface(editorialService, publicationService)
+	catalog, err := presentationCatalog(sources, accounts, library)
+	if err != nil {
+		return nil, err
+	}
+	publicationService, err := newPublicationService(site, app, editorialService, mediaService, catalog)
+	if err != nil {
+		return nil, fmt.Errorf("publication service: %w", err)
+	}
+	contentSurface, err := newContentSurface(editorialService, publicationService, contentLocales(catalog)...)
 	if err != nil {
 		return nil, fmt.Errorf("content surface: %w", err)
 	}
-	appearanceSurface, err := newAppearanceSurface(editorialService, publicationService)
+	appearanceSurface, err := newAppearanceSurface(editorialService, publicationService, contentLocales(catalog)...)
 	if err != nil {
 		return nil, fmt.Errorf("appearance surface: %w", err)
 	}
 	adminShell, err := shell.New(
-		shell.Config{Origin: site.Origin, AuthPath: "/auth", Language: config.Language},
+		shell.Config{Origin: site.Origin, AuthPath: "/auth", Language: config.Language, Catalogs: sources, SelectLanguage: selectInterfaceLanguage},
 		authenticator,
 		app,
 		accounts,
 		library,
 		contentSurface,
 		appearanceSurface,
+		interfaceLanguageSurface(CapabilityContentList, ContentCollectionTarget, catalog.Locales),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("admin: %w", err)
@@ -284,6 +309,7 @@ func buildSite(config Config, site ResolvedSite, adminPrincipal, operator achrix
 		Handler:        siteRequestHandler(management, publicationService),
 		adminPrincipal: adminPrincipal,
 		operator:       operator,
+		catalogs:       []fs.FS{accounts.Catalogs, library.Catalogs},
 	}, nil
 }
 
@@ -324,8 +350,9 @@ func buildRouter(config Config, sites []ResolvedSite, logger *slog.Logger) (*rou
 func managementHandler(web *identity.Web, adminShell *shell.Shell) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("/auth/", http.StripPrefix("/auth", web.Handler()))
-	mux.Handle("/admin", adminShell.Handler())
-	mux.Handle("/admin/", adminShell.Handler())
+	localized := interfaceLanguageHandler(adminShell.Handler(), adminShell.Locales())
+	mux.Handle("/admin", localized)
+	mux.Handle("/admin/", localized)
 	return mux
 }
 
