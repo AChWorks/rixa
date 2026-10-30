@@ -4,11 +4,11 @@ go 1.27.3
 
 require (
 	github.com/AChWorks/achrix v0.4.0
-	github.com/AChWorks/achrix/admin v0.1.0
+	github.com/AChWorks/achrix/admin v0.2.0
 	github.com/AChWorks/achrix/audit v0.1.0
-	github.com/AChWorks/achrix/identity v0.1.0
+	github.com/AChWorks/achrix/identity v0.2.0
 	github.com/AChWorks/achrix/installation v0.1.0
-	github.com/AChWorks/achrix/media v0.1.0
+	github.com/AChWorks/achrix/media v0.2.0
 	github.com/AChWorks/achrix/multisite v0.1.0
 	github.com/jackc/pgx/v5 v5.11.0
 	golang.org/x/net v0.58.0
