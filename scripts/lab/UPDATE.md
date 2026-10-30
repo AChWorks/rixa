@@ -155,3 +155,40 @@ owner releases the lab, shut down the exact guest, verify its QEMU job exited,
 retain only sanitized evidence and delete only the positively owned task disk,
 keys, certificates and private fixtures. Never clean historical unrelated
 worktrees, the Owner demo or unrelated services.
+
+
+## Corrected manager journeys without rebinding
+
+A real startup or recovery defect may require a new source fixture manager. Keep
+its predecessor operation bound to its exact frozen manager. Preserve the first
+failure, normal supported recovery, retained-state comparisons and ordinary
+removal before starting a second journey. Do not replace a frozen executable or
+rewrite an operation to make a corrected image take over.
+
+When the owning task explicitly authorizes an isolated overlay experiment,
+shut down the exact owned guest, verify its persistent QEMU job exited, acquire
+the launch lock and confirm sockets/listeners are gone. Hash the complete disk,
+retain a private ownership/export receipt and make the first image read-only.
+A new task-owned qcow2 overlay may reference that immutable backing image. Never
+copy a live disk or boot two writers against it. Record both image paths and the
+backing digest before creating or booting the overlay.
+
+Inside the new overlay only, validate the frozen retirement file map, original
+operation ownership, exact runtime UID/GID, absent service and absent runtime
+processes. Move only explicitly authorized product roots into private retained
+storage and retire only the positively owned unused account/group. Preserve the
+old databases, roles and private evidence. Use new fixture databases/roles,
+credentials, operation IDs and receipts for another genuine signed baseline
+installation. This is laboratory isolation, not a product purge, rollback or
+backup/restore feature. Prove the corrected image's first normal update attempt,
+actual strict TLS readiness, retained state, browser behavior and ordinary
+removal; retain both journeys' evidence and immutable manager identities.
+
+For a deterministic migration interruption, an explicitly authorized fixture may
+hold the product's existing migration advisory lock through one separately
+recorded, bounded database connection. Confirm the real candidate is waiting at
+its durable migration attempt, fence only its exact executor, then release only
+the positively identified fixture connection. Keep the SQL and credentials
+private. No stored-row, ledger or journal edits, payload wrappers or synthetic
+success markers are needed. Compare retained state after the interruption and
+report the actual post-fence stage, including a missed boundary honestly.
