@@ -275,6 +275,10 @@ func TestTerminalPTYChild(t *testing.T) {
 	if mode == "" {
 		return
 	}
+	if strings.HasPrefix(mode, "update-") {
+		runUpdatePTYChild(t, mode)
+		return
+	}
 	f := &testFacade{draft: testDraft(), firstSaveFailure: !strings.HasPrefix(mode, "fetch")}
 	if strings.HasPrefix(mode, "web-locale-") {
 		f.draft.Language = strings.TrimPrefix(mode, "web-locale-")
