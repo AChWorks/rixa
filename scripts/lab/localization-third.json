@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "locale": "ar",
+  "name": "Fixture Arabic",
+  "direction": "rtl",
+  "domain": "rixa",
+  "messages": {
+    "content": {
+      "other": "Third <img id=\"catalog-server-probe\">"
+    },
+    "formatting": {
+      "other": "<b id=\"catalog-server-probe\">Third formatting</b>"
+    },
+    "editor_invalid_media": {
+      "other": "Third invalid media <img id=\"catalog-browser-probe\">"
+    },
+    "outcome_unknown": {
+      "other": "Third unknown <img id=\"catalog-parts-probe\"> {Operation}"
+    },
+    "operation_committed": {
+      "other": "Third {Revision} | {Resource} | {Kind} | {Operation} <img id=\"catalog-parts-probe\">"
+    },
+    "saved_content_count": {
+      "one": "THIRD-ONE {Count}",
+      "other": "THIRD-OTHER {Count}"
+    }
+  }
+}
