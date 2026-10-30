@@ -14,7 +14,7 @@
 
 The runnable profiles are for **development** on Linux amd64 with PostgreSQL and private local storage. The manual runtime offers loopback HTTPS or explicit direct TLS. Builds containing `rixa manage` also provide a guided terminal and JSON CLI for a prepared Debian 13/systemd server: authenticate a selected release, configure and install its service, inspect progress, apply a compatible retained-state update, continue safely fenced operations and remove the owned runtime while retaining data. The [native operator guide](docs/server-management.md) defines its required local PostgreSQL 18 databases, TLS material, trusted verifier and infrastructure authority.
 
-The one-line entry and clean-server PostgreSQL setup are not available in published packages yet. Their [source-only starter and prerequisite commands](docs/server-management.md#bootstrap-starter-and-postgresql-prerequisite-source) are unpublished and have not yet been validated through real clean-server provisioning. Supply the prerequisites below when using a released package. Production hosting, panel/web setup, unattended updates and destructive purge remain separate development work.
+Installation behavior follows the independently trusted executable and guides supplied with the selected package. The [bootstrap starter and PostgreSQL prerequisite path](docs/server-management.md#bootstrap-starter-and-postgresql-prerequisites) requires its own host profile; a one-line entry also needs a separately authenticated immutable generation. Production hosting, panel/web setup, unattended updates and destructive purge remain separate development work.
 
 ## Get started
 
@@ -23,7 +23,7 @@ Download a versioned package and its adjacent checksum from [Releases](https://g
 You supply:
 
 - distinct HTTPS hostnames for control and each enabled site, with suitable TLS certificate/key material;
-- a PostgreSQL database for control and a separate database for each enabled site;
+- compatible PostgreSQL databases for control and each enabled site; packages with the bounded clean-host prerequisite operation can create the initial control/site pair after explicit review;
 - exclusive private Media/Public roots for a manual runtime; native management creates its documented fixed private roots;
 - database secrets from protected environment sources, outside the JSON configuration and repository.
 

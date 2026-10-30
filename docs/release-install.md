@@ -15,7 +15,7 @@ The initial package target is Linux amd64 and contains:
 - `INSTALL.md` — this guide;
 - `MANAGE.md` and `VERIFY.md` — the native operator and release-authentication guides for this exact package source.
 
-PostgreSQL, TLS certificates/keys and operator secrets are deployment inputs and are not bundled. Site transfer additionally requires compatible maintained PostgreSQL `pg_dump`/`pg_restore` tooling; consult `docs/site-transfer.md` in the source tree for the exact release tag when using that development-profile feature.
+PostgreSQL, TLS certificates/keys and operator secrets are not bundled. Supply compatible databases for the prepared/manual path, or use a prerequisite operation only when the selected package and clean-host profile provide it. Site transfer additionally requires compatible maintained PostgreSQL `pg_dump`/`pg_restore` tooling; consult `docs/site-transfer.md` in the source tree for the exact release tag when using that development-profile feature.
 
 The default runtime profile is loopback development. An explicit `hosting_profile: "direct_tls"` enables the validated direct TLS listener boundary in versions that contain it; it does not establish a production hosting or persistent-service profile. Use the guide included with the exact selected release; older published binaries do not gain new commands or profiles from source documentation.
 
@@ -37,9 +37,9 @@ The reported Rixa version must match the release tag and `BUILDINFO.json`; the C
 
 ## Choose the operation profile
 
-A trusted build containing `rixa manage` provides the [native operator path](server-management.md) on its explicitly supported Debian/systemd profile. It guides configuration, supervises installation independently of SSH, and provides retained status, supported compatible update/recovery and ordinary runtime/service removal. Released prepared-server packages require supplied PostgreSQL databases, TLS material and a trusted supported verifier.
+An independently trusted build containing `rixa manage` provides the [native operator path](server-management.md) on its explicitly supported Debian/systemd profile. It guides configuration, supervises installation independently of SSH, and provides retained status, supported compatible update/recovery and ordinary runtime/service removal. The prepared-server path requires supplied PostgreSQL databases, TLS material and a trusted supported verifier.
 
-The [bootstrap starter and PostgreSQL prerequisite source](server-management.md#bootstrap-starter-and-postgresql-prerequisite-source) adds a separate discovery/staging route and an explicitly reviewed clean-host provisioning operation. These additions are unpublished and real clean-server provisioning is not yet proven. They do not change the requirements of an older package. A complete one-line trust generation, unattended updater and panel profile need their own delivered evidence.
+Where the independently trusted package contains the commands, the [bootstrap starter and PostgreSQL prerequisite path](server-management.md#bootstrap-starter-and-postgresql-prerequisites) provides separate discovery/staging and explicitly reviewed clean-host provisioning. Follow that package's own guides for available behavior and its release's linked acceptance/CI evidence for delivered profiles. A starter package does not by itself provide an authenticated one-line entry; that requires the separate [immutable generation trust sequence](release-verification.md#bootstrap-starter-and-generation-trust). Unattended updates and panel profiles retain their own boundaries.
 
 Use that guide for native management. The following steps are the separate manual foreground development path. Do not pre-create the manual layout below and then ask the native manager to adopt it; native installation refuses unrelated existing material.
 

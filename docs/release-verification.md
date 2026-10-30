@@ -16,7 +16,7 @@ The attestation policy binds the archive digest, Rixa publisher repository and o
 
 ## Verification command
 
-With a trusted Rixa executable that contains this command and a compatible trusted official GitHub CLI:
+With an independently trusted Rixa executable that contains this command and a compatible trusted official GitHub CLI:
 
 ```bash
 rixa artifact verify \
@@ -30,7 +30,7 @@ An optional `--sha256` supplies an additional expected digest; it never replaces
 
 The normal CMS runtime does not depend on GitHub CLI. Use the helper's [official installation guidance](https://github.com/cli/cli/blob/trunk/docs/install_linux.md); an operating-system package named `gh` may be too old to provide the required attestation flags. The verifier reports its supported helper requirements. Never obtain the trusted verifier by executing the unverified Rixa payload itself.
 
-A local bundle permits verification without logging into GitHub. Initial refresh of trusted signing metadata may still need network access; this is not a fully air-gapped verification profile. A future one-line bootstrap must independently establish its trusted helper before it executes elevated product code.
+A local bundle permits verification without logging into GitHub. Initial refresh of trusted signing metadata may still need network access; this is not a fully air-gapped verification profile. A one-line bootstrap must independently establish its trusted helper before it executes elevated product code.
 
 ## Fetch and verify a selected release
 
@@ -50,7 +50,7 @@ Fetch still requires the independently trusted Rixa executable and supported off
 
 ## Bootstrap starter and generation trust
 
-The source starter command is separate from the initial one-line trust entry. These additions are unpublished, and a complete authenticated clean-server journey has not yet been proven. Follow [native management](server-management.md#bootstrap-starter-and-postgresql-prerequisite-source) for source command boundaries and the exact release's supplied guides for available commands.
+The starter commands require an independently trusted executable or authenticated package that contains them. A starter package is separate from the initial authenticated one-line entry. Follow [native management](server-management.md#bootstrap-starter-and-postgresql-prerequisites) for command boundaries and the exact package's supplied guides for available behavior.
 
 The accepted trust sequence is:
 
@@ -60,7 +60,7 @@ The accepted trust sequence is:
 4. Freeze and reverify protected copies of the authenticated candidate, then use the shared authenticated package parser to check source, platform, actual compiled components and legal material. Stage the selected manager under protected content-addressed storage with no-replace activation. A prepared manager is not an applied installation or prerequisite plan.
 5. Route existing operations to their recorded frozen managers. Keep original installation/update/prerequisite records and helpers; a newer starter does not silently replace their ownership or resume their effects.
 
-Generation B follows S so the trust chain has no self-reference or unverified payload execution. It does not add a fourth asset to ordinary product releases, copy provenance policy into a shell installer, or require operators to compile Go. No generation script, invented release pin or ready-to-run one-line command is supplied by this source change. Initial generation publication and actual clean-server acceptance remain separate delivery gates; current version decisions and evidence belong to [Issue 29](https://github.com/AChWorks/rixa/issues/29).
+Generation B follows S so the trust chain has no self-reference or unverified payload execution. It does not add a fourth asset to ordinary product releases, copy provenance policy into a shell installer, or require operators to compile Go. This guide supplies no generation script or ready-to-run one-line command. Use only the separately authenticated generation's own instructions for that entry. Published starter/generation identities and actual host acceptance evidence belong to [Releases](https://github.com/AChWorks/rixa/releases), [Issue 29](https://github.com/AChWorks/rixa/issues/29) and their linked CI records; a source fixture is not public delivery evidence.
 
 ## Meaning and limits of success
 
