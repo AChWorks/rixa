@@ -450,10 +450,14 @@ func verifyRestoredSiteTransferContracts(parent context.Context, config Config, 
 		}
 		verifySite.PublicRoot = publicRoot
 	}
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	runtime, err := buildSite(config, ResolvedSite{SiteConfig: verifySite, DSN: dsn}, admin, admin, logger)
+	sources, err := config.catalogSources()
 	if err != nil {
-		return fmt.Errorf("%w: restored site composition", ErrSiteTransfer)
+		return fmt.Errorf("%w: restored interface catalogs: %w", ErrSiteTransfer, err)
+	}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	runtime, err := buildSite(config, ResolvedSite{SiteConfig: verifySite, DSN: dsn}, admin, admin, logger, sources)
+	if err != nil {
+		return fmt.Errorf("%w: restored site composition: %w", ErrSiteTransfer, err)
 	}
 	defer func() {
 		stopCtx, stopCancel := context.WithTimeout(context.WithoutCancel(parent), 5*time.Second)

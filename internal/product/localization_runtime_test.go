@@ -3,6 +3,8 @@
 package product
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -15,6 +17,7 @@ import (
 	"time"
 
 	"github.com/AChWorks/achrix/admin/localize"
+	"github.com/AChWorks/achrix/installation"
 )
 
 func TestInterfaceLanguagePreferenceIsBoundedAndRetained(t *testing.T) {
@@ -239,5 +242,36 @@ func TestContentLocaleMetadataComesFromCatalog(t *testing.T) {
 		if err != nil || selected.Locale() != metadata || metadata.Name == "" || metadata.Direction == "" {
 			t.Fatal("content metadata was invented separately")
 		}
+	}
+}
+
+func TestSetupPreservesInstalledCatalogConfiguration(t *testing.T) {
+	request := setupFixture(t)
+	var raw map[string]any
+	if err := json.Unmarshal(request.Configuration, &raw); err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	raw["catalog_root"], raw["language"] = root, "de"
+	data, err := json.Marshal(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Configuration = data
+	applied, err := applySetup(context.Background(), request, nil, satisfiedSetupProbe, nil)
+	if err != nil || applied.State != SetupVerified || applied.Plan.Status() != installation.Ready {
+		t.Fatalf("catalog setup persistence: %v", err)
+	}
+	persisted, err := os.ReadFile(request.TargetPath)
+	if err != nil || !bytes.Equal(persisted, request.Configuration) {
+		t.Fatal("setup changed configured catalog source bytes")
+	}
+	c, err := LoadConfig(request.TargetPath)
+	if err != nil || c.CatalogRoot != root || c.Language != "de" {
+		t.Fatal("setup persistence dropped locale configuration")
+	}
+	again, err := applySetup(context.Background(), request, nil, satisfiedSetupProbe, nil)
+	if err != nil || again.State != SetupVerified {
+		t.Fatal("locale configuration did not survive setup reentry")
 	}
 }
