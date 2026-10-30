@@ -276,6 +276,10 @@ func TestTerminalPTYChild(t *testing.T) {
 	if mode == "" {
 		return
 	}
+	if mode == "native-fields" {
+		nativeFieldsPTYChild(t)
+		return
+	}
 	if strings.HasPrefix(mode, "bootstrap-") {
 		bootstrapPTYChild(t, mode)
 		return

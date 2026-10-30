@@ -30,7 +30,7 @@ sudo /usr/local/bin/rixa manage menu --operation first-install
 
 The menu can fetch an authenticated release through the shared artifact policy, or use exact local archive/bundle inputs. Stable and development selections remain explicit. It asks for origins/listener, certificate paths, the two database connections and initial administrator credentials. Login names use the product's exact lowercase ASCII syntax. Passwords retain their original Unicode contents and follow the same bootstrap policy as direct product operations.
 
-Review the intended effects before Apply. Valid entered values remain available when a field is corrected or the operator navigates back. The backend controls which actions are currently possible; an uncertain result does not become a generic Retry button.
+Each field checks its own value while you edit. Related fields may be changed in sequence: enter HTTPS origins without a port, then set the later TLS listener to 443. Completing Configure checks the whole draft, including matching origin/listener ports and separate control/site hostnames and databases. A mismatch returns to the affected field and retains your other entries. Review checks the complete configuration and actual prerequisites again before Apply. The backend controls which actions are currently possible; an uncertain result does not become a generic Retry button.
 
 Use `--plain` for a simple terminal or `--no-color`/`NO_COLOR` to remove color. Direct commands emit JSON and never prompt. `--non-interactive` rejects opening the menu. The operator CLI and terminal menu always use English, independently of the web interface and site content language. Original Unicode input is retained; its display still depends on the terminal's shaping and bidirectional support.
 

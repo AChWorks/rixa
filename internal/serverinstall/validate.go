@@ -18,7 +18,19 @@ var operationSyntax = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,47}$`)
 var releaseSyntax = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z][0-9A-Za-z.-]*)?$`)
 var commitSyntax = regexp.MustCompile(`^[0-9a-f]{40}$`)
 
+// ValidateDraft checks the complete draft before it can be saved or reviewed.
 func ValidateDraft(d Draft) []Problem {
+	return validateDraft(d, true)
+}
+
+// ValidateDraftFields checks each value independently while an operator edits
+// the draft. Relationships between fields may be temporarily inconsistent;
+// callers must use ValidateDraft before accepting the completed draft.
+func ValidateDraftFields(d Draft) []Problem {
+	return validateDraft(d, false)
+}
+
+func validateDraft(d Draft, complete bool) []Problem {
 	var p []Problem
 	add := func(field, code, message string) { p = append(p, Problem{field, code, message}) }
 	if !operationSyntax.MatchString(d.OperationID) {
@@ -43,7 +55,7 @@ func ValidateDraft(d Draft) []Problem {
 			continue
 		}
 		key := strings.ToLower(u.Hostname())
-		if origins[key] {
+		if complete && origins[key] {
 			add(f.name, "isolation", "Control and site require different hostnames.")
 		}
 		origins[key] = true
@@ -54,7 +66,7 @@ func ValidateDraft(d Draft) []Problem {
 	if e != nil || numberErr != nil || number < 1 || number > 65535 || strconv.Itoa(number) != port || ip == nil || ip.IsLoopback() || ip.IsMulticast() || (!ip.IsUnspecified() && !ip.IsGlobalUnicast()) || port == "" {
 		add("listen", "listener", "Use an explicit non-loopback IP and port, such as 0.0.0.0:8443.")
 	}
-	if numberErr == nil {
+	if complete && numberErr == nil {
 		for _, origin := range []struct{ name, value string }{{"control_origin", d.ControlOrigin}, {"site_origin", d.SiteOrigin}} {
 			u, e := url.Parse(origin.value)
 			if e == nil && u != nil {
@@ -100,10 +112,10 @@ func ValidateDraft(d Draft) []Problem {
 		}
 	}
 
-	if d.ControlDSN != "" && d.ControlDSN == d.SiteDSN {
+	if complete && d.ControlDSN != "" && d.ControlDSN == d.SiteDSN {
 		add("site_dsn", "isolation", "Control and site require distinct PostgreSQL databases.")
 	}
-	if len(p) == 0 {
+	if complete && len(p) == 0 {
 		if _, e := product.ParseConfig(configBytes(d, "", "")); e != nil {
 			add("listen", "configuration", "Origins, listener ports and product configuration must agree.")
 		}
