@@ -3,6 +3,7 @@
 package product
 
 import (
+	"context"
 	"fmt"
 	"html/template"
 	"io/fs"
@@ -17,6 +18,8 @@ import (
 )
 
 const interfaceLanguageCookie = "rixa-ui-language"
+
+type interfaceLanguageContextKey struct{}
 
 // CatalogRoot is operator-controlled private translation data, never code.
 func (c Config) catalogSources() ([]fs.FS, error) {
@@ -79,7 +82,7 @@ func contentLocales(catalog *localize.Catalog) []localize.Locale {
 func supportedContentLanguage(tag string) bool { return tag == "en" || tag == "fa" }
 
 func selectInterfaceLanguage(r *http.Request) string {
-	if selected := r.URL.Query().Get("ui_language"); selected != "" {
+	if selected, ok := r.Context().Value(interfaceLanguageContextKey{}).(string); ok {
 		return selected
 	}
 	if cookie, err := r.Cookie(interfaceLanguageCookie); err == nil {
@@ -107,6 +110,14 @@ func interfaceLanguageHandler(next http.Handler, locales []localize.Locale) http
 				localeSelectionFailure(w)
 				return
 			}
+			// Consume only this product-owned presentation parameter before
+			// the shared shell's strict no-query admission. Clone preserves
+			// the caller's request and all authentication/Origin headers.
+			// Any unrelated parameter remains subject to the shell's guard.
+			selected := choices[0]
+			values.Del("ui_language")
+			r = r.Clone(context.WithValue(r.Context(), interfaceLanguageContextKey{}, selected))
+			r.URL.RawQuery = values.Encode()
 			http.SetCookie(w, &http.Cookie{Name: interfaceLanguageCookie, Value: choices[0], Path: "/admin", Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode, MaxAge: 365 * 24 * 60 * 60})
 		} else if cookie, cookieErr := r.Cookie(interfaceLanguageCookie); cookieErr == nil && !supported[cookie.Value] {
 			// Removing a pack must not strand an operator behind a stale preference.

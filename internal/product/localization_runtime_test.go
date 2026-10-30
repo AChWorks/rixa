@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -16,6 +17,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/AChWorks/achrix"
+	shell "github.com/AChWorks/achrix/admin"
 	"github.com/AChWorks/achrix/admin/localize"
 	"github.com/AChWorks/achrix/installation"
 )
@@ -273,5 +276,92 @@ func TestSetupPreservesInstalledCatalogConfiguration(t *testing.T) {
 	again, err := applySetup(context.Background(), request, nil, satisfiedSetupProbe, nil)
 	if err != nil || again.State != SetupVerified {
 		t.Fatal("locale configuration did not survive setup reentry")
+	}
+}
+
+// These adapters supply normal Shell interfaces for a presentation-only TLS
+// fixture. Product Identity/session adapters remain unchanged.
+type localeFixtureAuthentication struct{}
+
+func (localeFixtureAuthentication) AuthenticateRequest(*http.Request, bool) (achrix.Principal, error) {
+	return "locale-fixture", nil
+}
+
+type localeFixtureAuthorization struct{}
+
+func (localeFixtureAuthorization) Authorize(context.Context, achrix.Principal, string, string) error {
+	return nil
+}
+
+func TestInterfaceLanguageSelectorThroughAdmittedTLSShell(t *testing.T) {
+	catalog, err := presentationCatalog([]fs.FS{bundledProductCatalogs()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	admin, err := shell.New(shell.Config{Origin: "https://a.rixa.test", AuthPath: "/auth", Language: "en", Catalogs: []fs.FS{bundledProductCatalogs()}, SelectLanguage: selectInterfaceLanguage}, localeFixtureAuthentication{}, localeFixtureAuthorization{}, interfaceLanguageSurface("fixture.read", "", catalog.Locales))
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewTLSServer(interfaceLanguageHandler(admin.Handler(), admin.Locales()))
+	defer server.Close()
+	client := server.Client()
+	client.Timeout = 5 * time.Second
+	var preference *http.Cookie
+	request := func(path string) (int, string, *http.Response) {
+		t.Helper()
+		r, err := http.NewRequest(http.MethodGet, server.URL+path, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.Host = "a.rixa.test"
+		if preference != nil {
+			r.AddCookie(preference)
+		}
+		response, err := client.Do(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, readErr := io.ReadAll(io.LimitReader(response.Body, 1<<20))
+		_ = response.Body.Close()
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		return response.StatusCode, string(body), response
+	}
+	for _, selection := range []struct{ tag, direction string }{{"fa", "rtl"}, {"en", "ltr"}} {
+		code, body, response := request("/admin/language/?ui_language=" + selection.tag)
+		if code != http.StatusOK || !strings.Contains(body, `lang="`+selection.tag+`"`) || !strings.Contains(body, `dir="`+selection.direction+`"`) || !strings.Contains(body, `name="ui_language"`) {
+			t.Fatalf("selector did not render admitted localized HTML: status%d", code)
+		}
+		cookies := response.Cookies()
+		if len(cookies) != 1 {
+			t.Fatal("selector did not retain bounded preference")
+		}
+		preference = cookies[0]
+		code, body, _ = request("/admin/language/")
+		if code != http.StatusOK || !strings.Contains(body, `lang="`+selection.tag+`"`) {
+			t.Fatal("normal navigation lost selected locale")
+		}
+	}
+	code, _, _ := request("/admin/language/?ui_language=fa&unrelated=keep")
+	if code != http.StatusBadRequest {
+		t.Fatal("product selector bypassed shared unrelated-query admission")
+	}
+}
+
+func TestInterfaceLanguageTransportPreservesOriginalRequest(t *testing.T) {
+	original := httptest.NewRequest(http.MethodGet, "https://a.rixa.test/admin/language/?ui_language=fa&unrelated=keep", nil)
+	original.Header.Set("Origin", "https://a.rixa.test")
+	original.AddCookie(&http.Cookie{Name: "auth-session-canary", Value: "preserved"})
+	handler := interfaceLanguageHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r == original || r.URL == original.URL || r.URL.RawQuery != "unrelated=keep" || selectInterfaceLanguage(r) != "fa" || r.Header.Get("Origin") != original.Header.Get("Origin") || r.Header.Get("Cookie") != original.Header.Get("Cookie") {
+			t.Fatal("selector changed request boundaries or failed to consume its parameter")
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}), []localize.Locale{{Tag: "en"}, {Tag: "fa"}})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, original)
+	if response.Code != http.StatusNoContent || original.URL.RawQuery != "ui_language=fa&unrelated=keep" || selectInterfaceLanguage(original) != "" {
+		t.Fatal("original request was mutated")
 	}
 }
