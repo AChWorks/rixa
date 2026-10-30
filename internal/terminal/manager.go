@@ -159,7 +159,7 @@ func Run(ctx context.Context, backend serverinstall.Facade, options Options) (er
 				"Closing the menu leaves an already queued operation running.",
 				"Removal preserves configuration, credentials, databases and site data.",
 				"No updater, purge, PostgreSQL provisioner or panel adapter is offered here.",
-				"English terminal interface; Persian terminal rendering is not certified.",
+				"The terminal interface always uses English, independently of web language.",
 			}, "Enter / Escape returns"); err != nil {
 				return err
 			}
@@ -376,7 +376,7 @@ func draftFields(d *serverinstall.Draft) []field {
 		{"control_password", "Control administrator password", "Hidden; empty keeps a previously saved value.", true, &d.ControlPassword},
 		{"site_login", "Site administrator login", "Exact initial administrator login for this site.", false, &d.SiteLogin},
 		{"site_password", "Site administrator password", "Hidden; empty keeps a previously saved value.", true, &d.SitePassword},
-		{"language", "Site language", "Use an accepted product language, such as en or fa.", false, &d.Language},
+		{"language", "Web interface language", "Choose bundled en or fa for the web interface. The terminal always uses English.", false, &d.Language},
 	}
 }
 
