@@ -89,6 +89,10 @@ To extend, use public interfaces/typed collaborators. Keep content/theme/product
 
 An update reviews the exact released target and relevant API/dependency/schema changes, adapts only affected product code, rebuilds/tests a coherent artifact and stages explicit migrations/activation under the supported lifecycle profile. Product source/configuration is not replaced by a dependency update. Published compatibility commitments remain immutable; breaking Foundation changes follow the Foundation lifecycle/versioning policy.
 
+## Selected-site draft presentation
+
+The control-origin saved-content workspace delegates through normal ControlService selected-site authorization to the existing site-owned EditorialService and origin-qualified operator. The Admin request retains the authenticated control principal. One validated path supplies the site target; no global selection or universal site session is introduced. Direct-site and selected-control adapters share one product draft presenter with explicit optional publication composition. Bounded keyset content/history pages preserve existing APIs and immutable revisions. Recovery retains exact decimal CAS and immutable same-operation submitted data; missing acknowledgements are inspected before deliberate same-ID replay. Preview link resolution is product-owned and preserves stored source and private originals. [The workflow guide](selected-site-content.md) owns user-facing behavior.
+
 ## Installation and hosting boundary
 
 Installation is a deployment concern and must not leak host/root authority into Core or site capabilities. AChrix Installation owns pure requirement/evidence/adapter/progress assessment, immutable plans and rechecking. It performs no host discovery, provisioning, persistence, migration or activation. Rixa owns trustworthy environment probes, selected supported adapters, protected configuration, durable intent/progress, locking/fencing, actual effects, migration/bootstrap reconciliation, readiness and activation. All install surfaces consume those same product operations.
