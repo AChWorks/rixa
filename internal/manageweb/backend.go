@@ -25,24 +25,27 @@ type publicProblem struct {
 	Field   string `json:"field"`
 	Code    string `json:"code"`
 	Message string `json:"message"`
+	Detail  string `json:"technical_detail,omitempty"`
 }
 type response struct {
-	Review          map[string]string `json:"review,omitempty"`
-	NativeOperation string            `json:"native_operation_id,omitempty"`
-	Operation       string            `json:"operation_id"`
-	Kind            string            `json:"kind"`
-	State           string            `json:"state"`
-	Code            string            `json:"code"`
-	Message         string            `json:"message"`
-	Stage           string            `json:"stage,omitempty"`
-	Release         string            `json:"release,omitempty"`
-	Active          string            `json:"active_release,omitempty"`
-	ReviewToken     string            `json:"review_token,omitempty"`
-	AdminURL        string            `json:"admin_url,omitempty"`
-	Actions         []string          `json:"actions"`
-	Problems        []publicProblem   `json:"problems,omitempty"`
-	Artifact        publicArtifact    `json:"artifact"`
-	AccessClosed    bool              `json:"access_closed"`
+	Review            map[string]string `json:"review,omitempty"`
+	NativeOperation   string            `json:"native_operation_id,omitempty"`
+	Operation         string            `json:"operation_id"`
+	Kind              string            `json:"kind"`
+	State             string            `json:"state"`
+	Code              string            `json:"code"`
+	Message           string            `json:"message"`
+	TechnicalDetail   string            `json:"technical_detail,omitempty"`
+	TechnicalLanguage string            `json:"technical_language,omitempty"`
+	Stage             string            `json:"stage,omitempty"`
+	Release           string            `json:"release,omitempty"`
+	Active            string            `json:"active_release,omitempty"`
+	ReviewToken       string            `json:"review_token,omitempty"`
+	AdminURL          string            `json:"admin_url,omitempty"`
+	Actions           []string          `json:"actions"`
+	Problems          []publicProblem   `json:"problems,omitempty"`
+	Artifact          publicArtifact    `json:"artifact"`
+	AccessClosed      bool              `json:"access_closed"`
 }
 
 func (c *Console) status(ctx context.Context) (serverinstall.Result, error) {
@@ -51,12 +54,16 @@ func (c *Console) status(ctx context.Context) (serverinstall.Result, error) {
 	}
 	return c.backend.Status(ctx, c.options.Scope.Operation)
 }
-func (c *Console) present(l *localize.Localizer, r serverinstall.Result, action string) response {
+func (c *Console) present(request *http.Request, l *localize.Localizer, r serverinstall.Result, action string, nativeErr error, supplied ...string) response {
 	v := response{Operation: c.options.Scope.Operation, Kind: c.options.Scope.Kind, State: r.State, Code: r.Code, Stage: r.Stage, Release: r.Release, Active: r.ActiveRelease, ReviewToken: r.ReviewToken, AdminURL: r.AdminURL, Actions: []string{}}
 	if !c.sameNativeOperation(r) {
 		v.NativeOperation = r.OperationID
 	}
+	complete := nativeErr == nil && positivelyComplete(r)
 	v.Message = text(l, "state_"+r.State)
+	if r.State == "installed" && !complete {
+		v.Message = text(l, "state_installed_unconfirmed")
+	}
 	if v.Message == "state_"+r.State {
 		v.Message = text(l, "state_unknown")
 	}
@@ -65,12 +72,27 @@ func (c *Console) present(l *localize.Localizer, r serverinstall.Result, action 
 			v.Actions = append(v.Actions, a)
 		}
 	}
-	for _, p := range r.Problems {
-		v.Problems = append(v.Problems, publicProblem{p.Field, p.Code, text(l, "correct_field")})
+	redact, available := c.diagnosticRedactor(request, r.ReviewToken, supplied...)
+	if available {
+		v.TechnicalDetail = redact(r.Message)
+		v.TechnicalLanguage = "en"
+	} else {
+		v.TechnicalDetail = text(l, "diagnostic_unavailable")
+		v.TechnicalLanguage = l.Locale().Tag
+	}
+	for i, p := range r.Problems {
+		if i >= 32 {
+			break
+		}
+		detail := ""
+		if available {
+			detail = redact(p.Message)
+		}
+		v.Problems = append(v.Problems, publicProblem{Field: p.Field, Code: p.Code, Message: text(l, "correct_field"), Detail: detail})
 	}
 	c.mutex.Lock()
 	v.Artifact = publicArtifact{c.artifact.Release, c.artifact.Source, c.artifact.SHA256}
-	terminal := c.sameNativeOperation(r) && (r.State == "removed" || r.State == "rejected" || (r.State == "installed" && (c.allowed["apply"] || c.allowed["resume"])))
+	terminal := nativeErr == nil && c.sameNativeOperation(r) && (r.State == "removed" || r.State == "rejected" || (complete && (c.allowed["apply"] || c.allowed["resume"])))
 	if terminal && action != "page" {
 		c.closed = true
 		c.sessionHash = [32]byte{}
@@ -81,6 +103,13 @@ func (c *Console) present(l *localize.Localizer, r serverinstall.Result, action 
 		v.ReviewToken = ""
 	}
 	return v
+}
+
+// A retained installed state can still need reconciliation or be unhealthy.
+// Only these positive native receipts, without offered recovery, close access.
+func positivelyComplete(r serverinstall.Result) bool {
+	return r.State == "installed" && !slices.Contains(r.Actions, "resume") &&
+		(r.Code == "healthy" || r.Code == "installed" || r.Code == "updated")
 }
 func statusCode(err error) int {
 	switch {
@@ -193,7 +222,7 @@ func (c *Console) surface(w http.ResponseWriter, r *http.Request, view shell.Req
 	}
 	if r.URL.Path == "/status" && r.Method == http.MethodGet {
 		result, e := c.status(r.Context())
-		jsonResponse(w, statusCode(e), c.present(view.Localizer, result, "status"))
+		jsonResponse(w, statusCode(e), c.present(r, view.Localizer, result, "status", e))
 		return
 	}
 	if r.URL.Path == "/console.css" && r.Method == http.MethodGet {
@@ -219,6 +248,7 @@ func (c *Console) surface(w http.ResponseWriter, r *http.Request, view shell.Req
 		return
 	}
 	var result serverinstall.Result
+	var supplied []string
 	var e error
 	if action == "configure" {
 		var in configureInput
@@ -230,6 +260,7 @@ func (c *Console) surface(w http.ResponseWriter, r *http.Request, view shell.Req
 			c.fail(w, r, 400, "invalid_request")
 			return
 		}
+		supplied = []string{in.ControlDSN, in.SiteDSN, in.ControlPassword, in.SitePassword}
 		result, e = c.configure(r.Context(), in)
 	} else {
 		var input struct {
@@ -244,6 +275,7 @@ func (c *Console) surface(w http.ResponseWriter, r *http.Request, view shell.Req
 			c.fail(w, r, 400, "invalid_request")
 			return
 		}
+		supplied = append(supplied, input.ReviewToken)
 		if c.options.Scope.Kind == "update" {
 			switch action {
 			case "review":
@@ -262,9 +294,9 @@ func (c *Console) surface(w http.ResponseWriter, r *http.Request, view shell.Req
 			case "apply":
 				result, e = c.backend.Apply(r.Context(), c.options.Scope.Operation, input.ReviewToken)
 			case "resume":
-				result, e = c.backend.Resume(r.Context(), c.options.Scope.Operation)
+				result, e = c.installationEffect(r.Context(), "resume")
 			case "remove":
-				result, e = c.backend.Remove(r.Context(), c.options.Scope.Operation)
+				result, e = c.installationEffect(r.Context(), "remove")
 			}
 		}
 	}
@@ -272,7 +304,7 @@ func (c *Console) surface(w http.ResponseWriter, r *http.Request, view shell.Req
 		c.fail(w, r, statusCode(e), "unavailable")
 		return
 	}
-	value := c.present(view.Localizer, result, action)
+	value := c.present(r, view.Localizer, result, action, e, supplied...)
 	if action == "review" && e == nil {
 		summary, err := c.reviewSummary(r.Context())
 		if err != nil {
@@ -282,6 +314,23 @@ func (c *Console) surface(w http.ResponseWriter, r *http.Request, view shell.Req
 		value.Review = summary
 	}
 	jsonResponse(w, statusCode(e), value)
+}
+
+// The earlier presentation gate is advisory. Only the native strict seam binds
+// the original operation under the native effect lock, after body decoding.
+func (c *Console) installationEffect(ctx context.Context, action string) (serverinstall.Result, error) {
+	strict, ok := c.backend.(serverinstall.InstallationEffects)
+	if !ok {
+		return serverinstall.Result{}, serverinstall.ErrAuthority
+	}
+	switch action {
+	case "resume":
+		return strict.ResumeInstallation(ctx, c.options.Scope.Operation)
+	case "remove":
+		return strict.RemoveInstallation(ctx, c.options.Scope.Operation)
+	default:
+		return serverinstall.Result{}, serverinstall.ErrInput
+	}
 }
 
 func (c *Console) sameNativeOperation(r serverinstall.Result) bool {

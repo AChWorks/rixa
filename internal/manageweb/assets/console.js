@@ -74,11 +74,17 @@
   actions=Array.isArray(result.actions)?result.actions:[];
   root.querySelector("[data-state]").textContent=result.message||t("unavailable");
   root.querySelector("[data-code]").textContent=[result.native_operation_id,result.state,result.stage,result.code].filter(Boolean).join(" · ");
+  const diagnostic=root.querySelector("[data-diagnostics]");diagnostic.hidden=!result.technical_detail;
+  root.querySelector("[data-technical-detail]").textContent=result.technical_detail||"";
+  root.querySelector("[data-technical-detail]").parentElement.lang=result.technical_language||document.documentElement.lang;
+  root.querySelector("[data-technical-detail]").dir=result.technical_language==="en"?"ltr":"auto";
   const problems=root.querySelector("[data-problems]");problems.replaceChildren();
   configure.querySelectorAll('[aria-invalid="true"]').forEach(input=>{input.removeAttribute("aria-invalid");input.removeAttribute("aria-describedby");});
   for(const problem of result.problems||[]){
    const item=document.createElement("li"),id=document.createElement("bdi");id.dir="ltr";id.textContent=problem.field+" · "+problem.code;
-   item.id="problem-"+problems.children.length;item.append(id,document.createTextNode(" — "+problem.message));problems.append(item);
+   item.id="problem-"+problems.children.length;item.append(id,document.createTextNode(" — "+problem.message));
+   if(problem.technical_detail){const detail=document.createElement("p"),technical=document.createElement("bdi");detail.lang="en";technical.dir="ltr";technical.textContent=problem.technical_detail;detail.append(technical);item.append(detail);}
+   problems.append(item);
    const input=configure.elements.namedItem(problem.field);if(input){input.setAttribute("aria-invalid","true");input.setAttribute("aria-describedby",item.id);}
   }
   if(result.artifact)root.querySelector("[data-artifact]").textContent=[result.artifact.release,result.artifact.source_commit,result.artifact.sha256].filter(Boolean).join(" · ");
@@ -101,7 +107,10 @@
    if(pending?.action==="review"&&result.state==="ready"){pending=null;clearReview();}
    display(result);
    if(explicit)announce(pending?"uncertain_help":"inspected");
-  }catch(_){if(explicit)announce("inspection_failed",true);}
+  }catch(error){
+   if(error.result?.operation_id){try{display(error.result);}catch(_){}}
+   if(explicit)announce("inspection_failed",true);
+  }
   finally{busy=false;lock();}
  }
  async function send(attempt){

@@ -101,3 +101,19 @@ fake-native TLS interaction, recovery, locale and privacy checks. A fresh review
 always clears its prior Apply checkbox and summary; confirm the newly displayed
 review before applying. Its private fixture receipt verifies teardown and does
 not establish a supported host or panel profile.
+
+Installation Resume and Remove require the native strict `InstallationEffects`
+seam. It binds the original operation while holding the native effect lock;
+CLI parent-to-update convenience routing does not grant browser authority. A
+missing seam fails closed. An installed state may still require cleanup or be
+unhealthy. Matching recovery access stays available until a positive completion
+result without pending Resume; a fresh status/removal permit remains independent.
+
+A localized **Technical diagnostic (English)** section preserves bounded native
+cause and repair instructions, including field-specific details. These are
+escaped text with English/LTR isolation, not translated by message matching.
+Known saved/submitted credentials, connection strings and current request tokens
+are masked transiently, including their common encoded forms. The bound private
+draft and unchanged private permit file must remain readable for this protection;
+if their provenance cannot be verified, the details are visibly unavailable.
+The console retains its hashed permit/session authority model.

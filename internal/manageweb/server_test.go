@@ -32,14 +32,16 @@ import (
 )
 
 type fakeNative struct {
-	mutex       sync.Mutex
-	result      serverinstall.Result
-	draft       serverinstall.Draft
-	updated     serverinstall.UpdateDraft
-	calls       map[string]int
-	token       string
-	loadError   error
-	statusError error
+	mutex           sync.Mutex
+	result          serverinstall.Result
+	draft           serverinstall.Draft
+	updated         serverinstall.UpdateDraft
+	calls           map[string]int
+	token           string
+	loadError       error
+	statusError     error
+	resumeResult    *serverinstall.Result
+	diagnosticProbe bool
 }
 
 func (f *fakeNative) get(action string) serverinstall.Result {
@@ -77,6 +79,9 @@ func (f *fakeNative) SaveDraft(_ context.Context, d serverinstall.Draft) (server
 	f.draft = d
 	f.result.State = "draft"
 	f.result.Code = "draft-saved"
+	if f.diagnosticProbe {
+		f.result.Message = "Inspect /opt/rixa/manager and retain this operation. Private input: " + d.ControlDSN + " " + d.ControlPassword + " <img id=diagnostic-browser-probe>"
+	}
 	f.result.Actions = []string{"configure", "review", "status"}
 	f.result.ReviewToken = ""
 	return f.result, nil
@@ -141,6 +146,15 @@ func (f *fakeNative) ApplyUpdate(ctx context.Context, id, token string) (serveri
 	return f.Apply(ctx, id, token)
 }
 func (f *fakeNative) ResumeUpdate(ctx context.Context, id string) (serverinstall.Result, error) {
+	f.mutex.Lock()
+	if f.resumeResult != nil {
+		f.calls["resume"]++
+		f.result = *f.resumeResult
+		r := f.result
+		f.mutex.Unlock()
+		return r, nil
+	}
+	f.mutex.Unlock()
 	return f.Resume(ctx, id)
 }
 func (f *fakeNative) RemoveUpdatedInstallation(ctx context.Context, id string) (serverinstall.Result, error) {
@@ -622,6 +636,28 @@ func TestConsoleUpdateScopeAndSecretReplacementDenied(t *testing.T) {
 	}
 }
 
+func (f *fakeNative) ResumeInstallation(ctx context.Context, id string) (serverinstall.Result, error) {
+	return f.strictEffect("resume", id)
+}
+func (f *fakeNative) RemoveInstallation(ctx context.Context, id string) (serverinstall.Result, error) {
+	return f.strictEffect("remove", id)
+}
+func (f *fakeNative) strictEffect(action, id string) (serverinstall.Result, error) {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+	f.calls["strict_"+action]++
+	if f.result.OperationID != id || f.result.OperationKind == "update" {
+		return serverinstall.Result{}, serverinstall.ErrState
+	}
+	f.calls[action]++
+	if action == "remove" {
+		f.result.State = "removed"
+		f.result.Code = "removed"
+		f.result.Actions = []string{"status"}
+	}
+	return f.result, nil
+}
+
 // TestConsoleBrowserPreview is a source-only, fake-native TLS fixture. Its local
 // control file is never an HTTP route and cannot invoke a native executor.
 func TestConsoleBrowserPreview(t *testing.T) {
@@ -637,6 +673,10 @@ func TestConsoleBrowserPreview(t *testing.T) {
 		if _, e := os.Lstat(marker + suffix); !errors.Is(e, os.ErrNotExist) {
 			t.Fatal("preview path already exists")
 		}
+	}
+	previewKind := os.Getenv("RIXA_MANAGEWEB_PREVIEW_KIND")
+	if previewKind != "" && previewKind != "update-cleanup" {
+		t.Fatal("unknown fake preview kind")
 	}
 	var h *harness
 	command := ""
@@ -666,7 +706,15 @@ func TestConsoleBrowserPreview(t *testing.T) {
 			t.Error("private teardown receipt")
 		}
 	})
-	h = fixture(t, func(o *Options, _ *dependencies, _ *fakeNative) {
+	h = fixture(t, func(o *Options, _ *dependencies, f *fakeNative) {
+		f.diagnosticProbe = true
+		if previewKind == "update-cleanup" {
+			o.Scope = Scope{Kind: "update", Operation: "fixture-update", Installation: "fixture-install", Actions: []string{"status", "resume"}}
+			f.draft = serverinstall.Draft{OperationID: "fixture-install", Release: "v1.2.3", ControlDSN: "postgres://control:cleanup-browser-secret@127.0.0.1:5432/control?sslmode=disable", ControlPassword: "cleanup-admin-secret"}
+			f.result = serverinstall.Result{OperationKind: "update", OperationID: "fixture-update", InstallationOperation: "fixture-install", State: "installed", Code: "completion-cleanup-required", Message: "Update is committed; run resume with its retained manager to reconcile the pending claim.", Actions: []string{"resume", "status"}}
+			f.resumeResult = &serverinstall.Result{OperationKind: "update", OperationID: "fixture-update", InstallationOperation: "fixture-install", State: "installed", Code: "updated", Message: "Authenticated update completion verified.", Actions: []string{"status", "remove"}}
+		}
+
 		root := filepath.Join(filepath.Dir(o.PermitFile), "catalogs")
 		if os.Mkdir(root, 0700) != nil {
 			t.Fatal("preview catalog root")
@@ -678,7 +726,7 @@ func TestConsoleBrowserPreview(t *testing.T) {
 		o.CatalogRoot = root
 	})
 	b, e := json.Marshal(map[string]string{"schema": "rixa.manageweb-preview.v1",
-		"origin": h.console.origin, "permit": h.permit, "operation": "fixture-install"})
+		"origin": h.console.origin, "permit": h.permit, "operation": h.console.options.Scope.Operation})
 	if e != nil {
 		t.Fatal("preview identity")
 	}
@@ -753,6 +801,8 @@ func TestConsoleBrowserPreview(t *testing.T) {
 				case "installed":
 					h.backend.mutex.Lock()
 					h.backend.result.State = "installed"
+					h.backend.result.Code = "healthy"
+					h.backend.result.Message = "Owned service and strict TLS administration verified."
 					h.backend.result.Actions = []string{"status"}
 					h.backend.mutex.Unlock()
 				case "expire":

@@ -8,10 +8,10 @@ async function rixaManageWebBrowser({context,page,fixture,checkpoint,control,mod
  check(fixture?.schema==="rixa.manageweb-preview.v1","unexpected fake preview schema");
  const origin=new URL(fixture.origin);
  check(origin.protocol==="https:"&&origin.hostname==="127.0.0.1"&&!origin.username&&!origin.password&&!origin.search&&origin.pathname==="/","only loopback TLS fake preview allowed");
- check(fixture.operation==="fixture-install"&&typeof fixture.permit==="string"&&fixture.permit.length===43,"unexpected fake preview identity");
+ check(fixture.operation===(mode==="cleanup"?"fixture-update":"fixture-install")&&typeof fixture.permit==="string"&&fixture.permit.length===43,"unexpected fake preview identity");
  check(typeof checkpoint==="function"&&typeof control==="function","private checkpoint/control callbacks required");
- check(["journey","expiry"].includes(mode),"unsupported bounded browser mode");
- const checks=[],errors=[],counts={configure:0,apply:0,review:0,status:0};
+ check(["journey","expiry","cleanup"].includes(mode),"unsupported bounded browser mode");
+ const checks=[],errors=[],counts={configure:0,apply:0,review:0,resume:0,status:0};
  const configureBodies=[];
  let reviewedToken="",applyUsesReview=false;
  page.setDefaultTimeout(10000);
@@ -52,6 +52,12 @@ async function rixaManageWebBrowser({context,page,fixture,checkpoint,control,mod
  }
  async function noStorage() {
   check(await page.evaluate(()=>localStorage.length===0&&sessionStorage.length===0),"WebStorage was populated");
+ }
+ async function sessionStatus() {
+  return page.evaluate(async()=>{
+   const response=await fetch("/console-auth/csrf",{credentials:"same-origin",cache:"no-store",referrer:location.origin+"/",referrerPolicy:"same-origin",headers:{"X-Identity-Request":"1"}});
+   return response.status;
+  });
  }
  async function screenshot(name) {
   if(screenshotRoot)await page.screenshot({path:screenshotRoot+"/"+name+".png",fullPage:true});
@@ -98,6 +104,30 @@ async function rixaManageWebBrowser({context,page,fixture,checkpoint,control,mod
   check(denied===401,"browser mutation accepted an invalid CSRF token");
   await noStorage();
  });
+ if(mode==="cleanup") {
+  await step("retained-update-cleanup-is-not-completion",async()=>{
+   check((await page.locator("[data-code]").textContent()).includes("completion-cleanup-required"),"retained update cleanup state absent");
+   check((await page.locator("[data-state]").textContent()).includes("not confirmed"),"cleanup was announced as complete");
+   check(await sessionStatus()===200,"matching recovery session was revoked");
+   check(await page.locator("[data-action=resume]").isVisible(),"native Resume was hidden");
+   await layout("cleanup-en");
+   await language("fa","rtl");
+   await page.locator("[data-diagnostics] summary").click();
+   check((await page.locator("[data-diagnostics] summary").textContent()).includes("جزئیات فنی"),"Persian diagnostic label absent");
+   check((await page.locator("[data-technical-detail]").textContent()).includes("retained manager"),"concrete cleanup repair was lost");
+   check(await page.locator("[data-technical-detail]").getAttribute("dir")==="ltr","technical diagnostic direction absent");
+   await layout("cleanup-fa");
+   await noStorage();
+  });
+  await step("explicit-update-resume-positive-completion-lockout",async()=>{
+   await page.locator("[data-action=resume]").click();
+   await page.waitForFunction(()=>document.querySelector("[data-code]").textContent.includes("updated"));
+   check(counts.resume===1&&counts.apply===0&&counts.configure===0,"cleanup used another effect");
+   check(await sessionStatus()===401,"positive Resume completion did not revoke access");
+   await noStorage();
+  });
+  return finish();
+ }
  if(mode==="journey") {
   await step("en-fa-installed-locale-keyboard-layout",async()=>{
    await layout("console-en");
@@ -130,7 +160,7 @@ async function rixaManageWebBrowser({context,page,fixture,checkpoint,control,mod
    check(await page.locator("[data-pending]").isHidden(),"CSRF expiry became unknown mutation");
    check(counts.configure===0,"expired session sent configure");
    check(await form().locator("[name=control_password]").inputValue()===secrets.control_password,"expiry discarded unsaved secret");
-   check((await context.request.get(origin.origin+"/console-auth/csrf",{headers:{"X-Identity-Request":"1"}})).status()===401,"server session still live");
+   check(await sessionStatus()===401,"server session still live");
    await noStorage();
   });
  } else {
@@ -177,12 +207,23 @@ async function rixaManageWebBrowser({context,page,fixture,checkpoint,control,mod
    await page.locator("[data-inspect]").click();
    await page.waitForFunction(()=>!document.querySelector("[data-inspect]").disabled);
   });
+  await step("technical-diagnostics-escaped-redacted-and-localized",async()=>{
+   const technical=page.locator("[data-technical-detail]");
+   check((await technical.textContent()).includes("/opt/rixa/manager"),"useful diagnostic path lost");
+   check(!(await technical.textContent()).includes("browser-canary"),"diagnostic leaked an actual supplied credential");
+   check(await page.locator("#diagnostic-browser-probe").count()===0,"technical diagnostic became markup");
+   check((await technical.textContent()).includes("<img id=diagnostic-browser-probe>"),"escaped diagnostic text missing");
+   await page.locator("[data-diagnostics] summary").click();
+   await screenshot("console-technical-en");
+  });
   await step("saved-input-language-navigation",async()=>{
    for(const tag of ["fa","en"]) {
     await language(tag,tag==="fa"?"rtl":"ltr");
     check(await form().locator("[name=control_origin]").inputValue()==="https://control.example.invalid:9443","saved input lost across locale navigation");
     for(const name of Object.keys(secrets))check(await form().locator("[name="+name+"]").inputValue()===""&&await form().locator("[name="+name+"]").evaluate(e=>!e.required),"saved secret was returned or required again");
     check(!(await page.content()).includes("browser-canary"),"saved secret leaked in HTML");
+    check(await page.locator("#diagnostic-browser-probe").count()===0,"server-rendered diagnostic became markup");
+    if(tag==="fa")check((await page.locator("[data-diagnostics] summary").textContent()).includes("جزئیات فنی"),"Persian diagnostic label absent");
    }
   });
   await step("review-redaction-explicit-confirmation",async()=>{
@@ -215,15 +256,18 @@ async function rixaManageWebBrowser({context,page,fixture,checkpoint,control,mod
    await control("installed");
    await page.locator("[data-inspect]").click();
    await page.waitForFunction(()=>document.querySelector("[data-code]").textContent.includes("installed"));
-   check((await context.request.get(origin.origin+"/console-auth/csrf",{headers:{"X-Identity-Request":"1"}})).status()===401,"completion did not revoke session");
+   check(await sessionStatus()===401,"completion did not revoke session");
    check(await page.locator("[data-config]").isHidden(),"completion left configure available");
    check(counts.apply===1,"completion replayed Apply");
    await noStorage();
   });
  }
+ return finish();
+ async function finish() {
  check(errors.length===0,"browser JavaScript errors");
  const result={status:"verified",mode,checks,counts,javascript_errors:errors.length,
   scope:"source-only-loopback-TLS-fake-native",tls:"explicit self-signed context exception; strict TLS is separate evidence"};
  await checkpoint({phase:"complete",status:"passed",...result});
  return result;
+ }
 }

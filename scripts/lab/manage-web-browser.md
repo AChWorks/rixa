@@ -35,14 +35,14 @@ No new generic browser framework or repository dependency is required.
 
 In a browser execution capability with pre-created `context` and `page`,
 set the two operator-controlled absolute paths below. Use a new marker and
-isolated context for each of `journey` and `expiry`. The caller owns private
+isolated context for each of `journey`, `expiry` and `cleanup`. The caller owns private
 checkpoint I/O; the browser sees neither a local path selector nor control API.
 
 ```js
 const fs = await import("node:fs/promises");
 const marker = "/absolute/private/proof/run1.json";
 const sourceRoot = "/absolute/rixa-checkout";
-const mode = "journey"; // repeat with "expiry" and a new fixture
+const mode = "journey"; // repeat with "expiry" or "cleanup" and a new fixture
 const fixture = JSON.parse(await fs.readFile(marker, "utf8"));
 const source = await fs.readFile(sourceRoot + "/scripts/lab/manage-web-browser.js", "utf8");
 const run = new Function(source + "; return rixaManageWebBrowser;")();
@@ -100,3 +100,19 @@ does not submit the HTML form and cannot prove lost-ack recovery. A full pass
 must include the later Apply/inspection/completion phases. The driver is bounded
 regression and browser evidence, not universal WCAG compliance, real publisher
 verification, strict TLS trust, native recovery or aaPanel support.
+
+For `cleanup`, start the preview with `RIXA_MANAGEWEB_PREVIEW_KIND=update-cleanup`.
+It binds a fresh `status,resume` permit to `fixture-update`, returns retained
+`installed/completion-cleanup-required` state, and performs only one fake typed
+update Resume before positive completion. The browser checks live access before
+Resume and revoked access afterward using real in-page fetch with the same
+explicit same-origin referrer policy as the application. A direct API probe
+without Origin/Referer would be rejected independently of session validity and
+is insufficient revocation evidence.
+
+The journey includes an intentionally unsafe fake diagnostic containing supplied
+credential canaries and markup. Both server HTML and live browser text must retain
+the useful repair path, mask the actual credentials and render markup as text.
+English technical detail stays LTR beneath a catalog-owned localized label.
+Install Resume/Remove require the native `InstallationEffects` seam; do not
+substitute the CLI convenience methods when testing an earlier source stack.
