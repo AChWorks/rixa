@@ -502,8 +502,8 @@ func TestTerminalPTYRemainsEnglishForWebLocales(t *testing.T) {
 		t.Run(locale, func(t *testing.T) {
 			p := startPTY(t, "web-locale-"+locale)
 			position := p.await(t, 0, "Configure installation")
-			p.send(t, "?")
-			p.await(t, position, "The terminal interface always uses English")
+			p.send(t, "\x1bOP")
+			position = p.await(t, position, "The terminal interface always uses English")
 			p.send(t, "\r")
 			p.await(t, position, "Server management")
 			p.send(t, "\x03")
