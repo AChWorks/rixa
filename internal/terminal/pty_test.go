@@ -276,6 +276,14 @@ func TestTerminalPTYChild(t *testing.T) {
 	if mode == "" {
 		return
 	}
+	if strings.HasPrefix(mode, "bootstrap-") {
+		bootstrapPTYChild(t, mode)
+		return
+	}
+	if strings.HasPrefix(mode, "postgres-") {
+		postgresPTYChild(t, mode)
+		return
+	}
 	if strings.HasPrefix(mode, "update-") {
 		runUpdatePTYChild(t, mode)
 		return
