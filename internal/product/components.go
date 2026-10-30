@@ -126,7 +126,6 @@ func BuildRuntime(config RuntimeConfig, logger *slog.Logger) (*Runtime, error) {
 		r.applications = append(r.applications, router.app)
 	}
 	r.controlService = &ControlService{control: control, sites: r.Sites}
-	controlSurface := newControlSurface(config.Config.Sites, r.controlService)
 	controlSources := append([]fs.FS(nil), sources...)
 	// Reuse resources from real, already-composed public Module constructors.
 	// Each site consumes the same immutable compatible component build.
@@ -140,6 +139,7 @@ func BuildRuntime(config RuntimeConfig, logger *slog.Logger) (*Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
+	controlSurface := newControlSurface(config.Config.Sites, r.controlService, contentLocales(controlCatalog)...)
 	controlShell, err := shell.New(
 		shell.Config{Origin: config.Control.Origin, AuthPath: "/auth", Language: config.Language, Catalogs: controlSources, SelectLanguage: selectInterfaceLanguage},
 		control.authenticator,
