@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -105,15 +106,9 @@ func TestSelectedSiteBrowserFixture(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = seedJournal.Close() })
+	h.client.Transport = selectedSiteSeedTransport{next: h.client.Transport, journal: seedJournal}
 	post := func(host, path string, session retainedSession, body map[string]string) []byte {
 		t.Helper()
-		record, encodeErr := json.Marshal(map[string]any{"host": host, "path": path, "payload": body})
-		if encodeErr != nil {
-			t.Fatal(encodeErr)
-		}
-		if _, err = seedJournal.Write(append(record, '\n')); err != nil || seedJournal.Sync() != nil {
-			t.Fatal("selected-site seed attempt journal failed")
-		}
 		return h.post(host, path, session, body, http.StatusOK)
 	}
 	receipt := selectedSiteFixtureReceipt{
@@ -283,4 +278,51 @@ func assertSelectedSiteAttemptIsolation(t *testing.T, ctx context.Context, dsns 
 			}
 		}
 	}
+}
+
+// Capture the existing seeding helper's generated operation identities as well
+// as the additional pagination/history writes before their real HTTP effect.
+// Authentication endpoints/headers are deliberately outside this journal.
+type selectedSiteSeedTransport struct {
+	next    http.RoundTripper
+	journal *os.File
+}
+
+func (s selectedSiteSeedTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	path := request.URL.Path
+	if request.Method != http.MethodPost || !(strings.HasPrefix(path, "/admin/content/") || path == "/admin/appearance/save" || path == "/admin/media/upload") {
+		return s.next.RoundTrip(request)
+	}
+	if request.GetBody == nil {
+		return nil, fmt.Errorf("seed request cannot be journaled before effect")
+	}
+	body, err := request.GetBody()
+	if err != nil {
+		return nil, err
+	}
+	data, err := io.ReadAll(io.LimitReader(body, 128<<10))
+	_ = body.Close()
+	if err != nil || len(data) == 128<<10 {
+		return nil, fmt.Errorf("seed request exceeded journal bound")
+	}
+	record := map[string]any{"host": request.URL.Host, "path": path}
+	if request.Header.Get("Content-Type") == "application/json" {
+		record["payload"] = string(data)
+	} else {
+		// Media admission has no caller operation ID. Bind its one non-replayed
+		// upload to exact bytes without copying private binary data into JSON.
+		record["body_sha256"] = fmt.Sprintf("%x", sha256.Sum256(data))
+		record["body_bytes"] = len(data)
+	}
+	encoded, err := json.Marshal(record)
+	if err != nil {
+		return nil, err
+	}
+	if _, err = s.journal.Write(append(encoded, '\n')); err != nil {
+		return nil, err
+	}
+	if err = s.journal.Sync(); err != nil {
+		return nil, err
+	}
+	return s.next.RoundTrip(request)
 }
