@@ -442,7 +442,7 @@ func draftFields(d *serverinstall.Draft) []field {
 
 func configure(ctx context.Context, s *session, backend serverinstall.Facade, d *serverinstall.Draft, current serverinstall.Result) (serverinstall.Result, bool, error) {
 	fields := draftFields(d)
-	return configureFields(ctx, s, backend, d, current, fields, initialField(fields, *d), func() []serverinstall.Problem { return serverinstall.ValidateDraft(*d) })
+	return configureFields(ctx, s, backend, d, current, fields, initialField(fields, *d), func() []serverinstall.Problem { return serverinstall.ValidateDraftFields(*d) })
 }
 
 func configureFields(ctx context.Context, s *session, backend serverinstall.Facade, d *serverinstall.Draft, current serverinstall.Result, fields []field, index int, validate func() []serverinstall.Problem) (serverinstall.Result, bool, error) {
