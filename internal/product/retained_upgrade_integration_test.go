@@ -38,9 +38,9 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// The old executable is taken from the immutable published v0.3.0 artifact,
+// The old executable is taken from the immutable published v0.7.0 artifact,
 // never rebuilt with current source or assigned an invented old version.
-const retainedBaselineBinarySHA256 = "1c2b05f5b2b5e4c96ee62ae758c2b5f9c504a5a85f02716e0d0b25677017587e"
+const retainedBaselineBinarySHA256 = "49c95f08aa561191f6aca5016d6b247b76d045c20f3142532001b17f0d57f6d5"
 
 type retainedSession struct {
 	cookie    *http.Cookie
@@ -181,14 +181,56 @@ func TestRetainedReleaseUpgrade(t *testing.T) {
 	beforeFiles := snapshotRetainedFiles(t, raw.Sites[:2])
 	assertRetainedFixturePopulated(t, ctx, dsns)
 
-	// Apply only the new release's explicit migration/check lifecycle to the old
-	// databases, roots, configured principals and untouched browser credentials.
+	// The authentic v0.8 candidate cannot start on the v0.7 editorial-v2
+	// schema. This must fail closed without changing old data: Native Update
+	// currently runs candidate check before migrate, so it cannot yet manage
+	// this transition. Manual explicit migration below is NOT Native Update.
+	resolved, err := config.ResolveRuntime(ctx, mapLookup(secrets))
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeMigration, err := BuildRuntime(resolved, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if checkErr := Check(ctx, beforeMigration); !errors.Is(checkErr, ErrEditorialUnavailable) {
+		t.Fatalf("expected v0.8 schema precheck rejection on v0.7 data, got: %v", checkErr)
+	}
+	if !reflect.DeepEqual(snapshotRetainedRows(t, ctx, dsns), beforeRows) {
+		t.Fatal("failed candidate precheck mutated retained database rows")
+	}
+	if !reflect.DeepEqual(snapshotRetainedFiles(t, raw.Sites[:2]), beforeFiles) {
+		t.Fatal("failed candidate precheck mutated retained site files")
+	}
+
+	// Explicit candidate migration runs only after old serving has quiesced,
+	// with no implicit downgrade, binary rollback or Native Update claim.
 	for range 2 {
 		if err = Migrate(ctx, config, mapLookup(secrets)); err != nil {
 			t.Fatalf("candidate retained migration: %v", err)
 		}
 	}
-	resolved, err := config.ResolveRuntime(ctx, mapLookup(secrets))
+	// The previous published executable cannot safely be restarted after the
+	// forward-only editorial-v3 migration. Exit failure is required, not treated
+	// as proof of a supported automatic database/binary rollback.
+	oldCheck := exec.CommandContext(ctx, binary, "check", "--config", configPath)
+	oldCheck.Env = env
+	oldOutput, oldErr := oldCheck.Output()
+	if oldErr == nil {
+		t.Fatal("published v0.7 executable unexpectedly accepted the v0.8 schema")
+	}
+	var exited *exec.ExitError
+	if !errors.As(oldErr, &exited) || ctx.Err() != nil {
+		t.Fatalf("old schema rejection was not a verified child exit: %v", oldErr)
+	}
+	// A generic child exit could hide an unrelated executable or environment
+	// failure. The authentic v0.7 CLI must report the editorial readiness
+	// category from its exact-prefix ledger validator, not just exit nonzero.
+	if exited.ExitCode() != 1 || len(oldOutput) != 0 || !retainedOldSchemaDiagnostic(exited.Stderr) {
+		t.Fatalf("published v0.7 check failed for an unexpected reason: exit=%d stdout_bytes=%d stderr=%s",
+			exited.ExitCode(), len(oldOutput), retainedDiagnostic(string(exited.Stderr), env))
+	}
+	resolved, err = config.ResolveRuntime(ctx, mapLookup(secrets))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -273,7 +315,7 @@ func TestRetainedReleaseUpgrade(t *testing.T) {
 		t.Fatal("control principal bypassed site authorization after upgrade")
 	}
 	stopNew()
-	t.Log("RIXA_RETAINED_UPGRADE baseline=v0.3.0 candidate_core=v0.5.0 candidate_audit=v0.2.0 sites=2 exact_rows_files_ledgers=true physical_targets_retained=true scoped_restart=true valid_sessions_retained=true revoked_foreign_denied=true control_dispatch=true")
+	t.Log("RIXA_RETAINED_UPGRADE baseline=v0.7.0 candidate_core=v0.5.0 candidate_audit=v0.2.0 sites=2 exact_rows_files_ledgers=true physical_targets_retained=true scoped_restart=true valid_sessions_retained=true revoked_foreign_denied=true control_dispatch=true")
 }
 
 func verifyRetainedBaseline(t *testing.T, path string) {
@@ -296,16 +338,16 @@ func verifyRetainedBaseline(t *testing.T, path string) {
 		AChrix     string            `json:"achrix"`
 		Components map[string]string `json:"achrix_components"`
 	}
-	if json.Unmarshal(output, &version) != nil || version.Rixa != "v0.3.0" || version.AChrix != "v0.4.0" {
+	if json.Unmarshal(output, &version) != nil || version.Rixa != "v0.7.0" || version.AChrix != "v0.4.0" {
 		t.Fatal("published baseline runtime identity mismatch")
 	}
 	expected := map[string]string{
 		"github.com/AChWorks/achrix":              "v0.4.0",
-		"github.com/AChWorks/achrix/admin":        "v0.1.0",
+		"github.com/AChWorks/achrix/admin":        "v0.2.0",
 		"github.com/AChWorks/achrix/audit":        "v0.1.0",
-		"github.com/AChWorks/achrix/identity":     "v0.1.0",
+		"github.com/AChWorks/achrix/identity":     "v0.2.0",
 		"github.com/AChWorks/achrix/installation": "v0.1.0",
-		"github.com/AChWorks/achrix/media":        "v0.1.0",
+		"github.com/AChWorks/achrix/media":        "v0.2.0",
 		"github.com/AChWorks/achrix/multisite":    "v0.1.0",
 	}
 	if !reflect.DeepEqual(version.Components, expected) {
@@ -698,7 +740,7 @@ func assertRetainedSnapshots(t *testing.T, ctx context.Context, dsns map[string]
 	// The candidate deliberately adds the Rixa-owned v3 site-grant schema.
 	// Keep the retained-proof strict: only the exact new empty site tables and
 	// exact verified appended migration ledger may differ from the published
-	// v0.3.0 fixture. Every older table/row, credential/session, control table,
+	// v0.7.0 fixture. Every older table/row, credential/session, control table,
 	// file and config must remain byte-for-byte unchanged.
 	after := snapshotRetainedRows(t, ctx, dsns)
 	want := make(map[string]string, len(rows))
@@ -774,6 +816,47 @@ func assertRetainedFixturePopulated(t *testing.T, ctx context.Context, dsns map[
 			}
 		}
 		_ = conn.Close(ctx)
+	}
+}
+
+// The published v0.7 CLI emits this stable, scoped readiness category after
+// encountering the v3 editorial ledger. Informational JSON startup logs may
+// precede it; any other CLI failure or trailing diagnostic must not pass.
+func retainedOldSchemaDiagnostic(stderr []byte) bool {
+	const expected = "rixa: site site-a editorial: editorial unavailable"
+	lines := strings.Split(strings.TrimSpace(string(stderr)), "\n")
+	found := false
+	for i, line := range lines {
+		if strings.HasPrefix(line, "rixa: ") {
+			if found || i != len(lines)-1 || line != expected {
+				return false
+			}
+			found = true
+		}
+	}
+	return found
+}
+
+func TestRetainedOldSchemaDiagnostic(t *testing.T) {
+	const expected = "rixa: site site-a editorial: editorial unavailable"
+	cases := []struct {
+		name, diagnostic string
+		want             bool
+	}{
+		{"expected", "{\"level\":\"INFO\"}\n" + expected + "\n", true},
+		{"unrelated process failure", "rixa: database connection refused\n", false},
+		{"other editorial failure", "rixa: site site-b editorial: editorial unavailable\n", false},
+		{"partial category", "rixa: site site-a editorial\n", false},
+		{"unrelated cli failure before expected", "rixa: invalid configuration\n" + expected + "\n", false},
+		{"expected not terminal", expected + "\nrixa: database connection refused\n", false},
+		{"diagnostic only inside log", "{\"message\":\"" + expected + "\"}\n", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := retainedOldSchemaDiagnostic([]byte(tc.diagnostic)); got != tc.want {
+				t.Fatalf("retained old-schema diagnostic match = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 
