@@ -35,6 +35,7 @@ func TestEditorialMigrationLedgerCompatibility(t *testing.T) {
 		assertEditorialLedger(t, ctx, dsn, []editorialLedgerRow{
 			{1, editorialMigrationIdentity},
 			{2, editorialMigration2Identity},
+			{3, editorialMigration3Identity},
 		})
 		assertEditorialReady(t, ctx, dsn)
 
@@ -44,6 +45,7 @@ func TestEditorialMigrationLedgerCompatibility(t *testing.T) {
 		assertEditorialLedger(t, ctx, dsn, []editorialLedgerRow{
 			{1, editorialMigrationIdentity},
 			{2, editorialMigration2Identity},
+			{3, editorialMigration3Identity},
 		})
 
 		conn := editorialMigrationConn(t, ctx, dsn)
@@ -60,7 +62,7 @@ func TestEditorialMigrationLedgerCompatibility(t *testing.T) {
 		}
 	})
 
-	t.Run("retained v1 state upgrades to v2 without data loss", func(t *testing.T) {
+	t.Run("retained v1 state upgrades to v3 without data loss", func(t *testing.T) {
 		dsn := createEditorialMigrationTestDatabase(t, ctx, adminDSN)
 		seedEditorialV1(t, ctx, dsn)
 
@@ -70,6 +72,7 @@ func TestEditorialMigrationLedgerCompatibility(t *testing.T) {
 		assertEditorialLedger(t, ctx, dsn, []editorialLedgerRow{
 			{1, editorialMigrationIdentity},
 			{2, editorialMigration2Identity},
+			{3, editorialMigration3Identity},
 		})
 		assertEditorialReady(t, ctx, dsn)
 
@@ -97,6 +100,40 @@ func TestEditorialMigrationLedgerCompatibility(t *testing.T) {
 		if err := migrateEditorial(ctx, dsn, "retained-site"); err != nil {
 			t.Fatalf("retained current rerun: %v", err)
 		}
+	})
+
+	t.Run("retained v2 schema upgrades to v3 and rejects grant-table tampering", func(t *testing.T) {
+		dsn := createEditorialMigrationTestDatabase(t, ctx, adminDSN)
+		seedEditorialV1(t, ctx, dsn)
+		conn := editorialMigrationConn(t, ctx, dsn)
+		if _, err := conn.Exec(ctx, editorialMigration2SQL); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := conn.Exec(ctx, "INSERT INTO rixa.schema_migrations(version,identity) VALUES(2,$1)", editorialMigration2Identity); err != nil {
+			t.Fatal(err)
+		}
+		if err := conn.Close(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		if err := migrateEditorial(ctx, dsn, "retained-v2"); err != nil {
+			t.Fatalf("v2 to v3: %v", err)
+		}
+		assertEditorialLedger(t, ctx, dsn, []editorialLedgerRow{
+			{1, editorialMigrationIdentity}, {2, editorialMigration2Identity}, {3, editorialMigration3Identity},
+		})
+		assertEditorialReady(t, ctx, dsn)
+		conn = editorialMigrationConn(t, ctx, dsn)
+		var text string
+		if err := conn.QueryRow(ctx, "SELECT title FROM rixa.content_revisions WHERE item_id=$1 AND revision=1", retainedEditorialItemID).Scan(&text); err != nil || text != "Retained title" {
+			t.Fatalf("lost v2 content: %q / %v", text, err)
+		}
+		if _, err := conn.Exec(ctx, "DROP TABLE rixa.site_grant_history"); err != nil {
+			t.Fatal(err)
+		}
+		if err := conn.Close(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		assertEditorialNotReady(t, ctx, dsn)
 	})
 
 	t.Run("wrong v1 identity fails before v2 effects", func(t *testing.T) {
@@ -132,33 +169,34 @@ func TestEditorialMigrationLedgerCompatibility(t *testing.T) {
 		assertEditorialNotReady(t, ctx, dsn)
 	})
 
-	t.Run("unknown future v3 fails migration and readiness", func(t *testing.T) {
+	t.Run("unknown future v4 fails migration and readiness", func(t *testing.T) {
 		dsn := createEditorialMigrationTestDatabase(t, ctx, adminDSN)
-		if err := migrateEditorial(ctx, dsn, "future-v3"); err != nil {
+		if err := migrateEditorial(ctx, dsn, "future-v4"); err != nil {
 			t.Fatal(err)
 		}
 		conn := editorialMigrationConn(t, ctx, dsn)
-		if _, err := conn.Exec(ctx, "INSERT INTO rixa.schema_migrations(version,identity) VALUES(3,'future-v3')"); err != nil {
+		if _, err := conn.Exec(ctx, "INSERT INTO rixa.schema_migrations(version,identity) VALUES(4,'future-v4')"); err != nil {
 			t.Fatal(err)
 		}
 		conn.Close(context.Background())
 
-		if err := migrateEditorial(ctx, dsn, "future-v3"); !errors.Is(err, ErrConfiguration) {
-			t.Fatalf("future v3 migration error = %v, want ErrConfiguration", err)
+		if err := migrateEditorial(ctx, dsn, "future-v4"); !errors.Is(err, ErrConfiguration) {
+			t.Fatalf("future v4 migration error = %v, want ErrConfiguration", err)
 		}
 		assertEditorialLedger(t, ctx, dsn, []editorialLedgerRow{
 			{1, editorialMigrationIdentity},
 			{2, editorialMigration2Identity},
-			{3, "future-v3"},
+			{3, editorialMigration3Identity},
+			{4, "future-v4"},
 		})
 		assertEditorialNotReady(t, ctx, dsn)
 	})
 
-	t.Run("gapped v1 v3 ledger fails before inserting v2", func(t *testing.T) {
+	t.Run("gapped v1 v4 ledger fails before inserting v2", func(t *testing.T) {
 		dsn := createEditorialMigrationTestDatabase(t, ctx, adminDSN)
 		seedEditorialV1(t, ctx, dsn)
 		conn := editorialMigrationConn(t, ctx, dsn)
-		if _, err := conn.Exec(ctx, "INSERT INTO rixa.schema_migrations(version,identity) VALUES(3,'future-v3')"); err != nil {
+		if _, err := conn.Exec(ctx, "INSERT INTO rixa.schema_migrations(version,identity) VALUES(4,'future-v4')"); err != nil {
 			t.Fatal(err)
 		}
 		conn.Close(context.Background())
@@ -168,7 +206,7 @@ func TestEditorialMigrationLedgerCompatibility(t *testing.T) {
 		}
 		assertEditorialLedger(t, ctx, dsn, []editorialLedgerRow{
 			{1, editorialMigrationIdentity},
-			{3, "future-v3"},
+			{4, "future-v4"},
 		})
 		assertPublicationVersionColumnAbsent(t, ctx, dsn)
 		assertEditorialNotReady(t, ctx, dsn)

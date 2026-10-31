@@ -17,8 +17,8 @@ func TestSitePolicyKeepsAdministratorsScopedToTheirApplication(t *testing.T) {
 	b := achrix.Principal(testSiteBAdmin)
 	operatorA := operatorPrincipal(achrix.Principal(testControlAdmin), "site-a")
 	operatorB := operatorPrincipal(achrix.Principal(testControlAdmin), "site-b")
-	policyA := sitePolicy(a, operatorA)
-	policyB := sitePolicy(b, operatorB)
+	policyA := sitePolicy(a, operatorA, nil)
+	policyB := sitePolicy(b, operatorB, nil)
 
 	if err := policyA.Authorize(context.Background(), a, media.List, media.LibraryTarget); err != nil {
 		t.Fatalf("site A admin denied its own library: %v", err)

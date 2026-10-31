@@ -30,6 +30,7 @@ type SiteRuntime struct {
 	Identity    *identity.Service
 	Media       *media.Service
 	Editorial   *EditorialService
+	Access      *SiteAccess
 	Publication *PublicationService
 	Handler     http.Handler
 
@@ -225,9 +226,10 @@ func buildSite(config Config, site ResolvedSite, adminPrincipal, operator achrix
 		return nil, fmt.Errorf("media: %w", err)
 	}
 	productModule := newSiteModule()
+	access := newSiteAccess(site.DSN, operator)
 	app, err := achrix.New(
 		achrix.Config{StartupTimeout: config.StartupTimeout, ShutdownTimeout: config.ShutdownTimeout, Logger: logger},
-		sitePolicy(adminPrincipal, operator),
+		sitePolicy(adminPrincipal, operator, access),
 		auditModule,
 		identityModule,
 		mediaModule,
@@ -244,6 +246,7 @@ func buildSite(config Config, site ResolvedSite, adminPrincipal, operator achrix
 	if err != nil {
 		return nil, fmt.Errorf("identity service: %w", err)
 	}
+	access.bind(app, identityService)
 	mediaService, err := media.NewService(app, mediaModule)
 	if err != nil {
 		return nil, fmt.Errorf("media service: %w", err)
@@ -305,6 +308,7 @@ func buildSite(config Config, site ResolvedSite, adminPrincipal, operator achrix
 		Identity:       identityService,
 		Media:          mediaService,
 		Editorial:      editorialService,
+		Access:         access,
 		Publication:    publicationService,
 		Handler:        siteRequestHandler(management, publicationService),
 		adminPrincipal: adminPrincipal,

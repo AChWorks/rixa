@@ -36,6 +36,7 @@ func (m *siteModule) Descriptor() achrix.Descriptor {
 			{ID: CapabilityAppearanceRead, Version: 1},
 			{ID: CapabilityAppearanceEdit, Version: 1},
 			{ID: CapabilityOperationRead, Version: 1},
+			{ID: CapabilitySiteGrantManage, Version: 1},
 		},
 		Requires: []achrix.Capability{{ID: "achrix.authorization", Version: 2}},
 	}

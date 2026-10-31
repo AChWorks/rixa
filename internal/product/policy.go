@@ -28,7 +28,7 @@ const (
 
 const routerPrincipal achrix.Principal = "rixa.router"
 
-func sitePolicy(siteAdmin, controlOperator achrix.Principal) achrix.Policy {
+func sitePolicy(siteAdmin, controlOperator achrix.Principal, access *SiteAccess) achrix.Policy {
 	return achrix.PolicyFunc(func(ctx context.Context, actor achrix.Principal, capability, resource string) error {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -42,11 +42,18 @@ func sitePolicy(siteAdmin, controlOperator achrix.Principal) achrix.Policy {
 		isAdmin := actor == siteAdmin
 		isOperator := controlOperator != "" && actor == controlOperator
 		if !isAdmin && !isOperator {
-			return achrix.ErrDenied
+			if access == nil {
+				return achrix.ErrDenied
+			}
+			return access.memberAuthorize(ctx, actor, capability, resource)
 		}
 		switch capability {
 		case audit.Append:
 			return nil
+		case CapabilitySiteGrantManage:
+			if resource == SiteGrantCollectionTarget {
+				return nil
+			}
 		case identity.AccountCreate:
 			if resource == "" {
 				return nil

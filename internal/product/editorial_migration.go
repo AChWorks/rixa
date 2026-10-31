@@ -14,10 +14,35 @@ import (
 const (
 	editorialMigrationIdentity        = "rixa-editorial-v1-20261006"
 	editorialMigration2Identity       = "rixa-editorial-v2-20261006"
+	editorialMigration3Identity       = "rixa-editorial-v3-20261031-site-grants"
 	editorialMigrationLock      int64 = 74199742106
 )
 
 const editorialMigration2SQL = `ALTER TABLE rixa.content_items ADD COLUMN publication_intent_version bigint NOT NULL DEFAULT 1 CHECK (publication_intent_version >= 1);`
+
+// This is a Rixa-owned grant/attribution schema, independent of AChrix Identity
+// account-table internals. Each site's existing separate PostgreSQL DB owns it.
+const editorialMigration3SQL = `
+CREATE TABLE rixa.site_grants (
+    account_id text NOT NULL CHECK (account_id ~ '^[A-Z2-7]{26}$'),
+    permission text NOT NULL CHECK (permission IN ('rixa.content.read','rixa.content.edit')),
+    allowed boolean NOT NULL,
+    revision bigint NOT NULL CHECK (revision >= 1),
+    updated_by text NOT NULL,
+    updated_at timestamptz NOT NULL,
+    PRIMARY KEY (account_id,permission)
+);
+CREATE TABLE rixa.site_grant_history (
+    account_id text NOT NULL CHECK (account_id ~ '^[A-Z2-7]{26}$'),
+    permission text NOT NULL CHECK (permission IN ('rixa.content.read','rixa.content.edit')),
+    allowed boolean NOT NULL,
+    revision bigint NOT NULL CHECK (revision >= 1),
+    changed_by text NOT NULL,
+    changed_at timestamptz NOT NULL,
+    PRIMARY KEY (account_id,permission,revision),
+    FOREIGN KEY (account_id,permission) REFERENCES rixa.site_grants(account_id,permission) ON DELETE RESTRICT
+);
+`
 
 type editorialMigration struct {
 	sql      string
@@ -28,6 +53,7 @@ func editorialMigrationPlan() []editorialMigration {
 	return []editorialMigration{
 		{sql: editorialMigrationSQL, identity: editorialMigrationIdentity},
 		{sql: editorialMigration2SQL, identity: editorialMigration2Identity},
+		{sql: editorialMigration3SQL, identity: editorialMigration3Identity},
 	}
 }
 
