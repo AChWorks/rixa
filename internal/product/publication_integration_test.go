@@ -339,6 +339,89 @@ func testStaticPublicationRuntime(t *testing.T, ctx context.Context, runtime *Ru
 		t.Fatalf("cleanup unsafe-public intent: %v", err)
 	}
 
+	// Control-origin publication uses the same retained site snapshot, but
+	// binds a reviewed content head/intent and one currently authorized site.
+	control := runtime.ControlService()
+	controlActor := runtime.Control.AdminPrincipal
+	selectedHead, err := control.HeadSiteContent(ctx, controlActor, "site-a", fixture.PostID)
+	if err != nil || selectedHead.Revision != 3 || selectedHead.PublicationIntentVersion != 6 || selectedHead.PublicationIntentRevision != 0 {
+		t.Fatalf("selected withdrawn head=%#v err=%v", selectedHead, err)
+	}
+	selectedState, err := control.SitePublicationState(ctx, controlActor, "site-a", fixture.PostID, ContentPost)
+	if err != nil || selectedState.Generation != fourth.Generation || selectedState.ActiveRevision != 0 {
+		t.Fatalf("selected withdrawn state=%#v err=%v", selectedState, err)
+	}
+	otherGeneration := siteB.Publication.State(fixture.PostID, ContentPost).Generation
+	if _, err = control.SitePublicationState(ctx, runtime.Sites["site-a"].adminPrincipal, "site-a", fixture.PostID, ContentPost); !errors.Is(err, achrix.ErrDenied) {
+		t.Fatalf("site administrator read control origin: %v", err)
+	}
+	selectedIntent, err := control.SetSitePublicationIntent(ctx, controlActor, "site-a", newOperationID(), fixture.PostID, selectedHead.Revision, selectedHead.PublicationIntentVersion, 3)
+	if err != nil || selectedIntent.PublicationIntentVersion != 7 || selectedIntent.PublicationIntentRevision != 3 {
+		t.Fatalf("delegated selected intent=%#v err=%v", selectedIntent, err)
+	}
+	selectedRequest := PublicationRequest{
+		OperationID: newOperationID(), ExpectedGeneration: fourth.Generation,
+		ContentID: fixture.PostID, Route: "/news/control/",
+		ExpectedHead: 3, ExpectedIntentVersion: 7, ExpectedIntentRevision: 3,
+	}
+	stale := selectedRequest
+	stale.OperationID = newOperationID()
+	stale.ExpectedHead = 2
+	if _, err = control.ApplySitePublication(ctx, controlActor, "site-a", stale); !errors.Is(err, ErrEditorialConflict) {
+		t.Fatalf("stale reviewed head admitted: %v", err)
+	}
+	stale = selectedRequest
+	stale.OperationID = newOperationID()
+	stale.ExpectedIntentVersion = 6
+	if _, err = control.ApplySitePublication(ctx, controlActor, "site-a", stale); !errors.Is(err, ErrEditorialConflict) {
+		t.Fatalf("stale reviewed intent admitted: %v", err)
+	}
+	if _, err = control.ApplySitePublication(ctx, runtime.Sites["site-a"].adminPrincipal, "site-a", selectedRequest); !errors.Is(err, achrix.ErrDenied) {
+		t.Fatalf("site admin obtained control publication grant: %v", err)
+	}
+	selectedResult, err := control.ApplySitePublication(ctx, controlActor, "site-a", selectedRequest)
+	if err != nil || !validEditorialID(selectedResult.Generation) || selectedResult.Route != "/news/control/" {
+		t.Fatalf("selected control publication=%#v err=%v", selectedResult, err)
+	}
+	selectedOperation, err := control.SitePublicationOperation(ctx, controlActor, "site-a", selectedRequest.OperationID)
+	if err != nil || selectedOperation.Generation != selectedResult.Generation || selectedOperation.ContentID != fixture.PostID {
+		t.Fatalf("selected control operation=%#v err=%v", selectedOperation, err)
+	}
+	selectedReplay, err := control.ApplySitePublication(ctx, controlActor, "site-a", selectedRequest)
+	if err != nil || selectedReplay.Generation != selectedResult.Generation {
+		t.Fatalf("lost selected acknowledgement replay=%#v err=%v", selectedReplay, err)
+	}
+	altered := selectedRequest
+	altered.Route = "/news/replaced/"
+	if _, err = control.ApplySitePublication(ctx, controlActor, "site-a", altered); !errors.Is(err, ErrEditorialConflict) {
+		t.Fatalf("same ID accepted changed reviewed request: %v", err)
+	}
+	if response := request("a.rixa.test:19443", "/news/control/"); response.Code != http.StatusOK {
+		t.Fatalf("selected public route not active: %d", response.Code)
+	}
+	if response := request("b.rixa.test:19443", "/news/control/"); response.Code != http.StatusNotFound {
+		t.Fatalf("selected control publication crossed sites: %d", response.Code)
+	}
+	selectedCleared, err := control.ClearSitePublicationIntent(ctx, controlActor, "site-a", newOperationID(), fixture.PostID, 3, 7)
+	if err != nil || selectedCleared.PublicationIntentVersion != 8 || selectedCleared.PublicationIntentRevision != 0 {
+		t.Fatalf("selected withdrawal intent=%#v err=%v", selectedCleared, err)
+	}
+	withdraw := PublicationRequest{
+		OperationID: newOperationID(), ExpectedGeneration: selectedResult.Generation,
+		ContentID: fixture.PostID, Route: "/news/control/",
+		ExpectedHead: 3, ExpectedIntentVersion: 8, ExpectedIntentRevision: 0,
+	}
+	withdrawnByControl, err := control.ApplySitePublication(ctx, controlActor, "site-a", withdraw)
+	if err != nil || withdrawnByControl.Generation == selectedResult.Generation {
+		t.Fatalf("selected control withdrawal=%#v err=%v", withdrawnByControl, err)
+	}
+	if response := request("a.rixa.test:19443", "/news/control/"); response.Code != http.StatusGone {
+		t.Fatalf("selected withdrawn route still public: %d", response.Code)
+	}
+	if siteB.Publication.State(fixture.PostID, ContentPost).Generation != otherGeneration {
+		t.Fatal("selected site A mutation changed site B's public generation")
+	}
+
 	resolvedSite := runtime.Config.Sites[0]
 	reloaded, err := newPublicationService(resolvedSite, site.App, site.Editorial, site.Media)
 	if err != nil {

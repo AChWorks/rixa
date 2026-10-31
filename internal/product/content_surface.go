@@ -18,9 +18,9 @@ import (
 
 type contentSurface struct {
 	service        draftService
-	intentService  *EditorialService
+	intentService  publicationIntentEditor
 	routes         contentRoutes
-	publication    *PublicationService
+	publication    publicationPresenter
 	contentLocales []localize.Locale
 }
 
@@ -28,7 +28,10 @@ func newContentSurface(service *EditorialService, publication *PublicationServic
 	if service == nil {
 		return shell.Surface{}, shell.ErrConfiguration
 	}
-	h := &contentSurface{service: service, intentService: service, publication: publication, contentLocales: append([]localize.Locale(nil), languages...)}
+	h := &contentSurface{service: service, intentService: service, contentLocales: append([]localize.Locale(nil), languages...)}
+	if publication != nil {
+		h.publication = directPublication{service: publication}
+	}
 	return shell.Surface{ID: "content", Title: shell.Text{Domain: "rixa", Key: "content"}, Capability: CapabilityContentList, Target: ContentCollectionTarget, Handler: h.serve}, nil
 }
 
@@ -158,7 +161,11 @@ func (h *contentSurface) edit(w http.ResponseWriter, r *http.Request, view shell
 	}
 	publication := PublicationState{}
 	if h.publication != nil {
-		publication = h.publication.State(revision.ID, revision.Kind)
+		publication, err = h.publication.State(r.Context(), view.Principal, revision.ID, revision.Kind)
+		if err != nil {
+			editorialHTTPFail(w, err, "")
+			return
+		}
 	}
 	if err = renderProductPage(view, "edit_content", shell.Page{Template: contentEditTemplate, Data: contentEditView{Locale: view.Localizer, Revision: revision, Routes: h.routes, DraftOnly: h.intentService == nil, History: history.Items, NextCursor: history.NextCursor, Body: body, Publication: publication, OperationID: newOperationID()}}); err != nil {
 		editorialHTTPFail(w, ErrEditorialUnavailable, "")
@@ -299,7 +306,8 @@ func (h *contentSurface) publicationIntent(w http.ResponseWriter, r *http.Reques
 		"id": revision.ID, "revision": strconv.FormatInt(revision.Revision, 10),
 		"publication_intent_revision": strconv.FormatInt(revision.PublicationIntentRevision, 10),
 		"publication_intent_version":  strconv.FormatInt(revision.PublicationIntentVersion, 10),
-		"operation_id":                body.OperationID,
+		"site_id":                     h.routes.SiteID, "origin": h.routes.Origin,
+		"operation_id": body.OperationID,
 	})
 }
 
@@ -326,6 +334,7 @@ func (h *contentSurface) operation(w http.ResponseWriter, r *http.Request, view 
 		return
 	}
 	editorialJSON(w, map[string]string{
+		"site_id": h.routes.SiteID, "origin": h.routes.Origin,
 		"operation_id": publication.ID, "kind": "publication.apply", "resource_id": publication.ContentID,
 		"result_generation": publication.Generation, "route": publication.Route,
 		"created_at": publication.CreatedAt.Format("2006-01-02T15:04:05.999999Z07:00"),
@@ -342,20 +351,48 @@ func (h *contentSurface) publish(w http.ResponseWriter, r *http.Request, view sh
 		ID                 string `json:"id"`
 		ExpectedGeneration string `json:"expected_generation"`
 		Route              string `json:"route"`
+		ExpectedHead       string `json:"expected_head"`
+		ExpectedVersion    string `json:"expected_publication_version"`
+		ExpectedIntent     string `json:"expected_intent_revision"`
 	}
 	if err := decodeEditorialJSON(w, r, &body); err != nil {
 		editorialHTTPFail(w, err, body.OperationID)
 		return
 	}
-	result, err := h.publication.Apply(r.Context(), view.Principal, PublicationRequest{
+	request := PublicationRequest{
 		OperationID: body.OperationID, ExpectedGeneration: body.ExpectedGeneration,
 		ContentID: body.ID, Route: body.Route,
-	})
+	}
+	if h.routes.SiteID != "" {
+		// Selected-site public effects require an exact reviewed editorial
+		// head and intent; a bare, unreviewed site-wide apply is rejected.
+		var e error
+		request.ExpectedHead, e = parseRevision(body.ExpectedHead)
+		if e != nil {
+			editorialHTTPFail(w, ErrEditorialInvalid, body.OperationID)
+			return
+		}
+		request.ExpectedIntentVersion, e = parseRevision(body.ExpectedVersion)
+		if e != nil {
+			editorialHTTPFail(w, ErrEditorialInvalid, body.OperationID)
+			return
+		}
+		request.ExpectedIntentRevision, e = parseIntentRevision(body.ExpectedIntent)
+		if e != nil {
+			editorialHTTPFail(w, ErrEditorialInvalid, body.OperationID)
+			return
+		}
+	} else if body.ExpectedHead != "" || body.ExpectedVersion != "" || body.ExpectedIntent != "" {
+		editorialHTTPFail(w, ErrEditorialInvalid, body.OperationID)
+		return
+	}
+	result, err := h.publication.Apply(r.Context(), view.Principal, request)
 	if err != nil {
 		editorialHTTPFail(w, err, body.OperationID)
 		return
 	}
 	editorialJSON(w, map[string]string{
+		"site_id": h.routes.SiteID, "origin": h.routes.Origin,
 		"operation_id": body.OperationID, "generation": result.Generation,
 		"id": result.ContentID, "route": result.Route,
 	})
@@ -387,6 +424,15 @@ func parseRevision(value string) (int64, error) {
 	}
 	return v, nil
 }
+
+// A cleared publication intent is exactly zero, unlike a saved head revision.
+func parseIntentRevision(value string) (int64, error) {
+	if value == "0" {
+		return 0, nil
+	}
+	return parseRevision(value)
+}
+
 func editorialJSON(w http.ResponseWriter, value any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_ = json.NewEncoder(w).Encode(value)
@@ -429,7 +475,8 @@ var contentEditTemplate = template.Must(template.New("content-edit").Parse(`{{de
 <fieldset><legend>{{.Locale.Text "rixa" "formatting" nil}}</legend><div class="editor-toolbar" role="toolbar"><button type="button" data-wrap="strong" aria-label="{{.Locale.Text "rixa" "bold" nil}}"><strong>B</strong></button><button type="button" data-wrap="em" aria-label="{{.Locale.Text "rixa" "italic" nil}}"><em>I</em></button><button type="button" data-block="p" aria-label="{{.Locale.Text "rixa" "paragraph" nil}}">P</button><button type="button" data-block="h2" aria-label="{{.Locale.Text "rixa" "heading_2" nil}}">H2</button><button type="button" data-block="h3" aria-label="{{.Locale.Text "rixa" "heading_3" nil}}">H3</button></div><label>{{.Locale.Text "rixa" "link_url" nil}} <input data-link-url dir="ltr"></label><button type="button" data-add-link>{{.Locale.Text "rixa" "link_selection" nil}}</button><label>{{.Locale.Text "rixa" "media_id" nil}} <input data-media-id dir="ltr" maxlength="26" pattern="[A-Z2-7]{26}"></label><label>{{.Locale.Text "rixa" "media_description" nil}} <input data-media-caption maxlength="300" dir="auto"></label><button type="button" data-add-media>{{.Locale.Text "rixa" "insert_media_reference" nil}}</button></fieldset>
 <div data-editor contenteditable="true" role="textbox" aria-multiline="true" aria-label="{{.Locale.Text "rixa" "content_body" nil}}" dir="auto">{{.Body}}</div><button type="submit">{{.Locale.Text "rixa" "save_revision" nil}}</button></form>
 <p><a data-preview-link href="{{.Routes.Base}}/preview/{{.Revision.ID}}/{{.Revision.Revision}}">{{.Locale.Text "rixa" "preview_revision" nil}}</a></p>
-{{if not .DraftOnly}}<section><h2>{{.Locale.Text "rixa" "publication_intent" nil}}</h2><p>{{.Locale.Text "rixa" "publication_intent_notice" nil}}</p><form data-admin-form data-publication-form action="{{.Routes.Base}}/publication-intent" method="post"><input type="hidden" name="operation_id" value="{{.OperationID}}" data-operation-field><input type="hidden" name="id" value="{{.Revision.ID}}"><input type="hidden" name="expected_head" value="{{.Revision.Revision}}" data-head-field><input type="hidden" name="expected_publication_version" value="{{.Revision.PublicationIntentVersion}}" data-publication-version-field><label>{{.Locale.Text "rixa" "revision" nil}} <input name="revision" value="{{.Revision.Revision}}" data-revision-field inputmode="numeric" pattern="[0-9]+" required></label><button type="submit">{{.Locale.Text "rixa" "set_publication_intent" nil}}</button></form>{{if .Revision.PublicationIntentRevision}}<p>{{.Locale.Text "rixa" "marked_revision" nil}}: <output data-publication-intent-output>{{.Revision.PublicationIntentRevision}}</output></p><form data-admin-form data-publication-clear action="{{.Routes.Base}}/publication-intent-clear" method="post"><input type="hidden" name="operation_id" value="{{.OperationID}}" data-operation-field><input type="hidden" name="id" value="{{.Revision.ID}}"><input type="hidden" name="expected_head" value="{{.Revision.Revision}}" data-head-field><input type="hidden" name="expected_publication_version" value="{{.Revision.PublicationIntentVersion}}" data-publication-version-field><input type="hidden" name="revision" value="{{.Revision.Revision}}"><button type="submit">{{.Locale.Text "rixa" "clear_publication_intent" nil}}</button></form>{{end}}</section>
+{{if not .DraftOnly}}<section><h2>{{.Locale.Text "rixa" "publication_intent" nil}}</h2><p>{{.Locale.Text "rixa" "publication_intent_notice" nil}}</p><form data-admin-form data-publication-form action="{{.Routes.Base}}/publication-intent" method="post"><input type="hidden" name="operation_id" value="{{.OperationID}}" data-operation-field><input type="hidden" name="id" value="{{.Revision.ID}}"><input type="hidden" name="expected_head" value="{{.Revision.Revision}}" data-head-field><input type="hidden" name="expected_publication_version" value="{{.Revision.PublicationIntentVersion}}" data-publication-version-field><label>{{.Locale.Text "rixa" "revision" nil}} <input name="revision" value="{{.Revision.Revision}}" data-revision-field inputmode="numeric" pattern="[0-9]+" required></label><button type="submit">{{.Locale.Text "rixa" "set_publication_intent" nil}}</button></form>{{if .Revision.PublicationIntentRevision}}<p>{{.Locale.Text "rixa" "marked_revision" nil}}: <output data-publication-intent-output>{{.Revision.PublicationIntentRevision}}</output></p>{{end}}
+{{if or .Revision.PublicationIntentRevision .Routes.SiteID}}<form data-admin-form data-publication-clear {{if not .Revision.PublicationIntentRevision}}hidden{{end}} action="{{.Routes.Base}}/publication-intent-clear" method="post"><input type="hidden" name="operation_id" value="{{.OperationID}}" data-operation-field><input type="hidden" name="id" value="{{.Revision.ID}}"><input type="hidden" name="expected_head" value="{{.Revision.Revision}}" data-head-field><input type="hidden" name="expected_publication_version" value="{{.Revision.PublicationIntentVersion}}" data-publication-version-field><input type="hidden" name="revision" value="{{.Revision.Revision}}"><button type="submit">{{.Locale.Text "rixa" "clear_publication_intent" nil}}</button></form>{{end}}</section>
 {{end}}{{if .Publication.Enabled}}<section><h2>{{.Locale.Text "rixa" "public_publication" nil}}</h2>
 <p>{{.Locale.Text "rixa" "publication_apply_notice" nil}}</p>
 <p>{{.Locale.Text "rixa" "active_generation" nil}}: <output data-publication-generation-output>{{if .Publication.Generation}}{{.Publication.Generation}}{{else}}—{{end}}</output>{{if .Publication.ActiveRevision}} · {{.Locale.Text "rixa" "public_revision" nil}} {{.Publication.ActiveRevision}}{{end}}</p>
@@ -437,9 +484,19 @@ var contentEditTemplate = template.Must(template.New("content-edit").Parse(`{{de
 <input type="hidden" name="operation_id" value="{{.OperationID}}" data-operation-field>
 <input type="hidden" name="id" value="{{.Revision.ID}}">
 <input type="hidden" name="expected_generation" value="{{.Publication.Generation}}" data-publication-generation>
+{{if .Routes.SiteID}}<input type="hidden" name="expected_head" value="{{.Revision.Revision}}" data-head-field><input type="hidden" name="expected_publication_version" value="{{.Revision.PublicationIntentVersion}}" data-publication-version-field><input type="hidden" name="expected_intent_revision" value="{{.Revision.PublicationIntentRevision}}" data-intent-revision-field>
+<p>{{.Locale.Text "rixa" "publication_site_scope_notice" nil}}</p>
 <label>{{.Locale.Text "rixa" "public_route" nil}} <input name="route" value="{{.Publication.DesiredRoute}}" maxlength="512" dir="ltr" required></label>
+<fieldset><legend>{{.Locale.Text "rixa" "publication_review" nil}}</legend>
+<p>{{.Locale.Text "rixa" "selected_site" nil}}: <bdi dir="ltr">{{.Routes.SiteID}}</bdi> · <bdi dir="ltr">{{.Routes.Origin}}</bdi></p>
+<p>{{.Locale.Text "rixa" "revision" nil}}: <output data-review-head>{{.Revision.Revision}}</output> · {{.Locale.Text "rixa" "marked_revision" nil}}: <output data-review-intent-output>{{if .Revision.PublicationIntentRevision}}{{.Revision.PublicationIntentRevision}}{{else}}—{{end}}</output></p>
+<p>{{.Locale.Text "rixa" "active_generation" nil}}: <bdi data-review-generation dir="ltr">{{if .Publication.Generation}}{{.Publication.Generation}}{{else}}—{{end}}</bdi></p>
+<label>{{.Locale.Text "rixa" "publication_confirm" nil}} <input type="checkbox" data-confirm required></label>
+</fieldset>{{else}}
+<label>{{.Locale.Text "rixa" "public_route" nil}} <input name="route" value="{{.Publication.DesiredRoute}}" maxlength="512" dir="ltr" required></label>
+{{end}}
 <button type="submit">{{.Locale.Text "rixa" "apply_publication" nil}}</button>
-</form></section>{{end}}
+</form>{{if .Routes.SiteID}}<p data-publication-result hidden><span>{{.Locale.Text "rixa" "publication_result" nil}}</span> <a href="{{.Routes.Origin}}" target="_blank" rel="noopener">{{.Locale.Text "rixa" "open_public_site" nil}}</a></p>{{end}}</section>{{end}}
 <section><h2>{{.Locale.Text "rixa" "saved_revisions" nil}}</h2><ol>{{range .History}}<li><a href="{{$.Routes.Base}}/preview/{{$.Revision.ID}}/{{.Revision}}">{{$.Locale.Text "rixa" "revision" nil}} {{.Revision}}</a> — <bdi dir="auto">{{.Title}}</bdi> · <code>{{.Actor}}</code></li>{{end}}</ol>{{if .NextCursor}}<a href="{{.Routes.Base}}/history/{{.Revision.ID}}/before/{{.NextCursor}}">{{.Locale.Text "rixa" "older_revisions" nil}}</a>{{end}}</section>
 {{template "draft-recovery" .}}<section><h2>{{.Locale.Text "rixa" "inspect_mutation_outcome" nil}}</h2><form data-admin-form data-read-only data-operation-lookup action="{{.Routes.Base}}/operation" method="post"><label>{{.Locale.Text "rixa" "operation_id" nil}} <input name="operation_id" data-operation-lookup-input dir="ltr" maxlength="36" required></label><button type="submit">{{.Locale.Text "rixa" "inspect" nil}}</button></form></section></div>{{end}}` + contentScopeTemplates))
 
@@ -628,6 +685,10 @@ const contentEditorPrimitivesJS = `
     const preview = document.querySelector("[data-preview-link]");
     const id = save.querySelector("input[name=id]")?.value;
     if (preview && id) preview.href = base + "/preview/" + id + "/" + revision;
+    const reviewed = document.querySelector("[data-review-head]");
+    if (reviewed) reviewed.textContent = revision;
+    const confirmation = document.querySelector("[data-publication-apply] [data-confirm]");
+    if (confirmation) confirmation.checked = false;
     rotate(save);
     sync();
   });
@@ -637,8 +698,20 @@ const contentEditorPrimitivesJS = `
     const version = event.detail?.publication_intent_version;
     const output = document.querySelector("[data-publication-intent-output]");
     if (output && value !== undefined) output.textContent = value === "0" ? "—" : value;
+    const review = document.querySelector("[data-review-intent-output]");
+    if (review && value !== undefined) review.textContent = value === "0" ? "—" : value;
+    if (value !== undefined) document.querySelectorAll("[data-intent-revision-field]").forEach(field => field.value = value);
     if (version) document.querySelectorAll("[data-publication-version-field]").forEach(field => field.value = version);
+    const clear = document.querySelector("[data-publication-clear]");
+    if (clear && value !== undefined) clear.hidden = value === "0";
+    const confirmation = document.querySelector("[data-publication-apply] [data-confirm]");
+    if (confirmation) confirmation.checked = false;
     rotate(form);
+  }));
+
+  document.querySelectorAll("[data-publication-apply] input[name=route]").forEach(input => input.addEventListener("input", () => {
+    const confirmation = input.form.querySelector("[data-confirm]");
+    if (confirmation) confirmation.checked = false;
   }));
 
   document.querySelectorAll("[data-publication-apply]").forEach(form => form.addEventListener("admin:success", event => {
@@ -647,6 +720,10 @@ const contentEditorPrimitivesJS = `
     document.querySelectorAll("[data-publication-generation]").forEach(field => field.value = generation);
     const output = document.querySelector("[data-publication-generation-output]");
     if (output) output.textContent = generation;
+    const reviewGeneration = document.querySelector("[data-review-generation]");
+    if (reviewGeneration) reviewGeneration.textContent = generation;
+    const result = document.querySelector("[data-publication-result]");
+    if (result && matchesScope(event.detail)) result.hidden = false;
     rotate(form);
   }));
 

@@ -378,6 +378,21 @@
     "content_page_count": {
       "one": "Entries shown on this page: {Count}",
       "other": "Entries shown on this page: {Count}"
+    },
+    "publication_site_scope_notice": {
+      "other": "This applies a new public generation for the entire selected site, not just this article. Other marked revisions can become public and cleared intents can withdraw pages. Saving a draft never publishes."
+    },
+    "publication_review": {
+      "other": "Review the selected site's public effect before applying"
+    },
+    "publication_confirm": {
+      "other": "I understand this changes the selected site's entire public generation."
+    },
+    "publication_result": {
+      "other": "The site's public generation was updated."
+    },
+    "open_public_site": {
+      "other": "Open public site"
     }
   }
 }
