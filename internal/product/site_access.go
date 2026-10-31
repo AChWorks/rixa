@@ -119,7 +119,7 @@ func (s *SiteAccess) memberAuthorize(ctx context.Context, actor achrix.Principal
 		return ErrSiteGrantUnavailable
 	}
 	account, err := s.accounts.Account(ctx, s.operator, string(actor))
-	if errors.Is(err, identity.ErrNotFound) {
+	if errors.Is(err, identity.ErrNotFound) || errors.Is(err, identity.ErrConflict) {
 		return achrix.ErrDenied
 	}
 	if err != nil {
@@ -195,7 +195,7 @@ func (s *SiteAccess) Set(ctx context.Context, actor achrix.Principal, accountID,
 		return SiteGrant{}, err
 	}
 	account, err := s.accounts.Account(ctx, s.operator, accountID)
-	if errors.Is(err, identity.ErrNotFound) {
+	if errors.Is(err, identity.ErrNotFound) || errors.Is(err, identity.ErrConflict) {
 		return SiteGrant{}, ErrSiteGrantInvalid
 	}
 	if err != nil {
