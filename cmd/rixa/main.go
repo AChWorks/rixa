@@ -43,12 +43,20 @@ func run(args []string) error {
 		return json.NewEncoder(os.Stdout).Encode(map[string]any{"rixa": product.Version, "achrix": achrix.Version(), "achrix_components": product.FoundationVersions()})
 	case "migrate":
 		fs, configPath := commandFlags("migrate", args[1:])
+		inspect := fs.Bool("inspect", false, "read-only Rixa editorial migration ledger inspection; never authorizes Native Update")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
 		config, err := product.LoadConfig(*configPath)
 		if err != nil {
 			return err
+		}
+		if *inspect {
+			result, err := product.InspectEditorialMigrations(context.Background(), config, os.LookupEnv)
+			if err != nil {
+				return err
+			}
+			return json.NewEncoder(os.Stdout).Encode(result)
 		}
 		return product.Migrate(context.Background(), config, os.LookupEnv)
 	case "bootstrap-admin":
