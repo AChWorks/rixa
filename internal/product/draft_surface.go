@@ -31,6 +31,22 @@ type draftService interface {
 	Appearance(context.Context, achrix.Principal) (Appearance, error)
 }
 
+// siteBrowserDraftService routes trusted site-origin browser recovery to the
+// exact authenticated member's own operation. The configured site administrator
+// retains existing collection-wide inspection; Control selected-site recovery
+// uses selectedDraftService and its separate trusted operator policy.
+type siteBrowserDraftService struct {
+	*EditorialService
+	siteAdmin achrix.Principal
+}
+
+func (s siteBrowserDraftService) Operation(ctx context.Context, actor achrix.Principal, operationID string) (EditorialOperation, error) {
+	if actor == s.siteAdmin {
+		return s.EditorialService.Operation(ctx, actor, operationID)
+	}
+	return s.EditorialService.OwnOperation(ctx, actor, operationID)
+}
+
 type controlDraftManager interface {
 	ListSiteContentPage(context.Context, achrix.Principal, string, string, int) (ContentListPage, error)
 	HeadSiteContent(context.Context, achrix.Principal, string, string) (ContentRevision, error)

@@ -3,8 +3,12 @@
 package product
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -233,6 +237,30 @@ func TestSiteUserGrantsRealAccountsAndSiteIsolation(t *testing.T) {
 		t.Fatalf("different editor inspected another user's save: %v", err)
 	}
 
+	// Browser ingress must derive the real site principal from Identity's
+	// authenticated session. The same site-content route retains the existing
+	// administrator's global receipt lookup, but never lends it to a member.
+	writerSession := loginSiteReceiptBrowser(t, a, "drafter", "Test-Drafter-Password-2026!")
+	readerSession := loginSiteReceiptBrowser(t, a, "reader", "Test-Reader-Password-2026!")
+	adminSession := loginSiteReceiptBrowser(t, a, "site-a-admin", testSiteAPassword)
+	status, browserReceipt := inspectSiteReceiptBrowser(t, a, writerSession, saveOp)
+	if status != http.StatusOK || browserReceipt["operation_id"] != saveOp || browserReceipt["resource_id"] != draft.ID || browserReceipt["kind"] != "content.save" || browserReceipt["result_revision"] != "2" {
+		t.Fatalf("writer browser cannot recover its exact saved receipt: status=%d receipt=%v", status, browserReceipt)
+	}
+	status, _ = inspectSiteReceiptBrowser(t, a, readerSession, saveOp)
+	if status != http.StatusForbidden {
+		t.Fatalf("read-only browser inspected a writer's receipt: status=%d", status)
+	}
+	status, browserReceipt = inspectSiteReceiptBrowser(t, a, adminSession, editOnlyOp)
+	if status != http.StatusOK || browserReceipt["resource_id"] != editOnlyDraft.ID {
+		t.Fatalf("site admin lost collection-wide receipt inspection: status=%d receipt=%v", status, browserReceipt)
+	}
+	foreignSession := loginSiteReceiptBrowser(t, b, "foreign", "Test-Foreign-Password-2026!")
+	status, _ = inspectSiteReceiptBrowser(t, b, foreignSession, saveOp)
+	if status != http.StatusNotFound {
+		t.Fatalf("foreign site's browser inspected a site-A operation: status=%d", status)
+	}
+
 	editGrant, err := a.Access.Grant(ctx, siteAdmin, drafter.ID, CapabilityContentEdit)
 	if err != nil {
 		t.Fatal(err)
@@ -249,6 +277,10 @@ func TestSiteUserGrantsRealAccountsAndSiteIsolation(t *testing.T) {
 	}
 	if _, err := a.Editorial.OwnOperation(ctx, achrix.Principal(drafter.ID), saveOp); !errors.Is(err, achrix.ErrDenied) {
 		t.Fatalf("revoked edit still reads its old operation receipt: %v", err)
+	}
+	status, _ = inspectSiteReceiptBrowser(t, a, writerSession, saveOp)
+	if status != http.StatusForbidden {
+		t.Fatalf("revoked writer's original browser session still sees old receipt: status=%d", status)
 	}
 	if _, err := a.Access.Set(ctx, siteAdmin, drafter.ID, CapabilityContentEdit, true, 1); !errors.Is(err, ErrSiteGrantConflict) {
 		t.Fatalf("stale revision reinstated edit: %v", err)
@@ -363,4 +395,69 @@ func TestSiteUserGrantsRealAccountsAndSiteIsolation(t *testing.T) {
 	if err := conn.QueryRow(ctx, "SELECT count(*) FROM rixa.site_grant_history WHERE account_id=$1 AND permission=$2", reader.ID, CapabilityContentRead).Scan(&count); err != nil || count != 3 {
 		t.Fatalf("concurrent history was not atomic: count=%d err=%v", count, err)
 	}
+}
+
+// siteReceiptSession is used only by this real-Identity, real-PostgreSQL browser
+// integration proof. Session credentials must never be printed in assertions.
+type siteReceiptSession struct {
+	cookie *http.Cookie
+	csrf   string
+}
+
+func siteReceiptRequest(t *testing.T, site *SiteRuntime, path string, session *siteReceiptSession, body any) *httptest.ResponseRecorder {
+	t.Helper()
+	var payload []byte
+	if body != nil {
+		var err error
+		payload, err = json.Marshal(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	request := httptest.NewRequest(http.MethodPost, site.Origin+path, bytes.NewReader(payload))
+	request.Header.Set("Origin", site.Origin)
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-Identity-Request", "1")
+	if session != nil {
+		request.AddCookie(session.cookie)
+		request.Header.Set("X-CSRF-Token", session.csrf)
+	}
+	response := httptest.NewRecorder()
+	site.Handler.ServeHTTP(response, request)
+	return response
+}
+
+func loginSiteReceiptBrowser(t *testing.T, site *SiteRuntime, login, password string) siteReceiptSession {
+	t.Helper()
+	response := siteReceiptRequest(t, site, "/auth/login", nil, map[string]string{"login": login, "password": password})
+	if response.Code != http.StatusOK {
+		t.Fatalf("real site Identity login rejected: status=%d", response.Code)
+	}
+	var result struct {
+		Principal string `json:"principal"`
+		CSRF      string `json:"csrf"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil || result.Principal == "" || result.CSRF == "" {
+		t.Fatalf("real site Identity login result invalid: %v", err)
+	}
+	for _, cookie := range response.Result().Cookies() {
+		if cookie.Name == identity.CookieName {
+			return siteReceiptSession{cookie: cookie, csrf: result.CSRF}
+		}
+	}
+	t.Fatal("real site Identity login returned no session cookie")
+	return siteReceiptSession{}
+}
+
+func inspectSiteReceiptBrowser(t *testing.T, site *SiteRuntime, session siteReceiptSession, operationID string) (int, map[string]string) {
+	t.Helper()
+	response := siteReceiptRequest(t, site, "/admin/content/operation", &session, map[string]string{"operation_id": operationID})
+	if response.Code != http.StatusOK {
+		return response.Code, nil
+	}
+	var result map[string]string
+	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+		t.Fatalf("site browser operation receipt JSON invalid: %v", err)
+	}
+	return response.Code, result
 }

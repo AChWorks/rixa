@@ -279,7 +279,7 @@ func buildSite(config Config, site ResolvedSite, adminPrincipal, operator achrix
 	if err != nil {
 		return nil, fmt.Errorf("publication service: %w", err)
 	}
-	contentSurface, err := newContentSurface(editorialService, publicationService, contentLocales(catalog)...)
+	contentSurface, err := newContentSurface(editorialService, publicationService, adminPrincipal, contentLocales(catalog)...)
 	if err != nil {
 		return nil, fmt.Errorf("content surface: %w", err)
 	}

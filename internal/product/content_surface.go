@@ -24,11 +24,15 @@ type contentSurface struct {
 	contentLocales []localize.Locale
 }
 
-func newContentSurface(service *EditorialService, publication *PublicationService, languages ...localize.Locale) (shell.Surface, error) {
-	if service == nil {
+func newContentSurface(service *EditorialService, publication *PublicationService, siteAdmin achrix.Principal, languages ...localize.Locale) (shell.Surface, error) {
+	if service == nil || siteAdmin == "" {
 		return shell.Surface{}, shell.ErrConfiguration
 	}
-	h := &contentSurface{service: service, intentService: service, contentLocales: append([]localize.Locale(nil), languages...)}
+	h := &contentSurface{
+		service:        siteBrowserDraftService{EditorialService: service, siteAdmin: siteAdmin},
+		intentService:  service,
+		contentLocales: append([]localize.Locale(nil), languages...),
+	}
 	if publication != nil {
 		h.publication = directPublication{service: publication}
 	}
