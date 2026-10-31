@@ -4,7 +4,13 @@ package product
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"testing"
@@ -36,7 +42,7 @@ func TestSiteUserGrantsRealAccountsAndSiteIsolation(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	cert, key, _ := writeTestCertificate(t, dir, []string{"control.grant.test", "a.grant.test", "b.grant.test"})
+	cert, key, roots := writeTestCertificate(t, dir, []string{"control.grant.test", "a.grant.test", "b.grant.test"})
 	config := Config{
 		Listen:   "127.0.0.1:19443",
 		TLS:      TLSConfig{CertFile: cert, KeyFile: key},
@@ -233,6 +239,36 @@ func TestSiteUserGrantsRealAccountsAndSiteIsolation(t *testing.T) {
 		t.Fatalf("different editor inspected another user's save: %v", err)
 	}
 
+	// Browser ingress must derive the real site principal from Identity's
+	// authenticated session over actual HTTPS. The site admin's global lookup
+	// remains intact, but ordinary members can inspect only their own drafts.
+	browserA := newSiteReceiptHTTPS(t, ctx, a, cert, key, roots)
+	writerSession := browserA.login("a.grant.test", "drafter", "Test-Drafter-Password-2026!")
+	readerSession := browserA.login("a.grant.test", "reader", "Test-Reader-Password-2026!")
+	adminSession := browserA.login("a.grant.test", "site-a-admin", testSiteAPassword)
+	var browserReceipt map[string]string
+	if err := json.Unmarshal(browserA.post("a.grant.test", "/admin/content/operation", writerSession,
+		map[string]string{"operation_id": saveOp}, http.StatusOK), &browserReceipt); err != nil {
+		t.Fatalf("writer browser receipt JSON: %v", err)
+	}
+	if browserReceipt["operation_id"] != saveOp || browserReceipt["resource_id"] != draft.ID ||
+		browserReceipt["kind"] != "content.save" || browserReceipt["result_revision"] != "2" {
+		t.Fatalf("writer browser did not recover the exact saved receipt: %#v", browserReceipt)
+	}
+	browserA.post("a.grant.test", "/admin/content/operation", readerSession,
+		map[string]string{"operation_id": saveOp}, http.StatusForbidden)
+	if err := json.Unmarshal(browserA.post("a.grant.test", "/admin/content/operation", adminSession,
+		map[string]string{"operation_id": editOnlyOp}, http.StatusOK), &browserReceipt); err != nil {
+		t.Fatalf("site-admin browser receipt JSON: %v", err)
+	}
+	if browserReceipt["resource_id"] != editOnlyDraft.ID {
+		t.Fatalf("site admin lost collection-wide receipt inspection: %#v", browserReceipt)
+	}
+	browserB := newSiteReceiptHTTPS(t, ctx, b, cert, key, roots)
+	foreignSession := browserB.login("b.grant.test", "foreign", "Test-Foreign-Password-2026!")
+	browserB.post("b.grant.test", "/admin/content/operation", foreignSession,
+		map[string]string{"operation_id": saveOp}, http.StatusNotFound)
+
 	editGrant, err := a.Access.Grant(ctx, siteAdmin, drafter.ID, CapabilityContentEdit)
 	if err != nil {
 		t.Fatal(err)
@@ -250,6 +286,8 @@ func TestSiteUserGrantsRealAccountsAndSiteIsolation(t *testing.T) {
 	if _, err := a.Editorial.OwnOperation(ctx, achrix.Principal(drafter.ID), saveOp); !errors.Is(err, achrix.ErrDenied) {
 		t.Fatalf("revoked edit still reads its old operation receipt: %v", err)
 	}
+	browserA.post("a.grant.test", "/admin/content/operation", writerSession,
+		map[string]string{"operation_id": saveOp}, http.StatusForbidden)
 	if _, err := a.Access.Set(ctx, siteAdmin, drafter.ID, CapabilityContentEdit, true, 1); !errors.Is(err, ErrSiteGrantConflict) {
 		t.Fatalf("stale revision reinstated edit: %v", err)
 	}
@@ -363,4 +401,25 @@ func TestSiteUserGrantsRealAccountsAndSiteIsolation(t *testing.T) {
 	if err := conn.QueryRow(ctx, "SELECT count(*) FROM rixa.site_grant_history WHERE account_id=$1 AND permission=$2", reader.ID, CapabilityContentRead).Scan(&count); err != nil || count != 3 {
 		t.Fatalf("concurrent history was not atomic: count=%d err=%v", count, err)
 	}
+}
+
+// Actual TLS-backed response writers are required: Identity's HTTP surface
+// applies a socket read deadline and deliberately refuses a Recorder-only
+// request. Preserve the configured exact Host/SNI and certificate trust while
+// forwarding only the test's transport connection to the disposable listener.
+func newSiteReceiptHTTPS(t *testing.T, ctx context.Context, site *SiteRuntime, certFile, keyFile string, roots *x509.CertPool) retainedHTTP {
+	t.Helper()
+	pair, err := tls.LoadX509KeyPair(certFile, keyFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	origin, err := url.Parse(site.Origin)
+	if err != nil || origin.Scheme != "https" || origin.Hostname() == "" || origin.Port() == "" {
+		t.Fatal("site test origin is not an exact HTTPS origin with port")
+	}
+	server := httptest.NewUnstartedServer(site.Handler)
+	server.TLS = &tls.Config{Certificates: []tls.Certificate{pair}, MinVersion: tls.VersionTLS12}
+	server.StartTLS()
+	t.Cleanup(server.Close)
+	return newRetainedHTTP(t, ctx, server.Listener.Addr().String(), origin.Port(), roots)
 }

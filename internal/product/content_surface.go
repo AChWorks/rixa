@@ -22,13 +22,19 @@ type contentSurface struct {
 	routes         contentRoutes
 	publication    publicationPresenter
 	contentLocales []localize.Locale
+	siteAdmin      achrix.Principal // Only set for the trusted site-origin shell.
 }
 
-func newContentSurface(service *EditorialService, publication *PublicationService, languages ...localize.Locale) (shell.Surface, error) {
-	if service == nil {
+func newContentSurface(service *EditorialService, publication *PublicationService, siteAdmin achrix.Principal, languages ...localize.Locale) (shell.Surface, error) {
+	if service == nil || siteAdmin == "" {
 		return shell.Surface{}, shell.ErrConfiguration
 	}
-	h := &contentSurface{service: service, intentService: service, contentLocales: append([]localize.Locale(nil), languages...)}
+	h := &contentSurface{
+		service:        siteBrowserDraftService{EditorialService: service, siteAdmin: siteAdmin},
+		intentService:  service,
+		contentLocales: append([]localize.Locale(nil), languages...),
+		siteAdmin:      siteAdmin,
+	}
 	if publication != nil {
 		h.publication = directPublication{service: publication}
 	}
@@ -324,7 +330,11 @@ func (h *contentSurface) operation(w http.ResponseWriter, r *http.Request, view 
 		editorialJSON(w, map[string]string{"site_id": h.routes.SiteID, "origin": h.routes.Origin, "operation_id": op.ID, "kind": op.Kind, "resource_id": op.ResourceID, "result_revision": strconv.FormatInt(op.ResultRevision, 10), "created_at": op.CreatedAt.Format("2006-01-02T15:04:05.999999Z07:00")})
 		return
 	}
-	if !errors.Is(err, ErrEditorialNotFound) || h.publication == nil {
+	// A site member's missing own draft receipt must not trigger a second
+	// privileged publication-ledger lookup. Site admin and the trusted
+	// Control selected-site facade retain their existing publication recovery.
+	if !errors.Is(err, ErrEditorialNotFound) || h.publication == nil ||
+		(h.siteAdmin != "" && view.Principal != h.siteAdmin) {
 		editorialHTTPFail(w, err, body.OperationID)
 		return
 	}
