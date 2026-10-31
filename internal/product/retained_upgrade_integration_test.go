@@ -215,13 +215,20 @@ func TestRetainedReleaseUpgrade(t *testing.T) {
 	// as proof of a supported automatic database/binary rollback.
 	oldCheck := exec.CommandContext(ctx, binary, "check", "--config", configPath)
 	oldCheck.Env = env
-	if oldErr := oldCheck.Run(); oldErr == nil {
+	oldOutput, oldErr := oldCheck.Output()
+	if oldErr == nil {
 		t.Fatal("published v0.7 executable unexpectedly accepted the v0.8 schema")
-	} else {
-		var exited *exec.ExitError
-		if !errors.As(oldErr, &exited) || ctx.Err() != nil {
-			t.Fatalf("old schema rejection was not a verified child exit: %v", oldErr)
-		}
+	}
+	var exited *exec.ExitError
+	if !errors.As(oldErr, &exited) || ctx.Err() != nil {
+		t.Fatalf("old schema rejection was not a verified child exit: %v", oldErr)
+	}
+	// A generic child exit could hide an unrelated executable or environment
+	// failure. The authentic v0.7 CLI must report the editorial readiness
+	// category from its exact-prefix ledger validator, not just exit nonzero.
+	if exited.ExitCode() != 1 || len(oldOutput) != 0 || !retainedOldSchemaDiagnostic(exited.Stderr) {
+		t.Fatalf("published v0.7 check failed for an unexpected reason: exit=%d stdout_bytes=%d stderr=%s",
+			exited.ExitCode(), len(oldOutput), retainedDiagnostic(string(exited.Stderr), env))
 	}
 	resolved, err = config.ResolveRuntime(ctx, mapLookup(secrets))
 	if err != nil {
@@ -809,6 +816,47 @@ func assertRetainedFixturePopulated(t *testing.T, ctx context.Context, dsns map[
 			}
 		}
 		_ = conn.Close(ctx)
+	}
+}
+
+// The published v0.7 CLI emits this stable, scoped readiness category after
+// encountering the v3 editorial ledger. Informational JSON startup logs may
+// precede it; any other CLI failure or trailing diagnostic must not pass.
+func retainedOldSchemaDiagnostic(stderr []byte) bool {
+	const expected = "rixa: site site-a editorial: editorial unavailable"
+	lines := strings.Split(strings.TrimSpace(string(stderr)), "\n")
+	found := false
+	for i, line := range lines {
+		if strings.HasPrefix(line, "rixa: ") {
+			if found || i != len(lines)-1 || line != expected {
+				return false
+			}
+			found = true
+		}
+	}
+	return found
+}
+
+func TestRetainedOldSchemaDiagnostic(t *testing.T) {
+	const expected = "rixa: site site-a editorial: editorial unavailable"
+	cases := []struct {
+		name, diagnostic string
+		want             bool
+	}{
+		{"expected", "{\"level\":\"INFO\"}\n" + expected + "\n", true},
+		{"unrelated process failure", "rixa: database connection refused\n", false},
+		{"other editorial failure", "rixa: site site-b editorial: editorial unavailable\n", false},
+		{"partial category", "rixa: site site-a editorial\n", false},
+		{"unrelated cli failure before expected", "rixa: invalid configuration\n" + expected + "\n", false},
+		{"expected not terminal", expected + "\nrixa: database connection refused\n", false},
+		{"diagnostic only inside log", "{\"message\":\"" + expected + "\"}\n", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := retainedOldSchemaDiagnostic([]byte(tc.diagnostic)); got != tc.want {
+				t.Fatalf("retained old-schema diagnostic match = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 
