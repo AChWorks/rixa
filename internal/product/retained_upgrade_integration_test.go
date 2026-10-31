@@ -695,15 +695,46 @@ func snapshotRetainedFiles(t *testing.T, sites []SiteConfig) map[string]string {
 
 func assertRetainedSnapshots(t *testing.T, ctx context.Context, dsns map[string]string, sites []SiteConfig, configPath string, rows, files map[string]string, config []byte) {
 	t.Helper()
-	if after := snapshotRetainedRows(t, ctx, dsns); !reflect.DeepEqual(after, rows) {
+	// The candidate deliberately adds the Rixa-owned v3 site-grant schema.
+	// Keep the retained-proof strict: only the exact new empty site tables and
+	// exact verified appended migration ledger may differ from the published
+	// v0.3.0 fixture. Every older table/row, credential/session, control table,
+	// file and config must remain byte-for-byte unchanged.
+	after := snapshotRetainedRows(t, ctx, dsns)
+	want := make(map[string]string, len(rows))
+	for key, value := range rows {
+		want[key] = value
+	}
+	for _, scope := range []string{"a", "b"} {
+		ledgerKey := scope + "/" + (pgx.Identifier{"rixa", "schema_migrations"}).Sanitize()
+		if _, exists := want[ledgerKey]; !exists {
+			t.Fatalf("published baseline lacks site ledger: %s", ledgerKey)
+		}
+		assertEditorialLedger(t, ctx, dsns[scope], []editorialLedgerRow{
+			{1, editorialMigrationIdentity}, {2, editorialMigration2Identity}, {3, editorialMigration3Identity},
+		})
+		delete(want, ledgerKey)
+		delete(after, ledgerKey)
+		for _, table := range []string{"site_grants", "site_grant_history"} {
+			key := scope + "/" + (pgx.Identifier{"rixa", table}).Sanitize()
+			if _, existed := want[key]; existed {
+				t.Fatalf("published baseline unexpectedly owned new table %s", key)
+			}
+			if after[key] != fmt.Sprintf("0:%x", sha256.Sum256(nil)) {
+				t.Fatalf("new site grant table not empty/valid on upgrade: %s", key)
+			}
+			delete(after, key)
+		}
+	}
+	if !reflect.DeepEqual(after, want) {
 		var changed []string
-		for key, value := range rows {
+		for key, value := range want {
 			if after[key] != value {
 				changed = append(changed, key)
 			}
 		}
 		for key := range after {
-			if _, exists := rows[key]; !exists {
+			if _, exists := want[key]; !exists {
 				changed = append(changed, key)
 			}
 		}
