@@ -194,6 +194,14 @@ func TestSelectedPublicationIntentAndRecovery(t *testing.T) {
 	}
 }
 func TestPublicationOperationInspectionDistinguishesGenerationFromRevision(t *testing.T) {
+	// These helpers must be defined in the editor primitive script itself.
+	// A separate draft-recovery IIFE does not export them; the live browser
+	// previously raised ReferenceError despite static tests finding callers.
+	for _, function := range []string{"function matchesScope(result) {", "function validGeneration(value) {"} {
+		if !strings.Contains(contentEditorPrimitivesJS, function) {
+			t.Fatalf("editor primitive is missing its own helper %q", function)
+		}
+	}
 	for _, key := range []string{"publication_operation_committed", "publication_outcome_unverified",
 		"detail.kind === \"publication.apply\"", "detail.result_generation", "matchesScope(detail)", "validGeneration(detail.result_generation)"} {
 		if !strings.Contains(contentEditorJS, key) {
