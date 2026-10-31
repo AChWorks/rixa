@@ -202,8 +202,14 @@ func (m *Manager) RunUpdateOperation(ctx context.Context, id string) (Result, er
 			}
 		}
 		if e = m.executeUpdate(ctx, u, parent, stage, attempted); e != nil {
-			// No database migration has been attempted. Restore the previous service
-			// only from positive unchanged ownership, never from a timeout inference.
+			// The manager recognized pending editorial schema work with a
+			// read-only ledger observation *before* stopping the old service.
+			// Release the claim only after proving it is still healthy.
+			if stage == "stop" && errors.Is(e, errPreStopEditorialPending) && u.Attempts["migrate"] == "" {
+				return m.rejectPendingEditorialBeforeStop(ctx, u, parent, e)
+			}
+			// Post-stop compatibility retains its existing positive-restoration
+			// fence; binary rollback never reverses a schema mutation.
 			if stage == "compatibility" && u.Attempts["migrate"] == "" {
 				return m.rejectIncompatibleUpdate(ctx, u, parent, e)
 			}
@@ -242,6 +248,25 @@ func (m *Manager) executeUpdate(ctx context.Context, u *updateJournal, parent *j
 		if e := m.loadedUpdateService(ctx, parent, false); e != nil {
 			return e
 		}
+		if !m.unitQuiesced(ctx, "rixa.service", false) {
+			// Do not invoke candidate `check` while the prior runtime is live:
+			// publication Ready() can clean up filesystem generations.
+			// The only live-system preflight is the manager's READ ONLY Rixa
+			// editorial ledger observer. This is a negative guard, NOT a
+			// candidate/AChrix module compatibility admission.
+			if e := m.loadedUpdateService(ctx, parent, true); e != nil || m.updateUnitFileState(ctx) != "enabled" {
+				return ErrState
+			}
+			if e := updateEditorialPreflight(ctx, parent); e != nil {
+				return e
+			}
+		} else if !attempted {
+			// A first attempt expects the exact prior service to be serving;
+			// an unexpectedly quiescent service requires reconciliation.
+			return ErrState
+		}
+		// A resumed, already-quiesced stop is inspected by the original
+		// post-stop compatibility fence before any candidate migration.
 		return m.disableUpdateService(ctx)
 	case "compatibility", "migrate", "check":
 		if !m.updateMigrationFenced(ctx) {
@@ -450,6 +475,24 @@ func (m *Manager) candidateCommand(parent context.Context, u *updateJournal, j *
 	}
 	return nil
 }
+
+func (m *Manager) rejectPendingEditorialBeforeStop(ctx context.Context, u *updateJournal, parent *journal, cause error) (Result, error) {
+	if u.Stage != "stop" || u.Attempts["stop"] != "attempted" || u.Attempts["compatibility"] != "" || u.Attempts["migrate"] != "" ||
+		m.boundUpdateRuntime(ctx, u, parent) != nil || m.checkOwnedService(parent) != nil ||
+		m.loadedUpdateService(ctx, parent, true) != nil || m.updateUnitFileState(ctx) != "enabled" ||
+		m.updateHTTPPostflight(ctx, parent) != nil {
+		return m.updateFailure(u, "prior-service-unverified", "A pending editorial migration was observed before stopping the prior service, but its current ownership or TLS health is no longer proven. Inspect the retained operation.", cause)
+	}
+	u.State, u.Code, u.Message = "rejected", "editorial-upgrade-pending-prior-uninterrupted", "The native updater cannot automatically apply the Rixa editorial migration visible to this manager. No service stop or database migration was attempted; the original serving process and TLS access controls are verified. Choose a compatible update path."
+	if e := m.saveUpdate(u); e != nil {
+		return Result{}, e
+	}
+	if e := m.clearUpdateClaim(u.Draft.OperationID); e != nil {
+		return updateResult(u), e
+	}
+	return updateResult(u), ErrPrerequisite
+}
+
 func (m *Manager) rejectIncompatibleUpdate(ctx context.Context, u *updateJournal, parent *journal, cause error) (Result, error) {
 	// This is only a pre-migration service restoration. It is not a database or
 	// post-migration binary rollback. Every old ownership binding must still hold.

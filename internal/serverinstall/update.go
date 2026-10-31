@@ -169,6 +169,18 @@ func (m *Manager) reviewUpdate(ctx context.Context, u *updateJournal) []Problem 
 	}
 	u.ConfigSHA256, u.EnvironmentSHA256 = digest(config), digest(environment)
 	u.DatabaseTargets = parent.DatabaseTargets
+	// Review can refuse a definitely unsupported Rixa editorial schema change
+	// without staging or interrupting the live service. This is not candidate
+	// or Foundation-wide schema admission; the executor repeats this observation
+	// immediately before stop because the database can drift after Review.
+	if e = updateEditorialPreflight(ctx, parent); e != nil {
+		if errors.Is(e, errPreStopEditorialPending) {
+			add("installation_operation", "editorial-schema-update-unsupported", "The retained Rixa editorial schema needs migration. This native updater cannot admit schema-changing upgrades; preserve the running service and use a separately reviewed forward-recovery path.")
+		} else {
+			add("installation_operation", "editorial-inspection-unavailable", "The Rixa editorial schema could not be safely inspected. Verify the site database identity, permissions, and migration ledger before retrying Review.")
+		}
+		return problems
+	}
 	image, e := currentManagerImage()
 	if e != nil {
 		add("host", "manager-path", "Restart this trusted manager from a root-owned non-writable path before reviewing an update.")

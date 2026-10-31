@@ -176,8 +176,22 @@ func validUpdate(u *updateJournal) bool {
 	default:
 		return false
 	}
-	if u.State == "rejected" && (u.Attempts["compatibility"] != "attempted" || u.Attempts["migrate"] != "") {
-		return false
+	if u.State == "rejected" {
+		if u.BinarySHA256 == "" || u.UnitSHA256 == "" || u.Attempts["payload"] != "verified" || u.Attempts["migrate"] != "" {
+			return false
+		}
+		switch u.Code {
+		case "editorial-upgrade-pending-prior-uninterrupted":
+			if u.Stage != "stop" || u.Attempts["stop"] != "attempted" || u.Attempts["compatibility"] != "" {
+				return false
+			}
+		case "candidate-incompatible-prior-restored":
+			if u.Stage != "compatibility" || u.Attempts["stop"] != "verified" || u.Attempts["compatibility"] != "attempted" {
+				return false
+			}
+		default:
+			return false
+		}
 	}
 	if u.Frozen == "" {
 		if u.Stage != "" && u.Stage != "review" {
