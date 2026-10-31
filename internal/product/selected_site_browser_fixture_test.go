@@ -232,10 +232,13 @@ func assertSelectedPublicationBrowserIsolation(t *testing.T, ctx context.Context
 		t.Fatal("publication browser did not activate a new site-A public generation")
 	}
 	for table, before := range beforeRows {
-		// Live login/audit are expected to change. Public writes are limited to
-		// the selected site's editorial/operation and static publication state.
-		if strings.HasSuffix(table, "/\"identity\".\"sessions\"") || strings.HasSuffix(table, "/\"audit\".\"records\"") ||
-			strings.HasPrefix(table, "a/\"rixa\".") {
+		// All site-B tables, including identity sessions and audit, must remain
+		// untouched. Only the active control session/audit and site-A
+		// publication/editorial/session/audit state may legitimately change.
+		if !strings.HasPrefix(table, "b/") &&
+			(strings.HasSuffix(table, "/\"identity\".\"sessions\"") ||
+				strings.HasSuffix(table, "/\"audit\".\"records\"") ||
+				strings.HasPrefix(table, "a/\"rixa\".")) {
 			continue
 		}
 		if afterRows[table] != before {
