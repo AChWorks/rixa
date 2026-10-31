@@ -322,21 +322,26 @@ func (s *EditorialService) ClearPublicationIntent(ctx context.Context, actor ach
 	return s.store.publicationIntent(ctx, string(actor), operationID, id, expectedHead, expectedPublicationVersion, 0, true)
 }
 
-// Operation preserves the administrator's collection-wide receipt access.
-// Ordinary site accounts may reconcile only their own completed private
-// create/save operations while their CURRENT content-edit grant is effective.
-// A missing receipt is not proof that a still-in-flight write did not commit.
+// Operation is the existing administrator-only, collection-wide receipt
+// inspection path. Ordinary members use OwnOperation instead so a rejected
+// administrator access check never grants or double-checks a different scope.
 func (s *EditorialService) Operation(ctx context.Context, actor achrix.Principal, operationID string) (EditorialOperation, error) {
 	if !validOperationID(operationID) && operationID != "bootstrap:appearance" {
 		return EditorialOperation{}, ErrEditorialInvalid
 	}
-	if err := s.authorize(ctx, actor, CapabilityOperationRead, OperationCollectionTarget); err == nil {
-		return s.store.operation(ctx, operationID)
-	} else if !errors.Is(err, achrix.ErrDenied) {
+	if err := s.authorize(ctx, actor, CapabilityOperationRead, OperationCollectionTarget); err != nil {
 		return EditorialOperation{}, err
 	}
-	// An edit grant cannot authorize the global ledger: enforce ownership,
-	// permitted operation kind and site scope together in the storage query.
+	return s.store.operation(ctx, operationID)
+}
+
+// OwnOperation allows a current site editor to reconcile only their own
+// committed private create/save receipt. An absent receipt is NOT evidence
+// that an in-flight write failed and never permits a fresh-ID replay.
+func (s *EditorialService) OwnOperation(ctx context.Context, actor achrix.Principal, operationID string) (EditorialOperation, error) {
+	if !validOperationID(operationID) {
+		return EditorialOperation{}, ErrEditorialInvalid
+	}
 	if err := s.authorize(ctx, actor, CapabilityContentEdit, ContentCollectionTarget); err != nil {
 		return EditorialOperation{}, err
 	}

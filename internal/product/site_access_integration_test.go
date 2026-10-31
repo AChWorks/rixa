@@ -160,26 +160,29 @@ func TestSiteUserGrantsRealAccountsAndSiteIsolation(t *testing.T) {
 	if _, err := a.Editorial.Head(ctx, achrix.Principal(editOnly.ID), editOnlyDraft.ID); !errors.Is(err, achrix.ErrDenied) {
 		t.Fatalf("edit-only account inherited content-read authority: %v", err)
 	}
-	receipt, err := a.Editorial.Operation(ctx, achrix.Principal(editOnly.ID), editOnlyOp)
+	receipt, err := a.Editorial.OwnOperation(ctx, achrix.Principal(editOnly.ID), editOnlyOp)
 	if err != nil || receipt.ID != editOnlyOp || receipt.ResourceID != editOnlyDraft.ID || receipt.Kind != "content.create" || receipt.ResultRevision != 1 {
 		t.Fatalf("edit-only create receipt = %#v / %v", receipt, err)
 	}
-	if _, err := a.Editorial.Operation(ctx, achrix.Principal(drafter.ID), editOnlyOp); !errors.Is(err, ErrEditorialNotFound) {
+	if _, err := a.Editorial.OwnOperation(ctx, achrix.Principal(drafter.ID), editOnlyOp); !errors.Is(err, ErrEditorialNotFound) {
 		t.Fatalf("another writer read a foreign member receipt: %v", err)
 	}
-	if _, err := a.Editorial.Operation(ctx, achrix.Principal(reader.ID), editOnlyOp); !errors.Is(err, achrix.ErrDenied) {
+	if _, err := a.Editorial.OwnOperation(ctx, achrix.Principal(reader.ID), editOnlyOp); !errors.Is(err, achrix.ErrDenied) {
 		t.Fatalf("read-only member inspected an operation ledger: %v", err)
 	}
-	if _, err := a.Editorial.Operation(ctx, achrix.Principal(editOnly.ID), "bootstrap:appearance"); !errors.Is(err, ErrEditorialNotFound) {
-		t.Fatalf("member inspected a bootstrap operation: %v", err)
+	if _, err := a.Editorial.OwnOperation(ctx, achrix.Principal(editOnly.ID), "bootstrap:appearance"); !errors.Is(err, ErrEditorialInvalid) {
+		t.Fatalf("member accepted reserved bootstrap identity: %v", err)
 	}
-	if _, err := a.Editorial.Operation(ctx, achrix.Principal(editOnly.ID), newOperationID()); !errors.Is(err, ErrEditorialNotFound) {
+	if _, err := a.Editorial.Operation(ctx, achrix.Principal(editOnly.ID), editOnlyOp); !errors.Is(err, achrix.ErrDenied) {
+		t.Fatalf("member escaped through administrative operation lookup: %v", err)
+	}
+	if _, err := a.Editorial.OwnOperation(ctx, achrix.Principal(editOnly.ID), newOperationID()); !errors.Is(err, ErrEditorialNotFound) {
 		t.Fatalf("uncommitted or nonexistent receipt was not reported missing: %v", err)
 	}
-	if _, err := b.Editorial.Operation(ctx, achrix.Principal(foreign.ID), editOnlyOp); !errors.Is(err, ErrEditorialNotFound) {
+	if _, err := b.Editorial.OwnOperation(ctx, achrix.Principal(foreign.ID), editOnlyOp); !errors.Is(err, ErrEditorialNotFound) {
 		t.Fatalf("foreign site's ledger exposed another site's receipt: %v", err)
 	}
-	if _, err := a.Editorial.Operation(ctx, achrix.Principal(foreign.ID), editOnlyOp); !errors.Is(err, achrix.ErrDenied) {
+	if _, err := a.Editorial.OwnOperation(ctx, achrix.Principal(foreign.ID), editOnlyOp); !errors.Is(err, achrix.ErrDenied) {
 		t.Fatalf("foreign site member borrowed a local grant: %v", err)
 	}
 	if adminReceipt, err := a.Editorial.Operation(ctx, siteAdmin, editOnlyOp); err != nil || adminReceipt != receipt {
@@ -200,11 +203,14 @@ func TestSiteUserGrantsRealAccountsAndSiteIsolation(t *testing.T) {
 	if _, err := a.Editorial.Save(ctx, achrix.Principal(reader.ID), newOperationID(), draft.ID, 1, "Bad", "<p>Overwrite</p>"); !errors.Is(err, achrix.ErrDenied) {
 		t.Fatalf("reader saved draft: %v", err)
 	}
-	if _, err := a.Editorial.Operation(ctx, achrix.Principal(drafter.ID), draftOp); err != nil {
+	if _, err := a.Editorial.OwnOperation(ctx, achrix.Principal(drafter.ID), draftOp); err != nil {
 		t.Fatalf("author cannot inspect their committed draft receipt: %v", err)
 	}
-	if _, err := a.Editorial.Operation(ctx, achrix.Principal(drafter.ID), newOperationID()); !errors.Is(err, ErrEditorialNotFound) {
+	if _, err := a.Editorial.OwnOperation(ctx, achrix.Principal(drafter.ID), newOperationID()); !errors.Is(err, ErrEditorialNotFound) {
 		t.Fatalf("uncommitted or nonexistent member operation lookup = %v", err)
+	}
+	if _, err := a.Editorial.Operation(ctx, achrix.Principal(drafter.ID), draftOp); !errors.Is(err, achrix.ErrDenied) {
+		t.Fatalf("ordinary member obtained collection-wide operation permission: %v", err)
 	}
 	if _, err := a.Editorial.SetPublicationIntent(ctx, achrix.Principal(drafter.ID), newOperationID(), draft.ID, 1, 1, 1); !errors.Is(err, achrix.ErrDenied) {
 		t.Fatalf("drafter changed publication intent: %v", err)
@@ -220,10 +226,10 @@ func TestSiteUserGrantsRealAccountsAndSiteIsolation(t *testing.T) {
 	if err != nil || saved.Revision != 2 {
 		t.Fatalf("authorized save: %#v / %v", saved, err)
 	}
-	if savedReceipt, err := a.Editorial.Operation(ctx, achrix.Principal(drafter.ID), saveOp); err != nil || savedReceipt.ID != saveOp || savedReceipt.ResultRevision != 2 || savedReceipt.ResourceID != draft.ID || savedReceipt.Kind != "content.save" {
+	if savedReceipt, err := a.Editorial.OwnOperation(ctx, achrix.Principal(drafter.ID), saveOp); err != nil || savedReceipt.ID != saveOp || savedReceipt.ResultRevision != 2 || savedReceipt.ResourceID != draft.ID || savedReceipt.Kind != "content.save" {
 		t.Fatalf("authorized saved-revision receipt = %#v / %v", savedReceipt, err)
 	}
-	if _, err := a.Editorial.Operation(ctx, achrix.Principal(editOnly.ID), saveOp); !errors.Is(err, ErrEditorialNotFound) {
+	if _, err := a.Editorial.OwnOperation(ctx, achrix.Principal(editOnly.ID), saveOp); !errors.Is(err, ErrEditorialNotFound) {
 		t.Fatalf("different editor inspected another user's save: %v", err)
 	}
 
@@ -241,7 +247,7 @@ func TestSiteUserGrantsRealAccountsAndSiteIsolation(t *testing.T) {
 	if _, err := a.Editorial.Head(ctx, achrix.Principal(drafter.ID), draft.ID); err != nil {
 		t.Fatalf("revoked edit unexpectedly revoked read: %v", err)
 	}
-	if _, err := a.Editorial.Operation(ctx, achrix.Principal(drafter.ID), saveOp); !errors.Is(err, achrix.ErrDenied) {
+	if _, err := a.Editorial.OwnOperation(ctx, achrix.Principal(drafter.ID), saveOp); !errors.Is(err, achrix.ErrDenied) {
 		t.Fatalf("revoked edit still reads its old operation receipt: %v", err)
 	}
 	if _, err := a.Access.Set(ctx, siteAdmin, drafter.ID, CapabilityContentEdit, true, 1); !errors.Is(err, ErrSiteGrantConflict) {
@@ -303,7 +309,7 @@ func TestSiteUserGrantsRealAccountsAndSiteIsolation(t *testing.T) {
 	if err := a.Identity.SetEnabled(ctx, siteAdmin, editOnly.ID, editAccount.Revision, false); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.Editorial.Operation(ctx, achrix.Principal(editOnly.ID), editOnlyOp); !errors.Is(err, achrix.ErrDenied) {
+	if _, err := a.Editorial.OwnOperation(ctx, achrix.Principal(editOnly.ID), editOnlyOp); !errors.Is(err, achrix.ErrDenied) {
 		t.Fatalf("disabled owner inspected a receipt: %v", err)
 	}
 	editAccount, err = a.Identity.Account(ctx, siteAdmin, editOnly.ID)
@@ -313,7 +319,7 @@ func TestSiteUserGrantsRealAccountsAndSiteIsolation(t *testing.T) {
 	if err := a.Identity.SetEnabled(ctx, siteAdmin, editOnly.ID, editAccount.Revision, true); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.Editorial.Operation(ctx, achrix.Principal(editOnly.ID), editOnlyOp); err != nil {
+	if _, err := a.Editorial.OwnOperation(ctx, achrix.Principal(editOnly.ID), editOnlyOp); err != nil {
 		t.Fatalf("re-enabled member cannot inspect own still-authorized receipt: %v", err)
 	}
 	grant, err := a.Access.Grant(ctx, siteAdmin, editOnly.ID, CapabilityContentEdit)
@@ -323,7 +329,7 @@ func TestSiteUserGrantsRealAccountsAndSiteIsolation(t *testing.T) {
 	if _, err := a.Access.Set(ctx, siteAdmin, editOnly.ID, CapabilityContentEdit, false, grant.Revision); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.Editorial.Operation(ctx, achrix.Principal(editOnly.ID), editOnlyOp); !errors.Is(err, achrix.ErrDenied) {
+	if _, err := a.Editorial.OwnOperation(ctx, achrix.Principal(editOnly.ID), editOnlyOp); !errors.Is(err, achrix.ErrDenied) {
 		t.Fatalf("revoked member can still inspect own old receipt: %v", err)
 	}
 
