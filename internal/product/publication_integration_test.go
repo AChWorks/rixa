@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/AChWorks/achrix"
+	"github.com/jackc/pgx/v5"
 )
 
 func testStaticPublicationRuntime(t *testing.T, ctx context.Context, runtime *Runtime, actor achrix.Principal, sourceAssetID string, fixture publicationFixture) {
@@ -442,6 +443,7 @@ func testStaticPublicationRuntime(t *testing.T, ctx context.Context, runtime *Ru
 	if rec.Code != http.StatusOK {
 		t.Fatalf("reloaded static generation status=%d", rec.Code)
 	}
+	testReviewedHeadSavePublicationOrdering(t, ctx, runtime, actor)
 }
 
 func extractPublishedAssetPath(t *testing.T, body string) string {
@@ -461,4 +463,217 @@ func extractPublishedAssetPath(t *testing.T, body string) string {
 		t.Fatalf("public image path=%q", path)
 	}
 	return path
+}
+
+// Test the two possible orderings against real PostgreSQL and a real public
+// generation: a saved-head writer that wins the gate invalidates a reviewed
+// Apply; an Apply that owns the gate prevents a later Save from committing
+// until its public generation has durably activated.
+func testReviewedHeadSavePublicationOrdering(t *testing.T, ctx context.Context, runtime *Runtime, siteActor achrix.Principal) {
+	t.Helper()
+	a := runtime.Sites["site-a"]
+	b := runtime.Sites["site-b"]
+	controlActor := runtime.Control.AdminPrincipal
+	control := runtime.ControlService()
+	post, err := a.Editorial.Create(ctx, siteActor, newOperationID(), ContentPost,
+		"Reviewed public head", "<p>Initial public revision</p>")
+	if err != nil {
+		t.Fatal(err)
+	}
+	intended, err := control.SetSitePublicationIntent(ctx, controlActor, "site-a", newOperationID(),
+		post.ID, post.Revision, post.PublicationIntentVersion, 1)
+	if err != nil || intended.PublicationIntentRevision != 1 {
+		t.Fatalf("selected review intent: %#v %v", intended, err)
+	}
+	priorGeneration := a.Publication.State(post.ID, ContentPost).Generation
+	request := PublicationRequest{
+		OperationID: newOperationID(), ExpectedGeneration: priorGeneration,
+		ContentID: post.ID, Route: defaultPublicationRoute(ContentPost, post.ID),
+		ExpectedHead: 1, ExpectedIntentVersion: intended.PublicationIntentVersion, ExpectedIntentRevision: 1,
+	}
+	// Order A: Save holds the publication gate while its row is locked by a
+	// separate SQL transaction. Apply must wait and see the committed new head.
+	conn, err := pgx.Connect(ctx, runtime.Config.Sites[0].DSN)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(context.Background())
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var head int64
+	if err = tx.QueryRow(ctx, "SELECT head_revision FROM rixa.content_items WHERE id=$1 FOR UPDATE", post.ID).Scan(&head); err != nil || head != 1 {
+		_ = tx.Rollback(context.Background())
+		t.Fatalf("lock reviewed content head=%d err=%v", head, err)
+	}
+	type saved struct {
+		revision ContentRevision
+		err      error
+	}
+	saveFirst := make(chan saved, 1)
+	go func() {
+		revision, e := a.Editorial.Save(ctx, siteActor, newOperationID(), post.ID, 1,
+			"Saved first", "<p>New unmarked draft</p>")
+		saveFirst <- saved{revision, e}
+	}()
+	deadline := time.NewTimer(3 * time.Second)
+	ticker := time.NewTicker(5 * time.Millisecond)
+	gateAcquired := false
+waitForSave:
+	for !gateAcquired {
+		select {
+		case <-ticker.C:
+			gateAcquired = len(a.Editorial.publicationGate) == 1
+		case <-deadline.C:
+			break waitForSave
+		case <-ctx.Done():
+			break waitForSave
+		}
+	}
+	ticker.Stop()
+	deadline.Stop()
+	if !gateAcquired {
+		_ = tx.Rollback(context.Background())
+		t.Fatal("first Save did not acquire publication source gate before SQL row lock")
+	}
+	applyFirst := make(chan error, 1)
+	go func() {
+		_, e := control.ApplySitePublication(ctx, controlActor, "site-a", request)
+		applyFirst <- e
+	}()
+	if err = tx.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
+	first := <-saveFirst
+	if first.err != nil || first.revision.Revision != 2 {
+		t.Fatalf("Save-first revision: %#v %v", first.revision, first.err)
+	}
+	if err = <-applyFirst; !errors.Is(err, ErrEditorialConflict) {
+		t.Fatalf("stale reviewed Apply after committed Save: %v", err)
+	}
+	if current := a.Publication.State(post.ID, ContentPost); current.Generation != priorGeneration {
+		t.Fatalf("stale Apply changed public generation: %#v", current)
+	}
+	if _, e := control.SitePublicationOperation(ctx, controlActor, "site-a", request.OperationID); !errors.Is(e, ErrEditorialNotFound) {
+		t.Fatalf("stale Apply incorrectly recorded a public commit: %v", e)
+	}
+
+	// Order B: hold Apply at the durable root sync after the reviewed head
+	// and snapshot. Save must wait until that whole public decision finishes.
+	originalSync := a.Publication.rootSync
+	entered := make(chan struct{}, 1)
+	release := make(chan struct{})
+	released := false
+	defer func() {
+		if !released {
+			close(release)
+		}
+		a.Publication.rootSync = originalSync
+	}()
+	a.Publication.rootSync = func(path string) error {
+		select {
+		case entered <- struct{}{}:
+		default:
+		}
+		select {
+		case <-release:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		return originalSync(path)
+	}
+	request.OperationID = newOperationID()
+	request.ExpectedHead = 2 // deliberately publishing historical revision 1
+	type applied struct {
+		result PublicationResult
+		err    error
+	}
+	appliedFirst := make(chan applied, 1)
+	go func() {
+		result, e := control.ApplySitePublication(ctx, controlActor, "site-a", request)
+		appliedFirst <- applied{result, e}
+	}()
+	select {
+	case <-entered:
+	case outcome := <-appliedFirst:
+		t.Fatalf("Apply ended before synchronization barrier: %#v", outcome)
+	case <-time.After(8 * time.Second):
+		t.Fatal("Apply never reached durable activation barrier")
+	}
+	saveAfter := make(chan saved, 1)
+	go func() {
+		rev, e := a.Editorial.Save(ctx, siteActor, newOperationID(), post.ID, 2,
+			"Later draft", "<p>New private source after publication</p>")
+		saveAfter <- saved{rev, e}
+	}()
+	select {
+	case outcome := <-saveAfter:
+		t.Fatalf("later Save bypassed active publication gate: %#v", outcome)
+	case <-time.After(120 * time.Millisecond):
+	}
+	currentHead, e := a.Editorial.Head(ctx, siteActor, post.ID)
+	if e != nil || currentHead.Revision != 2 {
+		t.Fatalf("reviewed head changed before Apply finished: %#v %v", currentHead, e)
+	}
+	// Intent and appearance still share the same fence.
+	for _, op := range []struct {
+		name string
+		call func(context.Context) error
+	}{
+		{"intent", func(c context.Context) error {
+			_, e := a.Editorial.SetPublicationIntent(c, siteActor, newOperationID(), post.ID, 2, intended.PublicationIntentVersion, 1)
+			return e
+		}},
+		{"appearance", func(c context.Context) error {
+			appearance, e := a.Editorial.Appearance(c, siteActor)
+			if e != nil {
+				return e
+			}
+			_, e = a.Editorial.SaveAppearance(c, siteActor, newOperationID(), appearance.Revision, appearance.input())
+			return e
+		}},
+	} {
+		bounded, cancel := context.WithTimeout(ctx, 160*time.Millisecond)
+		e := op.call(bounded)
+		cancel()
+		if !errors.Is(e, context.DeadlineExceeded) {
+			t.Fatalf("%s mutation bypassed source gate: %v", op.name, e)
+		}
+	}
+	// Another site's Save must not wait for site A's publication gate.
+	bDraft, e := b.Editorial.Create(ctx, b.adminPrincipal, newOperationID(), ContentPost, "Independent B", "<p>site B</p>")
+	if e != nil {
+		t.Fatal(e)
+	}
+	bCtx, cancelB := context.WithTimeout(ctx, 3*time.Second)
+	other, e := b.Editorial.Save(bCtx, b.adminPrincipal, newOperationID(), bDraft.ID, 1,
+		"Site B still responsive", "<p>unrelated</p>")
+	cancelB()
+	if e != nil || other.Revision != 2 {
+		t.Fatalf("site B Save blocked by site A publication: %#v %v", other, e)
+	}
+	close(release)
+	released = true
+	result := <-appliedFirst
+	if result.err != nil || !validEditorialID(result.result.Generation) {
+		t.Fatalf("Apply-first publication: %#v %v", result.result, result.err)
+	}
+	later := <-saveAfter
+	if later.err != nil || later.revision.Revision != 3 {
+		t.Fatalf("later Save did not complete after Apply: %#v %v", later.revision, later.err)
+	}
+	state := a.Publication.State(post.ID, ContentPost)
+	if state.Generation != result.result.Generation || state.ActiveRevision != 1 {
+		t.Fatalf("historical published revision or generation changed: %#v", state)
+	}
+	replay, e := control.ApplySitePublication(ctx, controlActor, "site-a", request)
+	if e != nil || replay.Generation != result.result.Generation {
+		t.Fatalf("lost-ack replay after later Save: %#v %v", replay, e)
+	}
+	changed := request
+	changed.ExpectedHead = 3
+	if _, e = control.ApplySitePublication(ctx, controlActor, "site-a", changed); !errors.Is(e, ErrEditorialConflict) {
+		t.Fatalf("same operation ID accepted new reviewed head: %v", e)
+	}
 }

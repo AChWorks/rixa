@@ -99,14 +99,19 @@ func serveSelectedContent(manager controlDraftManager, sites []SiteConfig, langu
 		return
 	}
 	origin := ""
+	publicationConfigured := false
 	for _, site := range sites {
 		if site.ID == parts[0] {
 			origin = site.Origin
+			// A public root is optional. Preserve draft-only editing on sites
+			// that intentionally omit publication, even when their control
+			// manager also implements the publication methods.
+			publicationConfigured = !site.Disabled && site.PublicRoot != ""
 			break
 		}
 	}
 	h := &contentSurface{service: selectedDraftService{manager: manager, siteID: parts[0]}, routes: contentRoutes{SiteID: parts[0], Origin: origin}, contentLocales: languages}
-	if publication, ok := manager.(controlPublicationManager); ok {
+	if publication, ok := manager.(controlPublicationManager); publicationConfigured && ok {
 		selected := selectedPublication{manager: publication, siteID: parts[0]}
 		h.intentService = selected
 		h.publication = selected

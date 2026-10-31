@@ -79,7 +79,10 @@ func selectedPublicationResponse(t *testing.T, s *selectedPublicationStub, local
 	rec := httptest.NewRecorder()
 	view := shell.Request{Principal: "control-actor", Localizer: testProductLocalizer(t, locale), Allowed: func(string, string) bool { return true },
 		Render: func(page shell.Page) error { return page.Template.ExecuteTemplate(rec, "content", page.Data) }}
-	newControlSurface([]SiteConfig{{ID: "site-a", Origin: "https://a.rixa.test"}}, s,
+	newControlSurface([]SiteConfig{
+		{ID: "site-a", Origin: "https://a.rixa.test", PublicRoot: "/example/public-site-a"},
+		{ID: "site-b", Origin: "https://b.rixa.test", PublicRoot: "/example/public-site-b"},
+	}, s,
 		localize.Locale{Tag: "en", Direction: "ltr"}, localize.Locale{Tag: "fa", Direction: "rtl"}).Handler(rec, request, view)
 	return rec
 }
