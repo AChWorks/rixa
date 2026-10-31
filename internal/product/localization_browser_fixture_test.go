@@ -264,22 +264,30 @@ func waitBrowserReady(t *testing.T, h retainedHTTP) {
 
 func waitBrowserMarker(t *testing.T, ctx context.Context, path string) {
 	t.Helper()
+	if err := awaitBrowserMarker(ctx, path); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Kept shared between the draft and publication fixtures; returning an error
+// permits a bounded negative test for a missing/invalid finish.request.
+func awaitBrowserMarker(ctx context.Context, path string) error {
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
 	for {
 		info, err := os.Lstat(path)
 		if err == nil {
 			if !info.Mode().IsRegular() || info.Size() != 0 {
-				t.Fatalf("browser fixture marker must be an empty ordinary file: %s", filepath.Base(path))
+				return fmt.Errorf("browser fixture marker must be an empty ordinary file: %s", filepath.Base(path))
 			}
-			return
+			return nil
 		}
 		if !os.IsNotExist(err) {
-			t.Fatalf("browser fixture marker lookup failed: %v", err)
+			return fmt.Errorf("browser fixture marker lookup failed: %w", err)
 		}
 		select {
 		case <-ctx.Done():
-			t.Fatal(fmt.Errorf("browser fixture timed out waiting for %s: %w", filepath.Base(path), ctx.Err()))
+			return fmt.Errorf("browser fixture timed out waiting for %s: %w", filepath.Base(path), ctx.Err())
 		case <-ticker.C:
 		}
 	}

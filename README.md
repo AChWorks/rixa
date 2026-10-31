@@ -9,7 +9,7 @@
 - Configure each site's title, language, home page, header, footer and light/dark appearance.
 - Publish, correct, move or withdraw content as coherent static HTML, metadata, sitemap and authorized PNG/JPEG images while retaining private originals.
 - Choose English or Persian administration and install additional interface language files without rebuilding a compatible executable. The CLI and terminal stay English.
-- Use separate control and site logins. From the control interface, select one site to create and edit saved content, browse its history and preview revisions without another site login; site accounts remain independent.
+- Use separate control and site logins. From the control interface, select one site to create and edit saved content, browse its history, privately preview revisions, and separately review/apply a coherent site-wide public generation without another site login. Saving a draft never publishes it; site accounts remain independent.
 - Capture one quiesced site and restore it into a separate compatible empty target in the documented development profile.
 
 The runnable profiles are for **development** on Linux amd64 with PostgreSQL and private local storage. The manual runtime offers loopback HTTPS or explicit direct TLS. Builds containing `rixa manage` also provide a guided terminal and JSON CLI for a prepared Debian 13/systemd server: authenticate a selected release, configure and install its service, inspect progress, apply a compatible retained-state update, continue safely fenced operations and remove the owned runtime while retaining data. The [native operator guide](docs/server-management.md) defines its required local PostgreSQL 18 databases, TLS material, trusted verifier and infrastructure authority.

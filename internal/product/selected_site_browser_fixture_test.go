@@ -28,6 +28,21 @@ func TestSelectedSiteBrowserFixture(t *testing.T) {
 	if os.Getenv("RIXA_SELECTED_SITE_OBSERVATION") != "1" {
 		t.Skip("set RIXA_SELECTED_SITE_OBSERVATION=1 for the real selected-site browser fixture")
 	}
+	runSelectedSiteBrowserFixture(t, false)
+}
+
+// The publication variant keeps the same real login, PostgreSQL and TLS
+// environment, but authorizes exactly one selected site's public generation
+// to change. It is separately opt-in from the established draft-only proof.
+func TestSelectedSitePublicationBrowserFixture(t *testing.T) {
+	if os.Getenv("RIXA_SELECTED_SITE_PUBLICATION_OBSERVATION") != "1" {
+		t.Skip("set RIXA_SELECTED_SITE_PUBLICATION_OBSERVATION=1 for the real publication browser proof")
+	}
+	runSelectedSiteBrowserFixture(t, true)
+}
+
+func runSelectedSiteBrowserFixture(t *testing.T, publication bool) {
+	t.Helper()
 	binary, root, dsn := os.Getenv("RIXA_SELECTED_SITE_BINARY"), os.Getenv("RIXA_SELECTED_SITE_ROOT"), os.Getenv("RIXA_TEST_POSTGRES_DSN")
 	if !filepath.IsAbs(binary) || !filepath.IsAbs(root) || root == "/" || dsn == "" {
 		t.Fatal("selected-site fixture requires an absolute executable, new private root and disposable PostgreSQL DSN")
@@ -115,6 +130,9 @@ func TestSelectedSiteBrowserFixture(t *testing.T) {
 		Schema: "rixa.selected-site-browser.v1", BinarySHA256: digest, Control: raw.Control.Origin,
 		SiteA: raw.Sites[0].Origin, SiteB: raw.Sites[1].Origin,
 	}
+	if publication {
+		receipt.Schema = "rixa.selected-site-publication-browser.v1"
+	}
 	for i, host := range []string{"a.localhost", "b.localhost"} {
 		session := h.login(host, []string{"site-a-admin", "site-b-admin"}[i], []string{testSiteAPassword, testSiteBPassword}[i])
 		site := h.seedSite(host, raw.Sites[i].ID, session, uint8(40+i*80))
@@ -155,25 +173,94 @@ func TestSelectedSiteBrowserFixture(t *testing.T) {
 	if browserExecutableDigest(t, binary) != digest {
 		t.Fatal("selected-site browser acceptance changed its executable")
 	}
-	if !equalSelectedSiteFiles(beforeFiles, snapshotRetainedFiles(t, raw.Sites)) {
-		t.Fatal("draft browser journey changed Media originals or static publication files")
-	}
+	afterFiles := snapshotRetainedFiles(t, raw.Sites)
 	afterRows := snapshotRetainedRows(t, ctx, dsns)
-	for table, before := range beforeRows {
-		// Only session/audit and source-editorial effects are accepted here.
-		if selectedSiteMutableTable(table) {
-			continue
+	if publication {
+		assertSelectedPublicationBrowserIsolation(t, ctx, dsns, root, beforeFiles, afterFiles, beforeRows, afterRows)
+	} else {
+		if !equalSelectedSiteFiles(beforeFiles, afterFiles) {
+			t.Fatal("draft browser journey changed Media originals or static publication files")
 		}
-		if afterRows[table] != before {
-			t.Fatalf("draft browser journey changed an out-of-scope table: %s", table)
+		for table, before := range beforeRows {
+			// Only session/audit and source-editorial effects are accepted here.
+			if selectedSiteMutableTable(table) {
+				continue
+			}
+			if afterRows[table] != before {
+				t.Fatalf("draft browser journey changed an out-of-scope table: %s", table)
+			}
 		}
 	}
 	afterConfig, err := os.ReadFile(configPath)
 	if err != nil || !bytes.Equal(beforeConfig, afterConfig) {
 		t.Fatal("draft browser journey changed product configuration")
 	}
-	assertSelectedSiteAttemptIsolation(t, ctx, dsns, filepath.Join(root, "selected-site-attempts.jsonl"))
-	t.Log("RIXA_SELECTED_SITE_BROWSER unchanged_binary=true private_originals_static_config_ledgers_accounts=true attempted_operations_scoped_deduplicated=true")
+	if publication {
+		t.Log("RIXA_SELECTED_PUBLICATION_BROWSER unchanged_binary_config=true site_b_public_private_and_data_unchanged=true site_a_media_unchanged=true site_a_public_generation_changed=true")
+	} else {
+		assertSelectedSiteAttemptIsolation(t, ctx, dsns, filepath.Join(root, "selected-site-attempts.jsonl"))
+		t.Log("RIXA_SELECTED_SITE_BROWSER unchanged_binary=true private_originals_static_config_ledgers_accounts=true attempted_operations_scoped_deduplicated=true")
+	}
+}
+
+func assertSelectedPublicationBrowserIsolation(t *testing.T, ctx context.Context, dsns map[string]string, root string, beforeFiles, afterFiles, beforeRows, afterRows map[string]string) {
+	t.Helper()
+	// All site-B and all private originals must remain exactly unchanged,
+	// including absence of new files. Site-A alone may activate new generations.
+	for _, fileSet := range []map[string]string{beforeFiles, afterFiles} {
+		for key := range fileSet {
+			if !strings.HasPrefix(key, "site-b/") && !strings.HasPrefix(key, "site-a/media/") {
+				continue
+			}
+			if beforeFiles[key] != afterFiles[key] {
+				t.Fatalf("publication browser changed a protected file: %s", key)
+			}
+		}
+	}
+	changedPublic := false
+	for key, before := range beforeFiles {
+		if strings.HasPrefix(key, "site-a/public/") && afterFiles[key] != before {
+			changedPublic = true
+		}
+	}
+	for key := range afterFiles {
+		if strings.HasPrefix(key, "site-a/public/") && beforeFiles[key] != afterFiles[key] {
+			changedPublic = true
+		}
+	}
+	if !changedPublic {
+		t.Fatal("publication browser did not activate a new site-A public generation")
+	}
+	for table, before := range beforeRows {
+		// All site-B tables, including identity sessions and audit, must remain
+		// untouched. Only the active control session/audit and site-A
+		// publication/editorial/session/audit state may legitimately change.
+		if !strings.HasPrefix(table, "b/") &&
+			(strings.HasSuffix(table, "/\"identity\".\"sessions\"") ||
+				strings.HasSuffix(table, "/\"audit\".\"records\"") ||
+				strings.HasPrefix(table, "a/\"rixa\".")) {
+			continue
+		}
+		if afterRows[table] != before {
+			t.Fatalf("publication browser changed a protected table: %s", table)
+		}
+	}
+	operations, err := readSelectedPublicationJournal(filepath.Join(root, "publication-attempts.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, operationID := range operations {
+		conn, e := pgx.Connect(ctx, dsns["b"])
+		if e != nil {
+			t.Fatal(e)
+		}
+		var count int
+		e = conn.QueryRow(ctx, "SELECT count(*) FROM rixa.operations WHERE operation_id=$1", operationID).Scan(&count)
+		_ = conn.Close(ctx)
+		if e != nil || count != 0 {
+			t.Fatal("site-A browser mutation escaped to site-B editorial operations")
+		}
+	}
 }
 
 type selectedSiteFixtureReceipt struct {
