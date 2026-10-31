@@ -174,7 +174,7 @@ func TestSelectedPublicationIntentAndRecovery(t *testing.T) {
 }
 func TestPublicationOperationInspectionDistinguishesGenerationFromRevision(t *testing.T) {
 	for _, key := range []string{"publication_operation_committed", "publication_outcome_unverified",
-		"detail.kind === \"publication.apply\"", "detail.result_generation", "matchesScope(detail)"} {
+		"detail.kind === \"publication.apply\"", "detail.result_generation", "matchesScope(detail)", "validGeneration(detail.result_generation)"} {
 		if !strings.Contains(contentEditorJS, key) {
 			t.Fatalf("publication inspection lost %s", key)
 		}

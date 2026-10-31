@@ -507,9 +507,20 @@ const contentEditorCSS = `.selected-site{border-inline-start:3px solid GrayText;
 const contentEditorPrimitivesJS = `
 "use strict";
 (() => {
-  const base = document.querySelector("[data-content-workspace]")?.dataset.base || "/admin/content";
+  const scope = document.querySelector("[data-content-workspace]");
+  const base = scope?.dataset.base || "/admin/content";
   const status = document.getElementById("status");
   const i18n = window.AChrixI18n;
+  // This editor controller and the draft-recovery controller are separate
+  // closures. Scope validation belongs in each real consumer, not an implied
+  // cross-script global. The returned generation is a fixed-length public ID.
+  function matchesScope(result) {
+    return !!result && (!scope?.dataset.siteId ||
+      result.site_id === scope.dataset.siteId && result.origin === scope.dataset.origin);
+  }
+  function validGeneration(value) {
+    return typeof value === "string" && /^[A-Z2-7]{26}$/.test(value);
+  }
   function isolated(value) {
     const node = document.createElement("bdi");
     node.dir = "ltr";
@@ -716,7 +727,10 @@ const contentEditorPrimitivesJS = `
 
   document.querySelectorAll("[data-publication-apply]").forEach(form => form.addEventListener("admin:success", event => {
     const generation = event.detail?.generation;
-    if (!generation) return;
+    if (!matchesScope(event.detail) || !validGeneration(generation)) {
+      if (status) status.textContent = i18n.text("rixa", "publication_outcome_unverified");
+      return;
+    }
     document.querySelectorAll("[data-publication-generation]").forEach(field => field.value = generation);
     const output = document.querySelector("[data-publication-generation-output]");
     if (output) output.textContent = generation;
@@ -733,7 +747,7 @@ const contentEditorPrimitivesJS = `
       // A coherent public generation is not an editorial revision. Inspection
       // reports a historical committed generation, not necessarily the active
       // generation after another publication.
-      if (!matchesScope(detail) || !validID(detail.result_generation)) {
+      if (!matchesScope(detail) || !validGeneration(detail.result_generation)) {
         if (status) status.textContent = i18n.text("rixa", "publication_outcome_unverified");
         return;
       }
