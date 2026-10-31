@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -39,6 +40,11 @@ type PublicationRequest struct {
 	ExpectedGeneration string
 	ContentID          string
 	Route              string
+	// Nonzero target preconditions bind a reviewed selected-site change to the
+	// actual current editorial head/intent. Zero preserves legacy direct paths.
+	ExpectedHead           int64
+	ExpectedIntentVersion  int64
+	ExpectedIntentRevision int64
 }
 
 type PublicationResult struct {
@@ -306,6 +312,10 @@ func (s *PublicationService) Apply(ctx context.Context, actor achrix.Principal, 
 	if request.ContentID != "" && !validEditorialID(request.ContentID) {
 		return PublicationResult{}, ErrEditorialInvalid
 	}
+	preconditioned := request.ExpectedHead != 0 || request.ExpectedIntentVersion != 0 || request.ExpectedIntentRevision != 0
+	if preconditioned && (request.ContentID == "" || request.ExpectedHead < 1 || request.ExpectedIntentVersion < 1 || request.ExpectedIntentRevision < 0) {
+		return PublicationResult{}, ErrEditorialInvalid
+	}
 	if request.ContentID == "" && request.Route != "" {
 		return PublicationResult{}, ErrEditorialInvalid
 	}
@@ -318,9 +328,14 @@ func (s *PublicationService) Apply(ctx context.Context, actor achrix.Principal, 
 		return PublicationResult{}, err
 	}
 
-	requestHash := operationRequestHash(
-		"publication.apply", string(actor), request.ExpectedGeneration, request.ContentID, request.Route,
-	)
+	hashParts := []string{"publication.apply", string(actor), request.ExpectedGeneration, request.ContentID, request.Route}
+	if preconditioned {
+		hashParts = append(hashParts, "reviewed-content.v1",
+			strconv.FormatInt(request.ExpectedHead, 10),
+			strconv.FormatInt(request.ExpectedIntentVersion, 10),
+			strconv.FormatInt(request.ExpectedIntentRevision, 10))
+	}
+	requestHash := operationRequestHash(hashParts...)
 
 	if s.applyGate == nil {
 		return PublicationResult{}, ErrEditorialUnavailable
@@ -352,6 +367,22 @@ func (s *PublicationService) Apply(ctx context.Context, actor achrix.Principal, 
 		return PublicationResult{}, err
 	}
 	defer releaseSource()
+
+	// Validation under the publication source gate prevents reviewed intent
+	// changes from being silently replaced before an activation begins.
+	// Existing operation-ID reconciliation above intentionally precedes this
+	// check: a committed lost-ack result remains inspectable after edits.
+	if preconditioned {
+		head, headErr := s.editorial.store.head(ctx, request.ContentID)
+		if headErr != nil {
+			return PublicationResult{}, headErr
+		}
+		if head.Revision != request.ExpectedHead ||
+			head.PublicationIntentVersion != request.ExpectedIntentVersion ||
+			head.PublicationIntentRevision != request.ExpectedIntentRevision {
+			return PublicationResult{}, ErrEditorialConflict
+		}
+	}
 
 	current := s.state.Load()
 	currentGeneration := ""

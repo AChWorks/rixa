@@ -266,6 +266,41 @@ func (s *ControlService) SaveSiteAppearance(ctx context.Context, actor achrix.Pr
 	return site.Editorial.SaveAppearance(ctx, site.operator, operationID, expectedHead, input)
 }
 
+// Publication remains site-owned. Every control-origin operation revalidates
+// the exact site grant and delegates through its trusted site operator.
+func (s *ControlService) SetSitePublicationIntent(ctx context.Context, actor achrix.Principal, siteID, operationID, contentID string, expectedHead, expectedVersion, revision int64) (ContentRevision, error) {
+	site, err := s.site(ctx, actor, siteID)
+	if err != nil {
+		return ContentRevision{}, err
+	}
+	return site.Editorial.SetPublicationIntent(ctx, site.operator, operationID, contentID, expectedHead, expectedVersion, revision)
+}
+
+func (s *ControlService) ClearSitePublicationIntent(ctx context.Context, actor achrix.Principal, siteID, operationID, contentID string, expectedHead, expectedVersion int64) (ContentRevision, error) {
+	site, err := s.site(ctx, actor, siteID)
+	if err != nil {
+		return ContentRevision{}, err
+	}
+	return site.Editorial.ClearPublicationIntent(ctx, site.operator, operationID, contentID, expectedHead, expectedVersion)
+}
+
+func (s *ControlService) SitePublicationState(ctx context.Context, actor achrix.Principal, siteID, contentID string, kind ContentKind) (PublicationState, error) {
+	site, err := s.site(ctx, actor, siteID)
+	if err != nil {
+		return PublicationState{}, err
+	}
+	if site.Publication == nil {
+		return PublicationState{}, ErrEditorialUnavailable
+	}
+	if !validEditorialID(contentID) || !validContentKind(kind) {
+		return PublicationState{}, ErrEditorialInvalid
+	}
+	if _, err = site.Editorial.Head(ctx, site.operator, contentID); err != nil {
+		return PublicationState{}, err
+	}
+	return site.Publication.State(contentID, kind), nil
+}
+
 func (s *ControlService) ApplySitePublication(ctx context.Context, actor achrix.Principal, siteID string, request PublicationRequest) (PublicationResult, error) {
 	site, err := s.site(ctx, actor, siteID)
 	if err != nil {

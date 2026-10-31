@@ -12,6 +12,7 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -508,6 +509,110 @@ func testTrustedTLSIngress(t *testing.T, parent context.Context, config Config, 
 		return payload.CSRF
 	}
 	controlSession.csrf = refreshControlCSRF()
+
+	// This TLS runtime intentionally has NO public roots (configured above).
+	// A real authenticated control session must still be able to create,
+	// edit, inspect and preview private drafts on such an enabled site.
+	if runtime.Sites["site-a"].Publication != nil {
+		t.Fatal("no-root runtime unexpectedly composed a publication service")
+	}
+	selectedPath := "/admin/sites/site/site-a/content"
+	selectedRead := func(path string, want int) string {
+		t.Helper()
+		response, requestErr := request("control.rixa.test", http.MethodGet, path, nil, nil, controlSession.cookie)
+		if requestErr != nil {
+			t.Fatal(requestErr)
+		}
+		defer response.Body.Close()
+		data, readErr := io.ReadAll(response.Body)
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if response.StatusCode != want {
+			t.Fatalf("selected read %s status=%d want=%d body=%s", path, response.StatusCode, want, data)
+		}
+		return string(data)
+	}
+	if page := selectedRead(selectedPath+"/", http.StatusOK); !strings.Contains(page, "Saved content") {
+		t.Fatal("no-root selected content inventory is missing")
+	}
+	saved, readErr := runtime.ControlService().ListSiteContent(parent, controlSession.principal, "site-a")
+	if readErr != nil || len(saved) == 0 {
+		t.Fatalf("no-root selected site lost saved entries: %#v %v", saved, readErr)
+	}
+	itemID := saved[0].ID
+	for _, path := range []string{selectedPath + "/edit/" + itemID,
+		selectedPath + "/history/" + itemID + "/before/" + encodeRevisionPageCursor(itemID, 1),
+		selectedPath + "/preview/" + itemID + "/1"} {
+		page := selectedRead(path, http.StatusOK)
+		if strings.Contains(page, "data-publication-apply") || strings.Contains(page, "publication-intent-clear") {
+			t.Fatalf("no-root draft presented public actions at %s", path)
+		}
+	}
+	selectedPost := func(path string, body map[string]string, want int) map[string]string {
+		t.Helper()
+		payload, e := json.Marshal(body)
+		if e != nil {
+			t.Fatal(e)
+		}
+		response, e := request("control.rixa.test", http.MethodPost, path, payload, map[string]string{
+			"Content-Type": "application/json",
+			"Origin":       config.Control.Origin,
+			"X-CSRF-Token": controlSession.csrf,
+		}, controlSession.cookie)
+		if e != nil {
+			t.Fatal(e)
+		}
+		defer response.Body.Close()
+		raw, e := io.ReadAll(response.Body)
+		if e != nil {
+			t.Fatal(e)
+		}
+		if response.StatusCode != want {
+			t.Fatalf("selected mutation %s: %d want=%d body=%s", path, response.StatusCode, want, raw)
+		}
+		data := map[string]string{}
+		if e = json.Unmarshal(raw, &data); e != nil {
+			t.Fatalf("selected mutation %s response: %v", path, e)
+		}
+		return data
+	}
+	draftCreated := selectedPost(selectedPath+"/create", map[string]string{
+		"operation_id": newOperationID(), "kind": "post", "title": "No-root private draft", "body_html": "<p>Private draft</p>",
+	}, http.StatusOK)
+	if !validEditorialID(draftCreated["id"]) || draftCreated["revision"] != "1" {
+		t.Fatalf("no-root create: %#v", draftCreated)
+	}
+	draftUpdated := selectedPost(selectedPath+"/save", map[string]string{
+		"operation_id": newOperationID(), "id": draftCreated["id"], "expected_head": "1",
+		"title": "No-root saved draft", "body_html": "<p>Only private source</p>",
+	}, http.StatusOK)
+	if draftUpdated["revision"] != "2" || draftUpdated["id"] != draftCreated["id"] {
+		t.Fatalf("no-root save: %#v", draftUpdated)
+	}
+	for _, path := range []string{selectedPath + "/edit/" + draftCreated["id"],
+		selectedPath + "/history/" + draftCreated["id"] + "/before/" + encodeRevisionPageCursor(draftCreated["id"], 2),
+		selectedPath + "/preview/" + draftCreated["id"] + "/1",
+		selectedPath + "/preview/" + draftCreated["id"] + "/2"} {
+		selectedRead(path, http.StatusOK)
+	}
+	for _, path := range []string{selectedPath + "/publication-intent", selectedPath + "/publication-intent-clear", selectedPath + "/publish"} {
+		selectedPost(path, map[string]string{"operation_id": newOperationID()}, http.StatusNotFound)
+	}
+	if _, e := runtime.ControlService().ApplySitePublication(parent, controlSession.principal, "site-a", PublicationRequest{OperationID: newOperationID()}); !errors.Is(e, ErrEditorialUnavailable) {
+		t.Fatalf("unconfigured publication applied: %v", e)
+	}
+	for _, siteID := range []string{"disabled", "unknown"} {
+		selectedRead("/admin/sites/site/"+siteID+"/content/", http.StatusForbidden)
+	}
+	noSession, e := request("control.rixa.test", http.MethodGet, selectedPath+"/", nil, nil, nil)
+	if e != nil {
+		t.Fatal(e)
+	}
+	_ = noSession.Body.Close()
+	if noSession.StatusCode == http.StatusOK {
+		t.Fatal("unauthenticated control reached selected draft")
+	}
 
 	if _, directErr := runtime.Sites["site-a"].Identity.CreateAccount(parent, runtime.Control.AdminPrincipal, "direct-control-denied", "Direct-Control-Denied-2026!"); !errors.Is(directErr, achrix.ErrDenied) {
 		t.Fatalf("control principal bypassed target site policy: %v", directErr)

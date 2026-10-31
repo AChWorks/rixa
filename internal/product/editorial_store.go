@@ -276,6 +276,15 @@ func (s *EditorialService) Save(ctx context.Context, actor achrix.Principal, ope
 	if err != nil {
 		return ContentRevision{}, err
 	}
+	// A reviewed publication pins the current saved head through activation.
+	// Acquire the same site-owned source gate as Apply and intent updates
+	// only for the database mutation; validation and Media lookups stay
+	// outside the gate to keep the critical section bounded.
+	release, err := s.acquirePublicationSource(ctx)
+	if err != nil {
+		return ContentRevision{}, err
+	}
+	defer release()
 	return s.store.save(ctx, string(actor), operationID, id, expectedHead, title, canonical, refs)
 }
 

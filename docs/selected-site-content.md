@@ -2,11 +2,19 @@
 
 Sign in at the configured control administration origin, open **Sites**, and choose **Manage content** for a declared site you may manage. The workspace shows that site's stable ID and public origin. Switching sites is explicit navigation; a control login remains separate from every site's own login.
 
-Create a post or page, open its latest saved version, edit and save. Saving creates a source revision; it does not publish, correct or withdraw public output. The selected-site workspace currently provides this saved-content workflow. The site's own administration retains its existing publication, Media and appearance flows.
+Create a post or page, open its latest saved version, edit and save. Saving creates a source revision; it does not publish, correct or withdraw public output. The selected-site workspace provides both saved content and a separately confirmed public publication workflow. The site's own administration retains its existing publication, Media and appearance flows.
 
 The content list and revision history have bounded pages. Follow **More content** or **Older revisions** to continue; the shown count describes the current page. Concurrent edits may move content between pages, so refresh the first page when you need a current starting view. Revision previews identify an exact saved version.
 
 Private preview requires administration authority. Root-relative content links point to the selected site's declared public origin. Private originals remain private attachments/placeholders; preview does not authorize their publication.
+
+## Publishing or withdrawing from one selected site
+
+After saving, inspect the exact content head, intended public revision, the active public generation and the proposed public route. **Set publication intent** selects a saved revision without publishing it. **Clear publication intent** prepares withdrawal without immediately changing the public site. Preview the intended saved revision before applying. A cleared intent has revision zero; save and intent editing do not publish automatically.
+
+**Apply coherent publication** operates on the current selected site's *entire public generation*, not just the open article. Other marked content, withdrawals, appearance and site navigation can also change. The page explicitly identifies the SiteID and public origin and asks you to review the proposed route and acknowledge that site-wide consequence before submitting. Changing the proposed route, saving or changing publication intent resets the confirmation. A selected-site publish requires a current saved-head revision, intent-version, intended revision and expected active generation; stale values are rejected rather than silently overwriting a newer change. Content remains in that site's own database and public root; nothing fans out to another site.
+
+A successful response shows the new public generation and an **Open public site** link. On timeout or a lost response, **do not submit a different request under a new ID**. Retain the exact operation ID and payload, use **Inspect mutation outcome** on that same selected site, and retry only the original exact request if inspection does not establish a result. A change to the route or reviewed versions under an already-used ID returns a conflict. Reload the editor before planning another operation; this replaces stale UI values with current authoritative state. Withdrawal may return **410 Gone** for previously published routes, not a silent deletion.
 
 ## Saving and recovery
 

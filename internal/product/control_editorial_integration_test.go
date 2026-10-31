@@ -65,8 +65,8 @@ func TestSelectedSiteDraftPaginationAndRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a := &EditorialService{app: aApp, store: aStore}
-	b := &EditorialService{app: bApp, store: bStore}
+	a := &EditorialService{app: aApp, store: aStore, publicationGate: make(chan struct{}, 1)}
+	b := &EditorialService{app: bApp, store: bStore, publicationGate: make(chan struct{}, 1)}
 	control := &ControlService{
 		control: &ControlRuntime{App: controlApp},
 		sites: map[string]*SiteRuntime{
