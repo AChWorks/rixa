@@ -72,13 +72,13 @@ func TestRetainedReleaseUpgrade(t *testing.T) {
 	}
 	verifyRetainedBaseline(t, binary)
 	for module, expected := range map[string]string{
-		"github.com/AChWorks/achrix":              "v0.4.0",
-		"github.com/AChWorks/achrix/admin":        "v0.2.0",
-		"github.com/AChWorks/achrix/audit":        "v0.1.0",
-		"github.com/AChWorks/achrix/identity":     "v0.2.0",
-		"github.com/AChWorks/achrix/installation": "v0.1.0",
-		"github.com/AChWorks/achrix/media":        "v0.2.0",
-		"github.com/AChWorks/achrix/multisite":    "v0.1.0",
+		"github.com/AChWorks/achrix":              "v0.5.0",
+		"github.com/AChWorks/achrix/admin":        "v0.3.0",
+		"github.com/AChWorks/achrix/audit":        "v0.2.0",
+		"github.com/AChWorks/achrix/identity":     "v0.3.0",
+		"github.com/AChWorks/achrix/installation": "v0.2.0",
+		"github.com/AChWorks/achrix/media":        "v0.3.0",
+		"github.com/AChWorks/achrix/multisite":    "v0.1.1",
 	} {
 		if achrix.DependencyVersion(module) != expected {
 			t.Fatalf("retained-upgrade candidate component identity mismatch: %s", module)
@@ -273,7 +273,7 @@ func TestRetainedReleaseUpgrade(t *testing.T) {
 		t.Fatal("control principal bypassed site authorization after upgrade")
 	}
 	stopNew()
-	t.Log("RIXA_RETAINED_UPGRADE baseline=v0.3.0 core=v0.4.0 localized_components=v0.2.0 sites=2 exact_rows_files_ledgers=true physical_targets_retained=true scoped_restart=true valid_sessions_retained=true revoked_foreign_denied=true control_dispatch=true")
+	t.Log("RIXA_RETAINED_UPGRADE baseline=v0.3.0 candidate_core=v0.5.0 candidate_audit=v0.2.0 sites=2 exact_rows_files_ledgers=true physical_targets_retained=true scoped_restart=true valid_sessions_retained=true revoked_foreign_denied=true control_dispatch=true")
 }
 
 func verifyRetainedBaseline(t *testing.T, path string) {

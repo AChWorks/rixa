@@ -139,7 +139,7 @@ func TestRuntimeIsolationLifecycleAndTLSIngress(t *testing.T) {
 	if runtime.Sites["disabled"] != nil {
 		t.Fatal("disabled site acquired resources")
 	}
-	if achrix.Version() != "v0.4.0" {
+	if achrix.Version() != "v0.5.0" {
 		t.Fatalf("unexpected Foundation identity %q", achrix.Version())
 	}
 	if err = runtime.Start(ctx); err != nil {

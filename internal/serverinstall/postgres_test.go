@@ -416,6 +416,13 @@ func TestPostgresNamespaceNeverClaimsExistingForeignData(t *testing.T) {
 			if e := os.MkdirAll(b.namespace(j), 0755); e != nil {
 				t.Fatal(e)
 			}
+			// The fixture models product-owned public directories. MkdirAll
+			// inherits the process umask and cannot establish their exact mode.
+			for _, path := range []string{b.path(postgresDataRoot), b.namespace(j)} {
+				if e := os.Chmod(path, 0755); e != nil {
+					t.Fatal(e)
+				}
+			}
 			if name == "foreign-data" {
 				if e := os.Mkdir(b.data(j), 0700); e != nil {
 					t.Fatal(e)
