@@ -322,6 +322,9 @@ func (s *EditorialService) ClearPublicationIntent(ctx context.Context, actor ach
 	return s.store.publicationIntent(ctx, string(actor), operationID, id, expectedHead, expectedPublicationVersion, 0, true)
 }
 
+// Operation is the existing administrator-only, collection-wide receipt
+// inspection path. Ordinary members use OwnOperation instead so a rejected
+// administrator access check never grants or double-checks a different scope.
 func (s *EditorialService) Operation(ctx context.Context, actor achrix.Principal, operationID string) (EditorialOperation, error) {
 	if !validOperationID(operationID) && operationID != "bootstrap:appearance" {
 		return EditorialOperation{}, ErrEditorialInvalid
@@ -330,6 +333,19 @@ func (s *EditorialService) Operation(ctx context.Context, actor achrix.Principal
 		return EditorialOperation{}, err
 	}
 	return s.store.operation(ctx, operationID)
+}
+
+// OwnOperation allows a current site editor to reconcile only their own
+// committed private create/save receipt. An absent receipt is NOT evidence
+// that an in-flight write failed and never permits a fresh-ID replay.
+func (s *EditorialService) OwnOperation(ctx context.Context, actor achrix.Principal, operationID string) (EditorialOperation, error) {
+	if !validOperationID(operationID) {
+		return EditorialOperation{}, ErrEditorialInvalid
+	}
+	if err := s.authorize(ctx, actor, CapabilityContentEdit, ContentCollectionTarget); err != nil {
+		return EditorialOperation{}, err
+	}
+	return s.store.ownDraftOperation(ctx, operationID, string(actor))
 }
 
 func (s *EditorialService) Appearance(ctx context.Context, actor achrix.Principal) (Appearance, error) {
@@ -755,6 +771,33 @@ func (s *editorialStore) operation(parent context.Context, operationID string) (
 	if !found {
 		return EditorialOperation{}, ErrEditorialNotFound
 	}
+	return op, nil
+}
+
+// ownDraftOperation never reads the unscoped operation ledger on behalf of
+// an ordinary member. The unique revision operation ID supplies the persisted
+// actor attribution, and both revisions and operations live in this site's DB.
+func (s *editorialStore) ownDraftOperation(parent context.Context, operationID, actor string) (EditorialOperation, error) {
+	ctx, conn, release, err := s.connection(parent)
+	if err != nil {
+		return EditorialOperation{}, err
+	}
+	defer release()
+	var op EditorialOperation
+	err = conn.QueryRow(ctx, `
+		SELECT o.operation_id,o.kind,o.resource_id,o.request_hash,o.result_revision,o.created_at
+		FROM rixa.operations o
+		JOIN rixa.content_revisions r ON r.operation_id=o.operation_id
+			AND r.item_id=o.resource_id AND r.revision=o.result_revision
+		WHERE o.operation_id=$1 AND r.actor=$2
+			AND o.kind IN ('content.create','content.save')
+	`, operationID, actor).Scan(
+		&op.ID, &op.Kind, &op.ResourceID, &op.RequestHash, &op.ResultRevision, &op.CreatedAt,
+	)
+	if err != nil {
+		return EditorialOperation{}, editorialReadError(err)
+	}
+	op.CreatedAt = op.CreatedAt.UTC()
 	return op, nil
 }
 
