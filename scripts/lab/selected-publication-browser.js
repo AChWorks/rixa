@@ -3,6 +3,19 @@
 
 // Browser-driven, real-control-login, real-PostgreSQL selected-site publication.
 // This code is intended only for the explicitly disposable loopback fixture.
+// All three observations are required. A committed 200 *without* a failed
+// browser request and an uncertain-result UI cannot prove a lost acknowledgment.
+function assertPublicationLostAcknowledgment({operationID, receipt, abort, failedRequest, uncertainUI}) {
+  if (!receipt || receipt.operation_id !== operationID || receipt.status !== 200 ||
+      !/^[A-Z2-7]{26}$/.test(receipt.generation || "") ||
+      !abort || abort.operation_id !== operationID || abort.completed !== true ||
+      !failedRequest || failedRequest.operation_id !== operationID ||
+      typeof failedRequest.error !== "string" || !failedRequest.error ||
+      uncertainUI !== true) {
+    throw new Error("lost acknowledgment did not reach the original browser request and uncertain-result UI");
+  }
+}
+
 async function rixaSelectedPublicationBrowser({browser, context, page, fixture, privateRoot}) {
   const check = (ok, message) => { if (!ok) throw new Error(message); };
   check(fixture && fixture.schema === "rixa.selected-site-publication-browser.v1", "wrong publication fixture");
@@ -66,7 +79,17 @@ async function rixaSelectedPublicationBrowser({browser, context, page, fixture, 
   let failNextPublishAcknowledgement = false;
   let lostReceipt;
   let resolveLost;
-  const lostForwarded = new Promise(resolve => { resolveLost = resolve; });
+  const lostAborted = new Promise(resolve => { resolveLost = resolve; });
+  async function bounded(promise, ms, label) {
+    let timer;
+    try {
+      return await Promise.race([promise, new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(label)), ms);
+      })]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
   await context.route(pattern, async intercepted => {
     const request = intercepted.request();
     if (request.method() !== "POST") return intercepted.continue();
@@ -82,18 +105,25 @@ async function rixaSelectedPublicationBrowser({browser, context, page, fixture, 
       if (failNextPublishAcknowledgement && request.url().endsWith("/publish")) {
         failNextPublishAcknowledgement = false;
         const result = await localRequest(request.url(), "POST", await request.allHeaders(), payload);
-        await record({type: "effect_receipt_before_lost_ack", site_id: "site-a",
-          operation_id: data.operation_id, status: result.status});
         check(result.status === 200, "withdrawal was not committed before simulated lost acknowledgement");
         lostReceipt = JSON.parse(result.text);
-        resolveLost();
-        return intercepted.abort("failed");
+        check(lostReceipt.operation_id === data.operation_id &&
+          /^[A-Z2-7]{26}$/.test(lostReceipt.generation || ""), "real committed receipt identity invalid");
+        await record({type: "effect_receipt_before_lost_ack", site_id: "site-a",
+          operation_id: data.operation_id, status: result.status, generation: lostReceipt.generation});
+        // Completion is signaled only once Playwright finishes aborting
+        // this exact intercepted browser request, not merely after HTTP 200.
+        await intercepted.abort("failed");
+        resolveLost({operation_id: data.operation_id, completed: true});
+        return;
       }
       return intercepted.continue();
     } catch (error) {
       errors.push("interception: " + String(error.message));
       await intercepted.abort("failed").catch(() => {});
-      resolveLost();
+      if (request.url().endsWith("/publish")) {
+        resolveLost({operation_id: "", completed: false, error: String(error)});
+      }
     }
   });
 
@@ -187,12 +217,50 @@ async function rixaSelectedPublicationBrowser({browser, context, page, fixture, 
     check(await withdraw.locator("input[name=expected_intent_revision]").inputValue() === "0",
       "cleared intent not carried to Apply");
     await withdraw.locator("[data-confirm]").check();
+    // Observe the product's real admin:failure event in the same live page.
+    // This captures only boolean state; no credentials or response data.
+    await page.evaluate(() => {
+      document.querySelector("[data-publication-apply]").addEventListener("admin:failure", event => {
+        window.__rixaPublicationFailure = {
+          unknown: event.detail?.unknown === true,
+          acknowledged: event.detail?.acknowledged === true
+        };
+      }, {once: true});
+    });
+    const withdrawalFailure = page.waitForEvent("requestfailed", {
+      predicate: request => {
+        if (request.method() !== "POST" || new URL(request.url()).pathname !== base + "/publish" ||
+            new URL(request.url()).origin !== fixture.control) return false;
+        try { return JSON.parse(request.postData() || "{}").operation_id === withdrawID; }
+        catch (_) { return false; }
+      },
+      timeout: 12000
+    });
     failNextPublishAcknowledgement = true;
     await withdraw.locator("button[type=submit]").click();
-    await lostForwarded;
-    check(lostReceipt && /^[A-Z2-7]{26}$/.test(lostReceipt.generation) &&
-      lostReceipt.generation !== publishedGeneration && lostReceipt.operation_id === withdrawID,
-      "lost acknowledgement was not from actual committed withdrawal");
+    // The event is bounded and matches both the exact request path and ID.
+    // HTTP 200 alone (or initiating abort without its completion) cannot pass.
+    const failed = await withdrawalFailure;
+    const abort = await bounded(lostAborted, 12000, "withdrawal route abort did not complete");
+    const errorText = failed.failure()?.errorText || "";
+    const requestFailure = {operation_id: withdrawID, error: errorText};
+    check(!!errorText, "matching withdrawal request lacked an actual transport failure");
+    await record({type: "browser_request_failed", site_id: "site-a",
+      operation_id: withdrawID, error: errorText});
+    await page.waitForFunction(operationID => {
+      const failure = window.__rixaPublicationFailure;
+      return failure?.unknown === true && failure.acknowledged === false &&
+        document.querySelector("[data-operation-lookup-input]")?.value === operationID &&
+        document.getElementById("status")?.textContent?.includes(operationID);
+    }, withdrawID, {timeout: 12000});
+    const uncertainUI = await page.evaluate(() => window.__rixaPublicationFailure?.unknown === true);
+    assertPublicationLostAcknowledgment({
+      operationID: withdrawID,
+      receipt: {...lostReceipt, status: 200},
+      abort, failedRequest: requestFailure, uncertainUI
+    });
+    check(lostReceipt.generation !== publishedGeneration, "withdrawal did not advance public generation");
+    await record({type: "uncertain_result_observed", site_id: "site-a", operation_id: withdrawID});
     const aGone = await localRequest(fixture.site_a + route);
     check(aGone.status === 410, "withdrawn real public HTTPS route is not 410 Gone");
     await page.locator("[data-operation-lookup-input]").fill(withdrawID);
@@ -208,7 +276,7 @@ async function rixaSelectedPublicationBrowser({browser, context, page, fixture, 
       "site B public generation changed");
     check(errors.length === 0, "product/browser JavaScript errors: " + errors.join("; "));
     mark("site-b-preserved-and-no-js-errors");
-    await record({type: "complete", site_id: "site-a", checks: [...checks],
+    await record({type: "complete", site_id: "site-a", operation_id: withdrawID, checks: [...checks],
       published_generation: publishedGeneration, withdrawn_generation: lostReceipt.generation});
     return result;
   } finally {

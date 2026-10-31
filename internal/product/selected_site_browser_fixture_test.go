@@ -245,54 +245,21 @@ func assertSelectedPublicationBrowserIsolation(t *testing.T, ctx context.Context
 			t.Fatalf("publication browser changed a protected table: %s", table)
 		}
 	}
-	file, err := os.Open(filepath.Join(root, "publication-attempts.jsonl"))
+	operations, err := readSelectedPublicationJournal(filepath.Join(root, "publication-attempts.jsonl"))
 	if err != nil {
-		t.Fatal("publication browser journal missing")
+		t.Fatal(err)
 	}
-	defer file.Close()
-	info, err := file.Stat()
-	if err != nil || info.Size() <= 0 || info.Size() > 1<<20 {
-		t.Fatal("publication browser journal missing or exceeds bound")
-	}
-	scanner := bufio.NewScanner(io.LimitReader(file, 1<<20))
-	seen := map[string]string{}
-	complete := false
-	for scanner.Scan() {
-		var attempt struct {
-			Type        string `json:"type"`
-			SiteID      string `json:"site_id"`
-			OperationID string `json:"operation_id"`
-			Payload     string `json:"payload"`
-		}
-		if json.Unmarshal(scanner.Bytes(), &attempt) != nil {
-			t.Fatal("invalid publication browser journal entry")
-		}
-		if attempt.Type == "complete" {
-			complete = true
-		}
-		if attempt.Type != "mutation" {
-			continue
-		}
-		if attempt.SiteID != "site-a" || !validOperationID(attempt.OperationID) {
-			t.Fatal("publication mutation not bound to site A and valid operation")
-		}
-		if old, exists := seen[attempt.OperationID]; exists && old != attempt.Payload {
-			t.Fatal("publication retry changed payload under an existing operation ID")
-		}
-		seen[attempt.OperationID] = attempt.Payload
-		var count int
+	for _, operationID := range operations {
 		conn, e := pgx.Connect(ctx, dsns["b"])
 		if e != nil {
 			t.Fatal(e)
 		}
-		e = conn.QueryRow(ctx, "SELECT count(*) FROM rixa.operations WHERE operation_id=$1", attempt.OperationID).Scan(&count)
+		var count int
+		e = conn.QueryRow(ctx, "SELECT count(*) FROM rixa.operations WHERE operation_id=$1", operationID).Scan(&count)
 		_ = conn.Close(ctx)
 		if e != nil || count != 0 {
 			t.Fatal("site-A browser mutation escaped to site-B editorial operations")
 		}
-	}
-	if scanner.Err() != nil || !complete || len(seen) < 4 {
-		t.Fatalf("publication browser journal incomplete: distinct_operations=%d complete=%v", len(seen), complete)
 	}
 }
 

@@ -40,10 +40,22 @@ English/LTR narrow-screen/keyboard and Persian/RTL wide-screen appearance,
 sets reviewed publication intent without publishing, explicitly confirms a
 site-wide Apply, checks anonymous HTTPS public HTML and unchanged site B,
 clears intent without auto-withdrawal, then performs actual withdrawal with
-a deliberately lost HTTP acknowledgment. The result is inspected under the
-*same operation identity* and the public route returns 410 Gone.
+a deliberately lost HTTP acknowledgment. The driver first proves a real
+HTTP 200 effect, awaits the intercepted route abort, and then observes the
+matching Playwright requestfailed event and the Admin Shell's unknown-outcome
+presentation (including the retained operation ID). Only then does it inspect
+the *same operation identity* and verify that the real public route returns
+410 Gone. A successful acknowledgment without a matching failed browser
+request cannot satisfy this acceptance gate.
+
 The driver journals each mutation's exact payload before its effect to a
 bounded 0600 private log without recording headers/cookies/passwords.
+The Go fixture requires the **exact ordered four actions**, one matching
+committed-effect receipt, one observed browser request failure, the matching
+uncertain-result UI observation, and one terminal completion naming all eight
+browser checks. Missing, duplicate, unrecognized, extra fresh-ID and partial
+entries are rejected. An exact same-ID retry would need a separate explicitly
+declared journey; this current proof performs no automatic retry.
 
 After the driver reports success, create an EMPTY finish.request under the
 same fixture root and inspect the actual Go task exit. Go also checks
