@@ -399,6 +399,9 @@
     },
     "publication_outcome_unverified": {
       "other": "This publication result could not be verified for the selected site. Refresh the site and inspect the same operation ID again."
+    },
+    "publication_mark_first": {
+      "other": "Select a saved revision for publication first. Saving alone does not make anything public."
     }
   }
 }

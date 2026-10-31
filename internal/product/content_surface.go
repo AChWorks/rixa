@@ -480,7 +480,8 @@ var contentEditTemplate = template.Must(template.New("content-edit").Parse(`{{de
 {{end}}{{if .Publication.Enabled}}<section><h2>{{.Locale.Text "rixa" "public_publication" nil}}</h2>
 <p>{{.Locale.Text "rixa" "publication_apply_notice" nil}}</p>
 <p>{{.Locale.Text "rixa" "active_generation" nil}}: <output data-publication-generation-output>{{if .Publication.Generation}}{{.Publication.Generation}}{{else}}—{{end}}</output>{{if .Publication.ActiveRevision}} · {{.Locale.Text "rixa" "public_revision" nil}} {{.Publication.ActiveRevision}}{{end}}</p>
-<form data-admin-form data-publication-apply action="{{.Routes.Base}}/publish" method="post">
+{{if .Routes.SiteID}}<p data-publication-mark-first {{if or .Revision.PublicationIntentRevision .Publication.ActiveRevision}}hidden{{end}}>{{.Locale.Text "rixa" "publication_mark_first" nil}}</p>{{end}}
+<form data-admin-form data-publication-apply {{if and .Routes.SiteID (not .Revision.PublicationIntentRevision) (not .Publication.ActiveRevision)}}hidden{{end}} data-active-published="{{if .Publication.ActiveRevision}}true{{else}}false{{end}}" action="{{.Routes.Base}}/publish" method="post">
 <input type="hidden" name="operation_id" value="{{.OperationID}}" data-operation-field>
 <input type="hidden" name="id" value="{{.Revision.ID}}">
 <input type="hidden" name="expected_generation" value="{{.Publication.Generation}}" data-publication-generation>
@@ -715,6 +716,12 @@ const contentEditorPrimitivesJS = `
     if (version) document.querySelectorAll("[data-publication-version-field]").forEach(field => field.value = version);
     const clear = document.querySelector("[data-publication-clear]");
     if (clear && value !== undefined) clear.hidden = value === "0";
+    const apply = document.querySelector("[data-publication-apply]");
+    if (apply && value !== undefined && apply.querySelector("[data-intent-revision-field]")) {
+      apply.hidden = value === "0" && apply.dataset.activePublished !== "true";
+      const prompt = document.querySelector("[data-publication-mark-first]");
+      if (prompt) prompt.hidden = !apply.hidden;
+    }
     const confirmation = document.querySelector("[data-publication-apply] [data-confirm]");
     if (confirmation) confirmation.checked = false;
     rotate(form);
@@ -738,6 +745,13 @@ const contentEditorPrimitivesJS = `
     if (reviewGeneration) reviewGeneration.textContent = generation;
     const result = document.querySelector("[data-publication-result]");
     if (result && matchesScope(event.detail)) result.hidden = false;
+    const intent = form.querySelector("[data-intent-revision-field]");
+    if (intent) {
+      form.dataset.activePublished = intent.value === "0" ? "false" : "true";
+      form.hidden = intent.value === "0";
+      const prompt = document.querySelector("[data-publication-mark-first]");
+      if (prompt) prompt.hidden = !form.hidden;
+    }
     rotate(form);
   }));
 

@@ -17,9 +17,10 @@ import (
 
 type selectedPublicationStub struct {
 	*draftControlStub
-	calls   []draftControlCall
-	request PublicationRequest
-	failure error
+	calls       []draftControlCall
+	request     PublicationRequest
+	failure     error
+	unpublished bool
 }
 
 func publicationStub() *selectedPublicationStub {
@@ -50,7 +51,11 @@ func (s *selectedPublicationStub) ClearSitePublicationIntent(_ context.Context, 
 }
 func (s *selectedPublicationStub) SitePublicationState(_ context.Context, actor achrix.Principal, site, id string, kind ContentKind) (PublicationState, error) {
 	e := s.mark(actor, site, "state")
-	return PublicationState{Enabled: true, Generation: "CCCCCCCCCCCCCCCCCCCCCCCCCC", DesiredRoute: "/posts/review/", ActiveRevision: 1}, e
+	state := PublicationState{Enabled: true, Generation: "CCCCCCCCCCCCCCCCCCCCCCCCCC", DesiredRoute: "/posts/review/", ActiveRevision: 1}
+	if s.unpublished {
+		state.ActiveRevision = 0
+	}
+	return state, e
 }
 func (s *selectedPublicationStub) ApplySitePublication(_ context.Context, actor achrix.Principal, site string, request PublicationRequest) (PublicationResult, error) {
 	s.request = request
@@ -107,6 +112,22 @@ func TestSelectedPublicationReviewInEnglishAndPersian(t *testing.T) {
 		})
 	}
 }
+func TestSelectedPublicationMarkFirstDoesNotInviteInvalidApply(t *testing.T) {
+	stub := publicationStub()
+	stub.unpublished = true
+	stub.draftControlStub.revision.PublicationIntentRevision = 0
+	page := selectedPublicationResponse(t, stub, "en", http.MethodGet, "/site/site-a/content/edit/"+draftTestID, nil)
+	if page.Code != 200 {
+		t.Fatal(page.Code, page.Body.String())
+	}
+	for _, piece := range []string{"data-publication-mark-first", "Select a saved revision for publication first",
+		"data-publication-apply hidden", "data-active-published=\"false\""} {
+		if !strings.Contains(page.Body.String(), piece) {
+			t.Errorf("unpublished content did not require intent: missing %q", piece)
+		}
+	}
+}
+
 func TestSelectedPublicationHTTPEnforcesReviewedInputsAndSite(t *testing.T) {
 	path := "/site/site-a/content/publish"
 	good := selectedPublishBody()
