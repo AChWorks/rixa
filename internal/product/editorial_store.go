@@ -322,14 +322,25 @@ func (s *EditorialService) ClearPublicationIntent(ctx context.Context, actor ach
 	return s.store.publicationIntent(ctx, string(actor), operationID, id, expectedHead, expectedPublicationVersion, 0, true)
 }
 
+// Operation preserves the administrator's collection-wide receipt access.
+// Ordinary site accounts may reconcile only their own completed private
+// create/save operations while their CURRENT content-edit grant is effective.
+// A missing receipt is not proof that a still-in-flight write did not commit.
 func (s *EditorialService) Operation(ctx context.Context, actor achrix.Principal, operationID string) (EditorialOperation, error) {
 	if !validOperationID(operationID) && operationID != "bootstrap:appearance" {
 		return EditorialOperation{}, ErrEditorialInvalid
 	}
-	if err := s.authorize(ctx, actor, CapabilityOperationRead, OperationCollectionTarget); err != nil {
+	if err := s.authorize(ctx, actor, CapabilityOperationRead, OperationCollectionTarget); err == nil {
+		return s.store.operation(ctx, operationID)
+	} else if !errors.Is(err, achrix.ErrDenied) {
 		return EditorialOperation{}, err
 	}
-	return s.store.operation(ctx, operationID)
+	// An edit grant cannot authorize the global ledger: enforce ownership,
+	// permitted operation kind and site scope together in the storage query.
+	if err := s.authorize(ctx, actor, CapabilityContentEdit, ContentCollectionTarget); err != nil {
+		return EditorialOperation{}, err
+	}
+	return s.store.ownDraftOperation(ctx, operationID, string(actor))
 }
 
 func (s *EditorialService) Appearance(ctx context.Context, actor achrix.Principal) (Appearance, error) {
@@ -755,6 +766,33 @@ func (s *editorialStore) operation(parent context.Context, operationID string) (
 	if !found {
 		return EditorialOperation{}, ErrEditorialNotFound
 	}
+	return op, nil
+}
+
+// ownDraftOperation never reads the unscoped operation ledger on behalf of
+// an ordinary member. The unique revision operation ID supplies the persisted
+// actor attribution, and both revisions and operations live in this site's DB.
+func (s *editorialStore) ownDraftOperation(parent context.Context, operationID, actor string) (EditorialOperation, error) {
+	ctx, conn, release, err := s.connection(parent)
+	if err != nil {
+		return EditorialOperation{}, err
+	}
+	defer release()
+	var op EditorialOperation
+	err = conn.QueryRow(ctx, `
+		SELECT o.operation_id,o.kind,o.resource_id,o.request_hash,o.result_revision,o.created_at
+		FROM rixa.operations o
+		JOIN rixa.content_revisions r ON r.operation_id=o.operation_id
+			AND r.item_id=o.resource_id AND r.revision=o.result_revision
+		WHERE o.operation_id=$1 AND r.actor=$2
+			AND o.kind IN ('content.create','content.save')
+	`, operationID, actor).Scan(
+		&op.ID, &op.Kind, &op.ResourceID, &op.RequestHash, &op.ResultRevision, &op.CreatedAt,
+	)
+	if err != nil {
+		return EditorialOperation{}, editorialReadError(err)
+	}
+	op.CreatedAt = op.CreatedAt.UTC()
 	return op, nil
 }
 
