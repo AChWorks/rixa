@@ -93,6 +93,12 @@ func (m *Manager) updateResumable(ctx context.Context, u *updateJournal) bool {
 	if u.Frozen == "" || u.ExecutorGeneration >= 16 || (u.State != "applying" && u.State != "reconciliation-required") || u.Stage == "remove" || !m.updateExecutorFenced(ctx, u) || !m.updateManagerIntact(u) {
 		return false
 	}
+	// Once the stop command might have run, current predecessor health is
+	// insufficient to authorize another stop. Only the exact positively
+	// disabled and quiescent unit can continue the recorded attempt.
+	if u.Attempts["stop"] == "attempted" && !m.updateMigrationFenced(ctx) {
+		return false
+	}
 	pending, e := m.updateMarker("pending-update")
 	if e != nil || pending != u.Draft.OperationID {
 		return false
@@ -206,7 +212,13 @@ func (m *Manager) RunUpdateOperation(ctx context.Context, id string) (Result, er
 			// read-only ledger observation *before* stopping the old service.
 			// Release the claim only after proving it is still healthy.
 			if stage == "stop" && errors.Is(e, errPreStopEditorialPending) && u.Attempts["migrate"] == "" {
-				return m.rejectPendingEditorialBeforeStop(ctx, u, parent, e)
+				return m.rejectPendingEditorialBeforeStop(ctx, u, parent, e, attempted)
+			}
+			// The prior stop may already have run in an earlier executor
+			// invocation. A currently healthy predecessor is not historical
+			// proof of uninterrupted service. Never silently replay disable.
+			if stage == "stop" && attempted {
+				return m.unresolvedPriorStop(u, e)
 			}
 			// Post-stop compatibility retains its existing positive-restoration
 			// fence; binary rollback never reverses a schema mutation.
@@ -248,25 +260,24 @@ func (m *Manager) executeUpdate(ctx context.Context, u *updateJournal, parent *j
 		if e := m.loadedUpdateService(ctx, parent, false); e != nil {
 			return e
 		}
-		if !m.unitQuiesced(ctx, "rixa.service", false) {
-			// Do not invoke candidate `check` while the prior runtime is live:
-			// publication Ready() can clean up filesystem generations.
-			// The only live-system preflight is the manager's READ ONLY Rixa
-			// editorial ledger observer. This is a negative guard, NOT a
-			// candidate/AChrix module compatibility admission.
-			if e := m.loadedUpdateService(ctx, parent, true); e != nil || m.updateUnitFileState(ctx) != "enabled" {
-				return ErrState
-			}
-			if e := updateEditorialPreflight(ctx, parent); e != nil {
-				return e
-			}
-		} else if !attempted {
-			// A first attempt expects the exact prior service to be serving;
-			// an unexpectedly quiescent service requires reconciliation.
+		mayStop, e := m.admitUpdateStop(ctx, attempted)
+		if e != nil {
+			return e
+		}
+		if !mayStop {
+			// Only a previously attempted stop with positive disabled AND
+			// quiescent evidence can finish without repeating systemctl.
+			return nil
+		}
+		// Do not invoke candidate `check` while the prior runtime is live:
+		// Publication.Ready() may clean filesystem generations. The manager's
+		// READ ONLY editorial observer is a negative gate, not admission.
+		if e := m.loadedUpdateService(ctx, parent, true); e != nil || m.updateUnitFileState(ctx) != "enabled" {
 			return ErrState
 		}
-		// A resumed, already-quiesced stop is inspected by the original
-		// post-stop compatibility fence before any candidate migration.
+		if e := updateEditorialPreflight(ctx, parent); e != nil {
+			return e
+		}
 		return m.disableUpdateService(ctx)
 	case "compatibility", "migrate", "check":
 		if !m.updateMigrationFenced(ctx) {
@@ -476,7 +487,32 @@ func (m *Manager) candidateCommand(parent context.Context, u *updateJournal, j *
 	return nil
 }
 
-func (m *Manager) rejectPendingEditorialBeforeStop(ctx context.Context, u *updateJournal, parent *journal, cause error) (Result, error) {
+// admitUpdateStop separates an invocation's first stop attempt from a resumed
+// attempt whose physical outcome is uncertain. No READ ONLY ledger check,
+// service disable or "prior-uninterrupted" receipt is safe on the latter.
+// A previously attempted stop continues only when service quiescence AND unit
+// disable are both positively observed; no second stop command is issued.
+func (m *Manager) admitUpdateStop(ctx context.Context, previouslyAttempted bool) (bool, error) {
+	if previouslyAttempted {
+		if !m.updateMigrationFenced(ctx) {
+			return false, ErrState
+		}
+		return false, nil
+	}
+	if m.unitQuiesced(ctx, "rixa.service", false) {
+		return false, ErrState
+	}
+	return true, nil
+}
+
+func (m *Manager) unresolvedPriorStop(u *updateJournal, cause error) (Result, error) {
+	return m.updateFailure(u, "prior-stop-history-uncertain", "A previously attempted service stop cannot be proven disabled and quiescent; no automatic stop retry or uninterrupted-service receipt is safe. Inspect the retained update journal, systemd unit history and pending update before manual reconciliation.", cause)
+}
+
+func (m *Manager) rejectPendingEditorialBeforeStop(ctx context.Context, u *updateJournal, parent *journal, cause error, previouslyAttempted bool) (Result, error) {
+	if previouslyAttempted {
+		return m.unresolvedPriorStop(u, cause)
+	}
 	if u.Stage != "stop" || u.Attempts["stop"] != "attempted" || u.Attempts["compatibility"] != "" || u.Attempts["migrate"] != "" ||
 		m.boundUpdateRuntime(ctx, u, parent) != nil || m.checkOwnedService(parent) != nil ||
 		m.loadedUpdateService(ctx, parent, true) != nil || m.updateUnitFileState(ctx) != "enabled" ||
