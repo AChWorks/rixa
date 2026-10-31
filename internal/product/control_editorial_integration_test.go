@@ -48,7 +48,7 @@ func TestSelectedSiteDraftPaginationAndRecovery(t *testing.T) {
 		}
 		return controlFixed.Authorize(ctx, actor, capability, resource)
 	}), newControlModule())
-	siteFixed := sitePolicy(aAdmin, operatorA)
+	siteFixed := sitePolicy(aAdmin, operatorA, nil)
 	aApp := draftTestApplication(t, achrix.PolicyFunc(func(ctx context.Context, actor achrix.Principal, capability, resource string) error {
 		siteChecks.Add(1)
 		if siteDenied.Load() {
@@ -56,7 +56,7 @@ func TestSelectedSiteDraftPaginationAndRecovery(t *testing.T) {
 		}
 		return siteFixed.Authorize(ctx, actor, capability, resource)
 	}), newSiteModule())
-	bApp := draftTestApplication(t, sitePolicy(bAdmin, operatorB), newSiteModule())
+	bApp := draftTestApplication(t, sitePolicy(bAdmin, operatorB, nil), newSiteModule())
 	aStore, err := newEditorialStore(dsns["a"])
 	if err != nil {
 		t.Fatal(err)

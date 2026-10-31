@@ -65,12 +65,12 @@ func TestSiteTransferRoundTrip(t *testing.T) {
 		"site-b.transfer.test",
 	})
 	source := Config{
-		Listen: "127.0.0.1:22443",
-		TLS: TLSConfig{CertFile: cert, KeyFile: key},
-		Language: "en",
-		StartupTimeout: 15 * time.Second,
+		Listen:          "127.0.0.1:22443",
+		TLS:             TLSConfig{CertFile: cert, KeyFile: key},
+		Language:        "en",
+		StartupTimeout:  15 * time.Second,
 		ShutdownTimeout: 10 * time.Second,
-		Control: ControlConfig{Origin: "https://source-control.transfer.test:22443", DatabaseEnv: "TRANSFER_SOURCE_CONTROL"},
+		Control:         ControlConfig{Origin: "https://source-control.transfer.test:22443", DatabaseEnv: "TRANSFER_SOURCE_CONTROL"},
 		Sites: []SiteConfig{
 			{ID: "site-a", Origin: "https://site-a.transfer.test:22443", DatabaseEnv: "TRANSFER_SOURCE_A", MediaRoot: sourceMediaA, PublicRoot: sourcePublicA, PublicPolicy: testPublicPolicy()},
 			{ID: "site-b", Origin: "https://site-b.transfer.test:22443", DatabaseEnv: "TRANSFER_SOURCE_B", MediaRoot: sourceMediaB, PublicRoot: sourcePublicB, PublicPolicy: testPublicPolicy()},
@@ -78,8 +78,8 @@ func TestSiteTransferRoundTrip(t *testing.T) {
 	}
 	sourceEnv := mapLookup(map[string]string{
 		"TRANSFER_SOURCE_CONTROL": dsns["source-control"],
-		"TRANSFER_SOURCE_A": dsns["source-a"],
-		"TRANSFER_SOURCE_B": dsns["source-b"],
+		"TRANSFER_SOURCE_A":       dsns["source-a"],
+		"TRANSFER_SOURCE_B":       dsns["source-b"],
 	})
 	if err := Migrate(ctx, source, sourceEnv); err != nil {
 		t.Fatalf("source migrate: %v", err)
@@ -132,6 +132,10 @@ func TestSiteTransferRoundTrip(t *testing.T) {
 		t.Fatalf("source Media B: %v", err)
 	}
 
+	grant, grantErr := sourceRuntime.Sites["site-a"].Access.Set(ctx, aAdmin, member.ID, CapabilityContentRead, true, 0)
+	if grantErr != nil || grant.Revision != 1 {
+		t.Fatalf("source site grant=%#v / %v", grant, grantErr)
+	}
 	postA, err := sourceRuntime.Sites["site-a"].Editorial.Create(ctx, aAdmin, newOperationID(), ContentPost, "Transferred post",
 		"<p>site A transfer body</p><figure data-media-id=\""+assetA.ID+"\"><figcaption>transfer image</figcaption></figure>")
 	if err != nil {
@@ -284,12 +288,12 @@ func TestSiteTransferRoundTrip(t *testing.T) {
 	targetMedia := filepath.Join(targetParent, "media")
 	targetPublic := filepath.Join(targetParent, "public")
 	target := Config{
-		Listen: "127.0.0.1:22444",
-		TLS: TLSConfig{CertFile: cert, KeyFile: key},
-		Language: "en",
-		StartupTimeout: 15 * time.Second,
+		Listen:          "127.0.0.1:22444",
+		TLS:             TLSConfig{CertFile: cert, KeyFile: key},
+		Language:        "en",
+		StartupTimeout:  15 * time.Second,
 		ShutdownTimeout: 10 * time.Second,
-		Control: ControlConfig{Origin: "https://target-control.transfer.test:22444", DatabaseEnv: "TRANSFER_TARGET_CONTROL"},
+		Control:         ControlConfig{Origin: "https://target-control.transfer.test:22444", DatabaseEnv: "TRANSFER_TARGET_CONTROL"},
 		Sites: []SiteConfig{{
 			ID: "site-a", Origin: source.Sites[0].Origin, DatabaseEnv: "TRANSFER_TARGET_A",
 			MediaRoot: targetMedia, PublicRoot: targetPublic, PublicPolicy: source.Sites[0].PublicPolicy,
@@ -453,6 +457,10 @@ func TestSiteTransferRoundTrip(t *testing.T) {
 	if err != nil || freshSession.Principal != aAdmin {
 		t.Fatalf("fresh restored login=%#v err=%v", freshSession, err)
 	}
+	restoredGrant, grantErr := targetRuntime.Sites["site-a"].Access.Grant(ctx, aAdmin, member.ID, CapabilityContentRead)
+	if grantErr != nil || !restoredGrant.Allowed || restoredGrant.Revision != 1 {
+		t.Fatalf("restored site grant=%#v err=%v", restoredGrant, grantErr)
+	}
 	gotMember, err := targetRuntime.Sites["site-a"].Identity.Account(ctx, aAdmin, member.ID)
 	if err != nil || gotMember.Login != member.Login {
 		t.Fatalf("restored member=%#v err=%v", gotMember, err)
@@ -512,7 +520,7 @@ func TestSiteTransferRoundTrip(t *testing.T) {
 	dirtyConfig.Sites[0].PublicRoot = filepath.Join(dirtyParent, "public")
 	dirtyEnv := mapLookup(map[string]string{
 		"TRANSFER_TARGET_CONTROL": dsns["target-control"],
-		"TRANSFER_DIRTY": dsns["dirty"],
+		"TRANSFER_DIRTY":          dsns["dirty"],
 	})
 	if _, err = RestoreSite(ctx, dirtyConfig, "site-a", captureRoot, dirtyEnv, tooling); !errors.Is(err, ErrSiteTransfer) {
 		t.Fatalf("restore accepted nonempty target database: %v", err)
@@ -535,7 +543,7 @@ func TestSiteTransferRoundTrip(t *testing.T) {
 	tamperedConfig.Sites[0].PublicRoot = filepath.Join(tamperedParent, "public")
 	tamperedEnv := mapLookup(map[string]string{
 		"TRANSFER_TARGET_CONTROL": dsns["target-control"],
-		"TRANSFER_TAMPERED": dsns["tampered"],
+		"TRANSFER_TAMPERED":       dsns["tampered"],
 	})
 	if _, err = RestoreSite(ctx, tamperedConfig, "site-a", captureRoot, tamperedEnv, tooling); !errors.Is(err, ErrSiteTransfer) {
 		t.Fatalf("restore accepted tampered completion marker: %v", err)
@@ -571,7 +579,7 @@ func siteTransferTestTooling(t *testing.T) SiteTransferTooling {
 		return path
 	}
 	return SiteTransferTooling{
-		PGDump: writeWrapper("pg-dump-18", "pg_dump"),
+		PGDump:    writeWrapper("pg-dump-18", "pg_dump"),
 		PGRestore: writeWrapper("pg-restore-18", "pg_restore"),
 	}
 }
@@ -585,15 +593,15 @@ func createSiteTransferDatabases(t *testing.T, ctx context.Context, adminDSN str
 	defer admin.Close(context.Background())
 	suffix := strconv.FormatInt(time.Now().UnixNano(), 36)
 	names := map[string]string{
-		"source-control": "rixa_transfer_source_control_" + suffix,
-		"source-a": "rixa_transfer_source_a_" + suffix,
-		"source-b": "rixa_transfer_source_b_" + suffix,
+		"source-control":   "rixa_transfer_source_control_" + suffix,
+		"source-a":         "rixa_transfer_source_a_" + suffix,
+		"source-b":         "rixa_transfer_source_b_" + suffix,
 		"target-control":   "rixa_transfer_target_control_" + suffix,
 		"target-a":         "rixa_transfer_target_a_" + suffix,
 		"stateful-control": "rixa_transfer_stateful_control_" + suffix,
 		"stateful-a":       "rixa_transfer_stateful_a_" + suffix,
 		"dirty":            "rixa_transfer_dirty_" + suffix,
-		"tampered": "rixa_transfer_tampered_" + suffix,
+		"tampered":         "rixa_transfer_tampered_" + suffix,
 	}
 	for _, name := range names {
 		if _, err = admin.Exec(ctx, "CREATE DATABASE "+name+" TEMPLATE template0 ENCODING 'UTF8'"); err != nil {

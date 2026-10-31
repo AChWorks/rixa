@@ -161,6 +161,10 @@ func (s *editorialStore) ready(parent context.Context) error {
 	if head < 1 {
 		return ErrEditorialUnavailable
 	}
+	var grantsReady bool
+	if err = conn.QueryRow(ctx, "SELECT to_regclass('rixa.site_grants') IS NOT NULL AND to_regclass('rixa.site_grant_history') IS NOT NULL").Scan(&grantsReady); err != nil || !grantsReady {
+		return ErrEditorialUnavailable
+	}
 	return nil
 }
 

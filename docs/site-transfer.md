@@ -8,6 +8,7 @@ A completed capture contains one enabled site's:
 
 - complete site PostgreSQL database through native `pg_dump`, including Identity/Audit/Media/Rixa schemas and immutable migration ledgers;
 - site accounts/credentials and retained audit history;
+- site-owned read/draft permission grants and their exact revision/attribution history when present; these are checked against current restored local Identity account status, never used as global/control grants;
 - Rixa content/revisions/media references/appearance/theme/operation state;
 - exact private Media originals;
 - the private Rixa public artifact tree when publication is enabled, preserving active generation, route/withdrawal history and source relationships;

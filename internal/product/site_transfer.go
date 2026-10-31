@@ -84,6 +84,8 @@ type SiteTransferSummary struct {
 	ContentRevisions    int64  `json:"content_revisions"`
 	ContentMediaRefs    int64  `json:"content_media_refs"`
 	EditorialOperations int64  `json:"editorial_operations"`
+	SiteGrants          int64  `json:"site_grants"`
+	SiteGrantHistory    int64  `json:"site_grant_history"`
 	ReadyMedia          int64  `json:"ready_media"`
 	SourceSessionRows   int64  `json:"source_session_rows"`
 	AppearanceRevision  int64  `json:"appearance_revision"`
@@ -831,7 +833,8 @@ func beginSiteTransferDatabaseFence(parent context.Context, dsn, adminPrincipal 
 			audit.schema_migrations, audit.records,
 			media.schema_migrations, media.assets,
 			rixa.schema_migrations, rixa.content_items, rixa.content_revisions, rixa.content_media_refs,
-			rixa.appearance_revisions, rixa.appearance_head, rixa.operations
+			rixa.appearance_revisions, rixa.appearance_head, rixa.operations,
+            rixa.site_grants, rixa.site_grant_history
 		IN SHARE MODE
 	`
 	if _, err = tx.Exec(ctx, lockSQL); err != nil {
@@ -925,6 +928,8 @@ func inspectSiteTransferDatabaseQuery(parent context.Context, query siteTransfer
 		{&result.Summary.ContentRevisions, "SELECT count(*) FROM rixa.content_revisions"},
 		{&result.Summary.ContentMediaRefs, "SELECT count(*) FROM rixa.content_media_refs"},
 		{&result.Summary.EditorialOperations, "SELECT count(*) FROM rixa.operations"},
+		{&result.Summary.SiteGrants, "SELECT count(*) FROM rixa.site_grants"},
+		{&result.Summary.SiteGrantHistory, "SELECT count(*) FROM rixa.site_grant_history"},
 		{&result.Summary.ReadyMedia, "SELECT count(*) FROM media.assets WHERE state='ready'"},
 		{&result.Summary.SourceSessionRows, "SELECT count(*) FROM identity.sessions"},
 	}
