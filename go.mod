@@ -3,13 +3,13 @@ module github.com/AChWorks/rixa
 go 1.27.3
 
 require (
-	github.com/AChWorks/achrix v0.4.0
-	github.com/AChWorks/achrix/admin v0.2.0
-	github.com/AChWorks/achrix/audit v0.1.0
-	github.com/AChWorks/achrix/identity v0.2.0
-	github.com/AChWorks/achrix/installation v0.1.0
-	github.com/AChWorks/achrix/media v0.2.0
-	github.com/AChWorks/achrix/multisite v0.1.0
+	github.com/AChWorks/achrix v0.5.0
+	github.com/AChWorks/achrix/admin v0.3.0
+	github.com/AChWorks/achrix/audit v0.2.0
+	github.com/AChWorks/achrix/identity v0.3.0
+	github.com/AChWorks/achrix/installation v0.2.0
+	github.com/AChWorks/achrix/media v0.3.0
+	github.com/AChWorks/achrix/multisite v0.1.1
 	github.com/jackc/pgx/v5 v5.11.0
 	golang.org/x/crypto v0.57.0
 	golang.org/x/net v0.58.0
