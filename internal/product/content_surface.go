@@ -729,6 +729,19 @@ const contentEditorPrimitivesJS = `
 
   document.querySelectorAll("[data-operation-lookup]").forEach(form => form.addEventListener("admin:success", event => {
     const detail = event.detail || {};
+    if (detail.kind === "publication.apply") {
+      // A coherent public generation is not an editorial revision. Inspection
+      // reports a historical committed generation, not necessarily the active
+      // generation after another publication.
+      if (!matchesScope(detail) || !validID(detail.result_generation)) {
+        if (status) status.textContent = i18n.text("rixa", "publication_outcome_unverified");
+        return;
+      }
+      if (status) status.replaceChildren(i18n.parts("rixa", "publication_operation_committed", {
+        Operation: isolated(detail.operation_id || ""), Generation: isolated(detail.result_generation)
+      }));
+      return;
+    }
     if (status) status.replaceChildren(i18n.parts("rixa", "operation_committed", {
       Operation: isolated(detail.operation_id || ""), Kind: isolated(detail.kind || ""),
       Resource: isolated(detail.resource_id || ""), Revision: isolated(detail.result_revision || "0")

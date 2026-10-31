@@ -172,6 +172,24 @@ func TestSelectedPublicationIntentAndRecovery(t *testing.T) {
 		t.Fatal(s.calls)
 	}
 }
+func TestPublicationOperationInspectionDistinguishesGenerationFromRevision(t *testing.T) {
+	for _, key := range []string{"publication_operation_committed", "publication_outcome_unverified",
+		"detail.kind === \"publication.apply\"", "detail.result_generation", "matchesScope(detail)"} {
+		if !strings.Contains(contentEditorJS, key) {
+			t.Fatalf("publication inspection lost %s", key)
+		}
+	}
+	for _, localeName := range []string{"en", "fa"} {
+		language := testProductLocalizer(t, localeName)
+		message, err := language.Text("rixa", "publication_operation_committed", map[string]string{
+			"Operation": "fixture-op", "Generation": "fixture-generation",
+		})
+		if err != nil || !strings.Contains(message, "fixture-generation") || !strings.Contains(message, "fixture-op") {
+			t.Fatalf("%s committed generation message: %q %v", localeName, message, err)
+		}
+	}
+}
+
 func TestSelectedPublicationClientPreservesReviewAndRecoveryControls(t *testing.T) {
 	for _, part := range []string{"[data-publication-apply] [data-confirm]", "[data-intent-revision-field]",
 		"[data-review-generation]", "[data-publication-result]", "[data-operation-lookup-input]"} {

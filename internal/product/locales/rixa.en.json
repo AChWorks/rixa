@@ -393,6 +393,12 @@
     },
     "open_public_site": {
       "other": "Open public site"
+    },
+    "publication_operation_committed": {
+      "other": "Publication operation {Operation} committed as public generation {Generation}. Refresh this site to verify which generation is currently active."
+    },
+    "publication_outcome_unverified": {
+      "other": "This publication result could not be verified for the selected site. Refresh the site and inspect the same operation ID again."
     }
   }
 }
