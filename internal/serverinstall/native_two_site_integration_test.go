@@ -81,17 +81,38 @@ func TestNativeOptionalTwoSitePhysicalMigrationAndBootstrap(t *testing.T) {
 		t.Fatalf("aliased physical site database was admitted: %v", err)
 	}
 
-	cfg, err := product.ParseConfig(configBytes(d, "", ""))
+	// Edit only the private media/public roots in the original native JSON
+	// contract. A typed Config round-trip through json.Marshal is not a
+	// valid wire encoding: time.Duration would be emitted as integer ns,
+	// while product.ParseConfig expects strings such as "15s".
+	var raw map[string]any
+	if err := json.Unmarshal(configBytes(d, "", ""), &raw); err != nil {
+		t.Fatal(err)
+	}
+	sites, ok := raw["sites"].([]any)
+	if !ok || len(sites) != 2 {
+		t.Fatal("native two-site document missing site inventory")
+	}
+	for i, entry := range sites {
+		site, ok := entry.(map[string]any)
+		if !ok {
+			t.Fatal("invalid site document type")
+		}
+		for _, root := range []string{"media_root", "public_root"} {
+			target := filepath.Join(t.TempDir(), fmt.Sprintf("%s-%d", root, i))
+			if err := os.Mkdir(target, 0700); err != nil {
+				t.Fatal(err)
+			}
+			site[root] = target
+		}
+	}
+	encoded, err := json.Marshal(raw)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for i := range cfg.Sites {
-		for _, target := range []*string{&cfg.Sites[i].MediaRoot, &cfg.Sites[i].PublicRoot} {
-			*target = filepath.Join(t.TempDir(), fmt.Sprintf("site-%d", i))
-			if err := os.Mkdir(*target, 0700); err != nil {
-				t.Fatal(err)
-			}
-		}
+	cfg, err := product.ParseConfig(encoded)
+	if err != nil {
+		t.Fatalf("native config must round-trip after temp roots: %v", err)
 	}
 	// Product-owned migrations run in all three physically isolated databases,
 	// including real AChrix and Rixa tables, not only a hand-crafted ledger.
@@ -101,10 +122,6 @@ func TestNativeOptionalTwoSitePhysicalMigrationAndBootstrap(t *testing.T) {
 	editorial, err := product.InspectEditorialMigrations(ctx, cfg, databaseLookup(d))
 	if err != nil || len(editorial.Sites) != 2 || preStopEditorialDecision(editorial) != nil {
 		t.Fatalf("two independent current editorial ledgers not proven: %v", err)
-	}
-	encoded, err := json.Marshal(cfg)
-	if err != nil {
-		t.Fatal(err)
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	principals := map[string]string{}
