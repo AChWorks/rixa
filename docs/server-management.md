@@ -73,6 +73,38 @@ initial administrator logins. Ordinary Remove still retains **all** data,
 databases, private configuration and Media. Restart and status use the same
 systemd-owned service and immutable operation journal.
 
+The Native-generated `systemd` unit passively orders itself **after**
+`postgresql.service` on Debian hosts where that PostgreSQL meta unit is
+already part of the boot transaction. The Debian cluster instances declare
+`Before=postgresql.service`, so Rixa does not exhaust its bounded startup
+retries while an existing local PostgreSQL cluster is still starting. This is
+an ordering constraint only: Rixa does not add PostgreSQL `Wants`/`Requires`,
+provision a cluster, take ownership of a supplied database or assume that an
+externally supervised PostgreSQL server uses this exact unit name. Operators
+must verify external-supervisor readiness separately.
+
+The source-level two-site activation has a bounded 90-second **three-origin**
+service-readiness window after `systemd` activation; the default single-site
+window remains 30 seconds. Each origin must still pass the same authenticated
+TLS/Host and HTTP checks. The normal long-running `rixa run` entry has its
+own separately bounded 90-second wait before constructing the application:
+it retries only read-only PostgreSQL physical-identity probes that returned
+transient unavailability or a bounded probe deadline, spaced 2 seconds apart.
+Malformed configuration, rejected PostgreSQL credentials or permissions,
+failed TLS certificate verification, changed physical/tenant isolation and
+unclassified database admission failures fail immediately with sanitized
+error categories and the target identifier. Only recognized transient network
+or PostgreSQL readiness conditions are eligible for bounded retries. No
+migrations, account creation, session writes or serving starts during this wait. The operator
+`rixa check` and Native Review retain their existing fail-fast semantics.
+Service startup records bounded, credential-free wait/recovery diagnostics.
+A failed stage is not automatically retried or considered healthy because a process exists: inspect the retained stage and
+its diagnostic, then use the original frozen manager's `resume` action only
+when Status positively offers it. A runtime-child diagnostic distinguishes
+unavailable physical PostgreSQL identity observations from observed identity
+drift without printing the database connection or passwords. These source
+changes do not affect previously published binaries.
+
 **Limits:** This initial path cannot add a site to a *running* installation,
 cannot provision a third database automatically, and does not grant arbitrary
 schema-changing updates. The managed updater remains constrained by its

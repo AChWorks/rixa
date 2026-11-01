@@ -56,6 +56,19 @@ func (b *boundedOutput) Write(p []byte) (int, error) {
 	return b.buffer.Write(p)
 }
 
+// runtimeDatabaseBindingError distinguishes unavailable observations from
+// changed physical bindings without rendering an underlying DSN, SQL or
+// driver error into the root-owned retained diagnostic journal.
+func runtimeDatabaseBindingError(observed, expected map[string]string, probeErr error) error {
+	if probeErr != nil {
+		return fmt.Errorf("%w: runtime database identity observation unavailable", ErrState)
+	}
+	if len(expected) == 0 || !reflect.DeepEqual(observed, expected) {
+		return fmt.Errorf("%w: runtime database identity binding mismatch", ErrState)
+	}
+	return nil
+}
+
 // RuntimeStage is a deliberately fixed non-root child boundary. It receives
 // secret-bearing typed input through a pipe, never command arguments or logs.
 // It cannot select privileged commands or change any host management path.
@@ -81,8 +94,8 @@ func RuntimeStage(parent context.Context, args []string) error {
 	ctx, cancel := context.WithTimeout(parent, 90*time.Second)
 	defer cancel()
 	observed, e := databaseIdentities(ctx, task.Draft)
-	if e != nil || !reflect.DeepEqual(observed, task.DatabaseTargets) {
-		return ErrState
+	if e = runtimeDatabaseBindingError(observed, task.DatabaseTargets, e); e != nil {
+		return e
 	}
 	receipt := stageReceipt{Stage: args[0], Code: "verified"}
 	switch args[0] {
