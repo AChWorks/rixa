@@ -140,8 +140,18 @@ func TestNativeOptionalTwoSitePhysicalMigrationAndBootstrap(t *testing.T) {
 			" TO " + pgx.Identifier{roles[0]}.Sanitize(),
 			"REVOKE " + pgx.Identifier{roles[1]}.Sanitize() +
 				" FROM " + pgx.Identifier{roles[0]}.Sanitize()},
+		{"public-connect-regrant", "GRANT CONNECT ON DATABASE " + pgx.Identifier{databases[1]}.Sanitize() +
+			" TO PUBLIC", "REVOKE CONNECT ON DATABASE " + pgx.Identifier{databases[1]}.Sanitize() + " FROM PUBLIC"},
 		{"elevated-login", "ALTER ROLE " + pgx.Identifier{roles[2]}.Sanitize() + " CREATEDB",
 			"ALTER ROLE " + pgx.Identifier{roles[2]}.Sanitize() + " NOCREATEDB"},
+		{"superuser-login", "ALTER ROLE " + pgx.Identifier{roles[2]}.Sanitize() + " SUPERUSER",
+			"ALTER ROLE " + pgx.Identifier{roles[2]}.Sanitize() + " NOSUPERUSER"},
+		{"createrole-login", "ALTER ROLE " + pgx.Identifier{roles[2]}.Sanitize() + " CREATEROLE",
+			"ALTER ROLE " + pgx.Identifier{roles[2]}.Sanitize() + " NOCREATEROLE"},
+		{"replication-login", "ALTER ROLE " + pgx.Identifier{roles[2]}.Sanitize() + " REPLICATION",
+			"ALTER ROLE " + pgx.Identifier{roles[2]}.Sanitize() + " NOREPLICATION"},
+		{"bypassrls-login", "ALTER ROLE " + pgx.Identifier{roles[2]}.Sanitize() + " BYPASSRLS",
+			"ALTER ROLE " + pgx.Identifier{roles[2]}.Sanitize() + " NOBYPASSRLS"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			if _, err := admin.Exec(ctx, test.grant); err != nil {
@@ -158,6 +168,31 @@ func TestNativeOptionalTwoSitePhysicalMigrationAndBootstrap(t *testing.T) {
 			}
 		})
 	}
+	// A non-login privileged role also exposes privilege through role membership;
+	// admission must reject it even when it is not one of the three DB owners.
+	t.Run("unrelated-privileged-role-membership", func(t *testing.T) {
+		privileged := pgx.Identifier{prefix + "_privileged"}.Sanitize()
+		if _, err := admin.Exec(ctx, "CREATE ROLE "+privileged+" NOLOGIN CREATEROLE"); err != nil {
+			t.Fatalf("cannot create fixture-owned privileged role: %v", err)
+		}
+		defer func() {
+			if _, err := admin.Exec(ctx, "DROP ROLE "+privileged); err != nil {
+				t.Errorf("cannot remove fixture-owned privileged role: %v", err)
+			}
+		}()
+		member := pgx.Identifier{roles[0]}.Sanitize()
+		if _, err := admin.Exec(ctx, "GRANT "+privileged+" TO "+member); err != nil {
+			t.Fatalf("fixture role membership failed: %v", err)
+		}
+		defer func() {
+			if _, err := admin.Exec(ctx, "REVOKE "+privileged+" FROM "+member); err != nil {
+				t.Errorf("fixture role membership restoration failed: %v", err)
+			}
+		}()
+		if _, err := databaseIdentities(ctx, d); !errors.Is(err, errNativeRoleIsolation) {
+			t.Fatalf("privileged role membership admitted: %v", err)
+		}
+	})
 	if _, err := databaseIdentities(ctx, d); err != nil {
 		t.Fatalf("safe PostgreSQL roles not admitted after privilege restoration: %v", err)
 	}
