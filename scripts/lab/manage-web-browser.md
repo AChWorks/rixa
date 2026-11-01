@@ -71,6 +71,14 @@ try {
 }
 ```
 
+For the review-remediation optional-site browser journey, use an isolated
+fixture with `RIXA_MANAGEWEB_PREVIEW_KIND=two-site` and `mode="two-site"`.
+It verifies positive Save and Review, explicit removal and authoritative form
+synchronization (including saved-secret indicators and the reset action),
+re-add and reload, and English/LTR plus Persian/RTL behavior. This mode uses
+the same source-only fake Native backend and never provisions PostgreSQL or
+changes production. It does not replace the existing unknown-ack `journey`.
+
 The journey deliberately drops the first configure and Apply responses only
 **after** `route.fetch()` confirms a fake server commit. It retains request
 bodies privately in memory, compares exact configure replay, and never replays

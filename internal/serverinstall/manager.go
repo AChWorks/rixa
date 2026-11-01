@@ -212,7 +212,11 @@ func (m *Manager) review(ctx context.Context, j *journal) []Problem {
 	}
 	identities, e := databaseIdentities(ctx, d)
 	if e != nil {
-		add("control_dsn", "database-prerequisite", "Provide distinct reachable PostgreSQL18 databases, schema authority and pg_control_system() identity permissions.")
+		if errors.Is(e, errNativeRoleIsolation) {
+			add("site_b_dsn", "database-role-isolation", "For optional two-site installation provide three distinct non-elevated PostgreSQL LOGIN database owners, separate passwords, no shared role membership or cross-database CONNECT; revoke PUBLIC CONNECT on all three databases.")
+		} else {
+			add("control_dsn", "database-prerequisite", "Provide distinct reachable PostgreSQL18 databases, schema authority and pg_control_system() identity permissions.")
+		}
 	} else {
 		j.DatabaseTargets = identities
 	}

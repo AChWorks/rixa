@@ -87,6 +87,8 @@ func TestNativeOptionalTwoSiteConfigurationAndReviewInputs(t *testing.T) {
 		{"duplicate-control-dsn", "site_b_dsn", func(d *Draft) { d.SiteBDSN = d.ControlDSN }},
 		{"duplicate-site-dsn", "site_b_dsn", func(d *Draft) { d.SiteBDSN = d.SiteDSN }},
 		{"bad-secret", "site_b_password", func(d *Draft) { d.SiteBPassword = "short" }},
+		{"shared-postgres-login", "site_b_dsn", func(d *Draft) { d.SiteBDSN = strings.Replace(d.SiteBDSN, "siteb:", "site:", 1) }},
+		{"shared-postgres-password", "site_b_dsn", func(d *Draft) { d.SiteBDSN = strings.Replace(d.SiteBDSN, "second-db-secret", "site-db-secret", 1) }},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			d := validTwoSiteDraft()

@@ -65,8 +65,44 @@ func TestConsoleOptionalSiteBHTTPSFormNeverEchoesCredentials(t *testing.T) {
 	if strings.Contains(string(received), siteBSecret) || strings.Contains(string(received), siteBDSN) || strings.Contains(string(received), "private-dsn-secret") {
 		t.Fatal("two-site JSON response disclosed private credentials")
 	}
+	var saved struct {
+		SavedDraft *publicSavedDraft `json:"saved_draft"`
+	}
+	if err := json.Unmarshal(received, &saved); err != nil || saved.SavedDraft == nil {
+		t.Fatal("positive Save lacks authoritative allowlisted draft snapshot")
+	}
+	if saved.SavedDraft.Fields["site_b_origin"] != "https://b.rixa.test:8443" ||
+		saved.SavedDraft.Fields["site_b_login"] != "b-admin" ||
+		!saved.SavedDraft.Secrets["site_b_dsn"] || !saved.SavedDraft.Secrets["site_b_password"] ||
+		saved.SavedDraft.Secrets["control_dsn"] {
+		t.Fatal("public Save snapshot is stale or invents saved secrets")
+	}
 	if h.backend.draft.SiteBDSN != siteBDSN || h.backend.draft.SiteBPassword != siteBSecret {
 		t.Fatal("protected second-site configuration was not persisted by shared backend")
+	}
+	// In the same session, an acknowledged removal must not advertise saved
+	// site-b secrets, and must preserve unrelated preexisting credentials.
+	body["site_b_action"] = "remove"
+	body["control_dsn"] = "postgres://control:unrelated-private@127.0.0.1:5432/control?sslmode=disable"
+	body["control_password"] = "unrelated-control-private-password"
+	value, _ = json.Marshal(body)
+	code, received, _ = h.call(t, "POST", "/admin/operation/configure", string(value), true)
+	if code != 200 {
+		t.Fatalf("second-site removal Save returned %d", code)
+	}
+	if err := json.Unmarshal(received, &saved); err != nil || saved.SavedDraft == nil ||
+		saved.SavedDraft.Fields["site_b_origin"] != "" ||
+		saved.SavedDraft.Fields["site_b_login"] != "" ||
+		saved.SavedDraft.Secrets["site_b_dsn"] || saved.SavedDraft.Secrets["site_b_password"] ||
+		!saved.SavedDraft.Secrets["control_dsn"] || !saved.SavedDraft.Secrets["control_password"] {
+		t.Fatal("acknowledged remove did not reflect empty site-b and retained unrelated protected fields")
+	}
+	// Restore a saved optional site so subsequent HTML assertions cover it.
+	body["site_b_action"] = "keep"
+	value, _ = json.Marshal(body)
+	code, _, _ = h.call(t, "POST", "/admin/operation/configure", string(value), true)
+	if code != 200 {
+		t.Fatalf("readd Save returned %d", code)
 	}
 	code, page, _ := h.call(t, "GET", "/admin/operation/", "", false)
 	if code != 200 || !strings.Contains(string(page), "Optional second site") ||

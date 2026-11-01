@@ -27,7 +27,21 @@ that an earlier prerelease binary already supports it.
 For the two-site path, the infrastructure operator must supply a **third**
 independent PostgreSQL 18 database and role, and a valid runtime TLS
 certificate covering three distinct exact hostnames: Control, site-a and
-site-b. The first site's `site_origin`, `site_dsn`, `site_login` and
+site-b. Native Review and Apply **fail closed** unless all three database
+connections authenticate as separate LOGIN roles with distinct passwords,
+each role owns only its assigned database among these three, and no role is
+SUPERUSER, CREATEDB, CREATEROLE, REPLICATION or BYPASSRLS. On the same PostgreSQL
+cluster, effective `CONNECT` (including privileges from `PUBLIC`) and role
+membership from any of these three roles to another are both forbidden.
+The native two-site profile rejects any inherited or SET-able role
+memberships for these three application login roles, including membership
+that could permit privilege escalation through unrelated administrative roles.
+The infrastructure operator must explicitly revoke default `PUBLIC CONNECT`
+on the three databases and establish each isolated database owner/credential.
+A limited read-only `pg_control_system()` physical-identity probe must remain
+available to those roles for native admission. Rixa never creates roles,
+grants privileges, revokes access or silently weakens this preflight.
+The existing one-site prerequisite contract remains unchanged. The first site's `site_origin`, `site_dsn`, `site_login` and
 `site_password` inputs are unchanged. Add all four optional private draft
 fields for site-b:
 

@@ -158,6 +158,27 @@ func validateDraft(d Draft, complete bool) []Problem {
 			used[f.value] = true
 		}
 	}
+	if complete && siteBRequested(d) {
+		// Native optional two-site requires distinct credentials as well as
+		// distinct physical PostgreSQL owners. Otherwise one compromised DSN
+		// password can authenticate another site even when roles are distinct.
+		usernames, passwords := map[string]bool{}, map[string]bool{}
+		for _, f := range dsnFields {
+			u, err := url.Parse(f.value)
+			if err != nil || u == nil || u.User == nil {
+				continue
+			}
+			username := u.User.Username()
+			password, ok := u.User.Password()
+			if !ok || username == "" || password == "" {
+				continue
+			}
+			if usernames[username] || passwords[password] {
+				add(f.name, "role-isolation", "For two-site installation each database requires its own PostgreSQL login role and distinct password.")
+			}
+			usernames[username], passwords[password] = true, true
+		}
+	}
 	if complete && len(p) == 0 {
 		if _, e := product.ParseConfig(configBytes(d, "", "")); e != nil {
 			add("listen", "configuration", "Origins, listener ports and product configuration must agree.")

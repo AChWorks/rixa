@@ -32,6 +32,7 @@ type response struct {
 	closedHere bool
 
 	Review            map[string]string `json:"review,omitempty"`
+	SavedDraft        *publicSavedDraft `json:"saved_draft,omitempty"`
 	NativeOperation   string            `json:"native_operation_id,omitempty"`
 	Operation         string            `json:"operation_id"`
 	Kind              string            `json:"kind"`
@@ -199,6 +200,31 @@ func (c *Console) artifactState(ctx context.Context) (artifact, string, bool, er
 	return a, attempt, err != nil || archive != a.Archive || bundle != a.Bundle || release != a.Release || source != a.Source, err
 }
 
+// publicSavedDraft is a positive Save acknowledgement for the exact private
+// draft that was accepted. Never serialize a Draft: only allowlisted non-secret
+// UI fields and presence booleans may cross the browser boundary.
+type publicSavedDraft struct {
+	Fields  map[string]string `json:"fields"`
+	Secrets map[string]bool   `json:"secrets"`
+}
+
+func savedDraftView(d serverinstall.Draft) *publicSavedDraft {
+	return &publicSavedDraft{
+		Fields: map[string]string{
+			"control_origin": d.ControlOrigin, "site_origin": d.SiteOrigin,
+			"site_b_origin": d.SiteBOrigin, "site_b_login": d.SiteBLogin,
+			"listen": d.Listen, "control_login": d.ControlLogin,
+			"site_login": d.SiteLogin, "language": d.Language,
+		},
+		Secrets: map[string]bool{
+			"control_dsn": d.ControlDSN != "", "site_dsn": d.SiteDSN != "",
+			"site_b_dsn":       d.SiteBDSN != "",
+			"control_password": d.ControlPassword != "", "site_password": d.SitePassword != "",
+			"site_b_password": d.SiteBPassword != "",
+		},
+	}
+}
+
 type configureInput struct {
 	ControlOrigin   string `json:"control_origin"`
 	SiteOrigin      string `json:"site_origin"`
@@ -218,6 +244,11 @@ type configureInput struct {
 }
 
 func (c *Console) configure(ctx context.Context, in configureInput) (serverinstall.Result, error) {
+	result, _, err := c.configureWithSavedDraft(ctx, in)
+	return result, err
+}
+
+func (c *Console) configureWithSavedDraft(ctx context.Context, in configureInput) (serverinstall.Result, *publicSavedDraft, error) {
 	c.mutex.Lock()
 	a := c.artifact
 	c.mutex.Unlock()
@@ -225,7 +256,7 @@ func (c *Console) configure(ctx context.Context, in configureInput) (serverinsta
 		d, e := c.updater.LoadUpdateDraft(ctx, c.options.Scope.Operation)
 		if e != nil {
 			if !errors.Is(e, os.ErrNotExist) {
-				return serverinstall.Result{}, e
+				return serverinstall.Result{}, nil, e
 			}
 			d = serverinstall.UpdateDraft{}
 		}
@@ -237,12 +268,13 @@ func (c *Console) configure(ctx context.Context, in configureInput) (serverinsta
 			d.Release = a.Release
 			d.SourceCommit = a.Source
 		}
-		return c.updater.SaveUpdateDraft(ctx, d)
+		result, err := c.updater.SaveUpdateDraft(ctx, d)
+		return result, nil, err
 	}
 	d, e := c.backend.LoadDraft(ctx, c.options.Scope.Operation)
 	if e != nil {
 		if !errors.Is(e, os.ErrNotExist) {
-			return serverinstall.Result{}, e
+			return serverinstall.Result{}, nil, e
 		}
 		d = serverinstall.Draft{}
 	}
@@ -258,7 +290,7 @@ func (c *Console) configure(ctx context.Context, in configureInput) (serverinsta
 	d.ControlOrigin = in.ControlOrigin
 	d.SiteOrigin = in.SiteOrigin
 	if in.SiteBAction != "" && in.SiteBAction != "keep" && in.SiteBAction != "remove" {
-		return serverinstall.Result{}, serverinstall.ErrInput
+		return serverinstall.Result{}, nil, serverinstall.ErrInput
 	}
 	if in.SiteBAction == "remove" {
 		d.SiteBOrigin, d.SiteBDSN, d.SiteBLogin, d.SiteBPassword = "", "", "", ""
@@ -289,7 +321,11 @@ func (c *Console) configure(ctx context.Context, in configureInput) (serverinsta
 	if in.SitePassword != "" {
 		d.SitePassword = in.SitePassword
 	}
-	return c.backend.SaveDraft(ctx, d)
+	result, err := c.backend.SaveDraft(ctx, d)
+	if err != nil {
+		return result, nil, err
+	}
+	return result, savedDraftView(d), nil
 }
 func (c *Console) surface(w http.ResponseWriter, r *http.Request, view shell.Request) {
 	if r.URL.Path == "/" && r.Method == http.MethodGet {
@@ -332,6 +368,7 @@ func (c *Console) operation(w http.ResponseWriter, r *http.Request, locale *loca
 	}
 	var result serverinstall.Result
 	var supplied []string
+	var saved *publicSavedDraft
 	var e error
 	if action == "configure" {
 		var in configureInput
@@ -347,7 +384,7 @@ func (c *Console) operation(w http.ResponseWriter, r *http.Request, locale *loca
 			return
 		}
 		supplied = []string{in.ControlDSN, in.SiteDSN, in.SiteBDSN, in.ControlPassword, in.SitePassword, in.SiteBPassword}
-		result, e = c.configure(r.Context(), in)
+		result, saved, e = c.configureWithSavedDraft(r.Context(), in)
 	} else {
 		var input struct {
 			ReviewToken  string `json:"review_token,omitempty"`
@@ -409,6 +446,9 @@ func (c *Console) operation(w http.ResponseWriter, r *http.Request, locale *loca
 	if e != nil {
 		value.ReviewToken = ""
 		value.Review = nil
+	} else if action == "configure" && c.sameNativeOperation(result) && !value.AccessClosed {
+		// Only a positively acknowledged Save may replace browser form state.
+		value.SavedDraft = saved
 	}
 	jsonResponse(w, nativeStatusCode(r.Context(), e), value)
 }
