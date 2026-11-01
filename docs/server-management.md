@@ -119,6 +119,52 @@ The loopback database restriction makes the reviewed credential source identical
 
 Supplied TLS material is checked for key pairing, time, hostnames and server usage, then privately staged. Local postflight uses that supplied certificate to verify the exact HTTPS endpoints. This does not establish public DNS resolution, browser CA trust, firewall reachability or automatic certificate renewal.
 
+## Inspect adding a site after installation (read-only source capability)
+
+A manager built from source with `manage add-site inspect` can **assess**
+an optional `site-b` on a currently **installed, healthy, single-site**
+native operation. This inspection is a separate operator command from the
+initial two-site installation path. It is **not Add Site execution**:
+there is no Apply, Resume, topology mutation, site-b migration, bootstrap,
+service restart, browser-console flow or release/host support claim yet.
+
+Create an operator-owned **0600** private JSON file outside the web root,
+containing exactly:
+
+| Field | Meaning |
+| --- | --- |
+| `installation_operation` | Original installed one-site native operation ID |
+| `site_b_origin` | Third distinct HTTPS origin at the existing listener port |
+| `site_b_dsn` | Third independent explicit loopback PostgreSQL 18 password URL |
+| `site_b_login` | Intended independent site-b administrator login |
+| `site_b_password` | Intended new administrator password; remains private |
+
+Then inspect with an independently trusted manager containing this command:
+
+```bash
+sudo rixa manage add-site inspect --source /root/private/add-site-inspection.json
+```
+
+The CLI emits only a bounded, credential-free JSON result and reasoned
+field problems. It does not retain or print the draft and does not return a
+review token permitting mutation. On success, `state=inspected` and
+`code=prerequisites-verified` mean **inspection passed, not installed**.
+An incomplete or unsafe draft is rejected before database access.
+
+The assessment rechecks the original installation owner, active one-site
+configuration, service and strict HTTPS health, absence of active/pending
+managed updates, and the original physical database identities. It tests
+the original Control/site-a and new site-b database owners as one
+three-way role-isolation group, including PostgreSQL membership and
+effective cross-database CONNECT privileges. For this bounded inspection
+the existing owned TLS certificate must **already** cover the new site-b
+hostname. Certificate replacement and reconfiguration are not supported.
+
+Do not create or change a site, reuse an old demo, change PostgreSQL role
+grants, or mutate an active installation merely because inspection succeeds.
+A separately reviewed persisted Add Site lifecycle and actual host acceptance
+are required before an executable Add Site path can be advertised.
+
 ## Temporary browser access
 
 Use this interface only when the independently trusted manager exposes

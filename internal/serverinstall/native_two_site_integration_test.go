@@ -115,6 +115,23 @@ func TestNativeOptionalTwoSitePhysicalMigrationAndBootstrap(t *testing.T) {
 	if p := ValidateDraft(d); len(p) > 0 {
 		t.Fatalf("isolated-role native draft validation failed: %+v", p)
 	}
+	// The after-install admission reuses the same real three-role PostgreSQL
+	// contract without requiring the original bootstrap secrets to survive.
+	installedBase := d
+	installedBase.SiteBOrigin, installedBase.SiteBDSN = "", ""
+	installedBase.SiteBLogin, installedBase.SiteBPassword = "", ""
+	installedBase.ControlPassword, installedBase.SitePassword = "", ""
+	proposed := AddSiteInspectionDraft{InstallationOperation: d.OperationID,
+		SiteBOrigin: d.SiteBOrigin, SiteBDSN: d.SiteBDSN,
+		SiteBLogin: d.SiteBLogin, SiteBPassword: d.SiteBPassword}
+	if problems := ValidateAddSiteInspection(installedBase, proposed); len(problems) > 0 {
+		t.Fatalf("physical after-install site admission rejected valid private inputs: %+v", problems)
+	}
+	if candidate := proposed.withInstallation(installedBase); candidate.ControlPassword != "" || candidate.SitePassword != "" {
+		t.Fatal("the preflight reintroduced retired original administrator secrets")
+	} else if afterTargets, err := databaseIdentities(ctx, candidate); err != nil || len(afterTargets) != 3 {
+		t.Fatalf("actual after-install three-site-target admission failed: %v", err)
+	}
 	identities, err := databaseIdentities(ctx, d)
 	if err != nil {
 		t.Fatalf("real three-database native admission failed: %v", err)
