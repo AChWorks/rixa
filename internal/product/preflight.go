@@ -5,15 +5,19 @@ package product
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -83,13 +87,14 @@ func inspectDatabaseTargetWithConnector(parent context.Context, dsn string, conn
 
 	conn, connectErr := connect(ctx, cfg)
 	if connectErr != nil || conn == nil {
-		return identity, safePreflightError(ctx)
+		return identity, safePreflightError(ctx, connectErr)
 	}
 	defer func() {
 		closeCtx, closeCancel := context.WithTimeout(context.WithoutCancel(parent), time.Second)
 		defer closeCancel()
-		if closeErr := conn.Close(closeCtx); closeErr != nil {
-			err = errors.Join(err, ErrUnavailable)
+		if closeErr := conn.Close(closeCtx); closeErr != nil && err == nil {
+			// A close failure must never make a permanent probe rejection retryable.
+			err = ErrUnavailable
 		}
 	}()
 
@@ -98,8 +103,11 @@ func inspectDatabaseTargetWithConnector(parent context.Context, dsn string, conn
 		FROM pg_control_system() AS control
 		JOIN pg_database AS database ON database.datname = current_database()
 	`).Scan(&identity.systemID, &identity.databaseOID)
-	if queryErr != nil || identity.systemID == "" || identity.databaseOID == "" {
-		return databaseTargetIdentity{}, safePreflightError(ctx)
+	if queryErr != nil {
+		return databaseTargetIdentity{}, safePreflightError(ctx, queryErr)
+	}
+	if identity.systemID == "" || identity.databaseOID == "" {
+		return databaseTargetIdentity{}, fmt.Errorf("%w: incomplete physical database identity", ErrDatabaseAdmission)
 	}
 	return identity, nil
 }
@@ -136,11 +144,79 @@ func safeDatabaseHostTLS(host string, tlsConfig *tls.Config) bool {
 	return local || tlsConfig != nil && !tlsConfig.InsecureSkipVerify && tlsConfig.ServerName != ""
 }
 
-func safePreflightError(ctx context.Context) error {
+// safePreflightError classifies ONLY read-only PostgreSQL identity probes.
+// Driver errors (notably pgconn.ConnectError) can embed DSNs, usernames and
+// passwords. Never wrap or format the underlying error in operator diagnostics.
+// Unknown admission failures fail closed and do not trigger startup retries.
+func safePreflightError(ctx context.Context, cause error) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	return ErrUnavailable
+	if cause == nil {
+		return fmt.Errorf("%w: missing database connection", ErrDatabaseAdmission)
+	}
+
+	var pgErr *pgconn.PgError
+	if errors.As(cause, &pgErr) {
+		switch {
+		case strings.HasPrefix(pgErr.Code, "28"):
+			return fmt.Errorf("%w: PostgreSQL authentication rejected", ErrDatabaseAdmission)
+		case pgErr.Code == "42501":
+			return fmt.Errorf("%w: PostgreSQL identity probe permission denied", ErrDatabaseAdmission)
+		case strings.HasPrefix(pgErr.Code, "08"),
+			pgErr.Code == "57P03", // cannot_connect_now
+			pgErr.Code == "57P01", // admin_shutdown
+			pgErr.Code == "57P02", // crash_shutdown
+			pgErr.Code == "53300": // too_many_connections
+			return ErrUnavailable
+		default:
+			return fmt.Errorf("%w: PostgreSQL rejected database identity probe", ErrDatabaseAdmission)
+		}
+	}
+
+	var verification *tls.CertificateVerificationError
+	var unknownCA x509.UnknownAuthorityError
+	var hostname x509.HostnameError
+	var invalidCert x509.CertificateInvalidError
+	var missingRoots x509.SystemRootsError
+	var header tls.RecordHeaderError
+	if errors.As(cause, &verification) ||
+		errors.As(cause, &unknownCA) || errors.As(cause, &hostname) ||
+		errors.As(cause, &invalidCert) || errors.As(cause, &missingRoots) ||
+		errors.As(cause, &header) {
+		return fmt.Errorf("%w: PostgreSQL TLS verification or protocol rejected", ErrDatabaseAdmission)
+	}
+
+	if errors.Is(cause, context.Canceled) {
+		return context.Canceled
+	}
+	if errors.Is(cause, context.DeadlineExceeded) ||
+		pgconn.Timeout(cause) || pgconn.SafeToRetry(cause) {
+		return ErrUnavailable
+	}
+	var dnsErr *net.DNSError
+	if errors.As(cause, &dnsErr) {
+		if dnsErr.IsTimeout || dnsErr.IsTemporary {
+			return ErrUnavailable
+		}
+		return fmt.Errorf("%w: PostgreSQL host resolution rejected", ErrDatabaseAdmission)
+	}
+	var netErr net.Error
+	if errors.As(cause, &netErr) && netErr.Timeout() {
+		return ErrUnavailable
+	}
+	var opErr *net.OpError
+	if errors.As(cause, &opErr) {
+		return ErrUnavailable
+	}
+	if errors.Is(cause, syscall.ECONNREFUSED) || errors.Is(cause, syscall.ECONNRESET) ||
+		errors.Is(cause, syscall.ECONNABORTED) || errors.Is(cause, syscall.ETIMEDOUT) ||
+		errors.Is(cause, syscall.EHOSTUNREACH) || errors.Is(cause, syscall.ENETUNREACH) ||
+		errors.Is(cause, syscall.ENETDOWN) || errors.Is(cause, io.EOF) ||
+		errors.Is(cause, io.ErrUnexpectedEOF) || errors.Is(cause, pgconn.ErrConnClosed) {
+		return ErrUnavailable
+	}
+	return fmt.Errorf("%w: PostgreSQL connection or identity probe rejected", ErrDatabaseAdmission)
 }
 
 func validateDeclaredMediaRoots(sites []SiteConfig) error {

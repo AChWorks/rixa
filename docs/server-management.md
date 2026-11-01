@@ -90,9 +90,12 @@ TLS/Host and HTTP checks. The normal long-running `rixa run` entry has its
 own separately bounded 90-second wait before constructing the application:
 it retries only read-only PostgreSQL physical-identity probes that returned
 transient unavailability or a bounded probe deadline, spaced 2 seconds apart.
-A malformed configuration, invalid TLS, changed physical/tenant isolation or
-other unclassified failure still fails immediately. No migrations, account
-creation, session writes or serving starts during this wait. The operator
+Malformed configuration, rejected PostgreSQL credentials or permissions,
+failed TLS certificate verification, changed physical/tenant isolation and
+unclassified database admission failures fail immediately with sanitized
+error categories and the target identifier. Only recognized transient network
+or PostgreSQL readiness conditions are eligible for bounded retries. No
+migrations, account creation, session writes or serving starts during this wait. The operator
 `rixa check` and Native Review retain their existing fail-fast semantics.
 Service startup records bounded, credential-free wait/recovery diagnostics.
 A failed stage is not automatically retried or considered healthy because a process exists: inspect the retained stage and

@@ -32,6 +32,10 @@ func TestRuntimeReadinessDoesNotRetryConfigurationOrUnsafeErrors(t *testing.T) {
 		failure error
 	}{
 		{"configuration", fmt.Errorf("invalid TLS: %w", product.ErrConfiguration)},
+		{"authentication", fmt.Errorf("database target control: %w: authentication rejected", product.ErrDatabaseAdmission)},
+		{"permission", fmt.Errorf("database target site-a: %w: identity probe permission denied", product.ErrDatabaseAdmission)},
+		{"tls", fmt.Errorf("database target site-b: %w: TLS verification", product.ErrDatabaseAdmission)},
+		{"permanent-even-when-joined-to-transient", errors.Join(product.ErrDatabaseAdmission, product.ErrUnavailable)},
 		{"unclassified", errors.New("unexpected internal failure")},
 		{"canceled", context.Canceled},
 	} {

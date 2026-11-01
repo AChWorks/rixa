@@ -42,7 +42,8 @@ func awaitRuntimeDatabaseReadiness(parent context.Context, limit, interval time.
 			}
 			return result, nil
 		}
-		if errors.Is(err, product.ErrConfiguration) || !errors.Is(err, product.ErrUnavailable) && !errors.Is(err, context.DeadlineExceeded) {
+		if errors.Is(err, product.ErrConfiguration) || errors.Is(err, product.ErrDatabaseAdmission) ||
+			(!errors.Is(err, product.ErrUnavailable) && !errors.Is(err, context.DeadlineExceeded)) {
 			return product.RuntimeConfig{}, err
 		}
 		if attempts == 1 && logger != nil {

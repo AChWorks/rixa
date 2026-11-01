@@ -30,8 +30,9 @@ const (
 )
 
 var (
-	ErrConfiguration = errors.New("invalid rixa configuration")
-	ErrUnavailable   = errors.New("rixa unavailable")
+	ErrConfiguration     = errors.New("invalid rixa configuration")
+	ErrUnavailable       = errors.New("rixa unavailable")
+	ErrDatabaseAdmission = errors.New("database admission rejected")
 
 	siteIDSyntax        = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
 	envNameSyntax       = regexp.MustCompile(`^[A-Z][A-Z0-9_]{1,127}$`)
