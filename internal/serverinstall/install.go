@@ -321,7 +321,7 @@ func (m *Manager) runtimePaths(j *journal) error {
 	return ownedDir("/var/lib/rixa", j.UID, j.GID, 0700)
 }
 func (m *Manager) serviceBytes(j *journal) []byte {
-	return []byte("[Unit]\nDescription=Rixa CMS\nStartLimitIntervalSec=60\nStartLimitBurst=3\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=exec\nUser=rixa\nGroup=rixa\nExecStart=" + m.binaryPath(j) + " run --config " + runtimeConfigPath + "\nEnvironmentFile=/etc/rixa/service.env\nWorkingDirectory=/var/lib/rixa\nUMask=0077\nRestart=on-failure\nRestartSec=5\nTimeoutStartSec=30\nTimeoutStopSec=30\nNoNewPrivileges=yes\nProtectSystem=strict\nProtectHome=yes\nPrivateTmp=yes\nReadWritePaths=/var/lib/rixa\nCapabilityBoundingSet=CAP_NET_BIND_SERVICE\nAmbientCapabilities=CAP_NET_BIND_SERVICE\nRestrictSUIDSGID=yes\nLockPersonality=yes\n\n[Install]\nWantedBy=multi-user.target\n")
+	return []byte("[Unit]\nDescription=Rixa CMS\nStartLimitIntervalSec=60\nStartLimitBurst=3\nAfter=network-online.target postgresql.service\nWants=network-online.target\n\n[Service]\nType=exec\nUser=rixa\nGroup=rixa\nExecStart=" + m.binaryPath(j) + " run --config " + runtimeConfigPath + "\nEnvironmentFile=/etc/rixa/service.env\nWorkingDirectory=/var/lib/rixa\nUMask=0077\nRestart=on-failure\nRestartSec=5\nTimeoutStartSec=30\nTimeoutStopSec=30\nNoNewPrivileges=yes\nProtectSystem=strict\nProtectHome=yes\nPrivateTmp=yes\nReadWritePaths=/var/lib/rixa\nCapabilityBoundingSet=CAP_NET_BIND_SERVICE\nAmbientCapabilities=CAP_NET_BIND_SERVICE\nRestrictSUIDSGID=yes\nLockPersonality=yes\n\n[Install]\nWantedBy=multi-user.target\n")
 }
 func environmentFile(d Draft) []byte {
 	quote := func(s string) string { return "\"" + strings.NewReplacer("\\", "\\\\", "\"", "\\\"").Replace(s) + "\"" }
@@ -331,6 +331,18 @@ func environmentFile(d Draft) []byte {
 	}
 	return []byte(env)
 }
+
+// nativeServiceReadinessWindow preserves the established single-site window.
+// Optional initial two-site installations must positively verify three TLS
+// origins after systemd activation; allow a larger bounded settling period on
+// low-resource hosts without relaxing any ownership, TLS or HTTP checks.
+func nativeServiceReadinessWindow(d Draft) time.Duration {
+	if siteBRequested(d) {
+		return 90 * time.Second
+	}
+	return 30 * time.Second
+}
+
 func (m *Manager) installService(ctx context.Context, j *journal) error {
 	if e := m.observeAccount(j); e != nil {
 		return e
@@ -358,7 +370,7 @@ func (m *Manager) installService(ctx context.Context, j *journal) error {
 	if _, e := m.run(ctx, "/usr/bin/systemctl", "enable", "--now", "rixa.service"); e != nil {
 		return e
 	}
-	readyCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	readyCtx, cancel := context.WithTimeout(ctx, nativeServiceReadinessWindow(j.Draft))
 	defer cancel()
 	for {
 		if e := m.validateInstalled(readyCtx, j); e == nil {

@@ -146,7 +146,21 @@ func run(args []string) error {
 		if err != nil {
 			return err
 		}
-		resolved, err := config.ResolveRuntime(context.Background(), os.LookupEnv)
+		ctx := context.Background()
+		if args[0] == "run" {
+			var stop context.CancelFunc
+			ctx, stop = signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+			defer stop()
+		}
+		resolve := func(probe context.Context) (product.RuntimeConfig, error) {
+			return config.ResolveRuntime(probe, os.LookupEnv)
+		}
+		var resolved product.RuntimeConfig
+		if args[0] == "run" {
+			resolved, err = awaitRuntimeDatabaseReadiness(ctx, serveDatabaseReadinessLimit, serveDatabaseRetryInterval, resolve, logger)
+		} else {
+			resolved, err = resolve(ctx)
+		}
 		if err != nil {
 			return err
 		}
@@ -166,8 +180,6 @@ func run(args []string) error {
 				"achrix_components": product.FoundationVersions(),
 			})
 		}
-		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-		defer stop()
 		return product.Serve(ctx, runtime, logger)
 	default:
 		return fmt.Errorf("unknown command %q", args[0])

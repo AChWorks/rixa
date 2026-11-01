@@ -1,0 +1,81 @@
+// SPDX-License-Identifier: MPL-2.0
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/AChWorks/rixa/internal/product"
+)
+
+func TestRuntimeReadinessRetriesOnlyTransientReadOnlyPreflight(t *testing.T) {
+	attempts := 0
+	result, err := awaitRuntimeDatabaseReadiness(context.Background(), time.Second, time.Millisecond, func(context.Context) (product.RuntimeConfig, error) {
+		attempts++
+		if attempts <= 2 {
+			return product.RuntimeConfig{}, fmt.Errorf("database target control: %w", product.ErrUnavailable)
+		}
+		return product.RuntimeConfig{Config: product.Config{Listen: "127.0.0.1:12345"}}, nil
+	}, nil)
+	if err != nil || attempts != 3 || result.Listen != "127.0.0.1:12345" {
+		t.Fatalf("transient preflight not reconciled: attempts=%d err=%v", attempts, err)
+	}
+}
+
+func TestRuntimeReadinessDoesNotRetryConfigurationOrUnsafeErrors(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		failure error
+	}{
+		{"configuration", fmt.Errorf("invalid TLS: %w", product.ErrConfiguration)},
+		{"unclassified", errors.New("unexpected internal failure")},
+		{"canceled", context.Canceled},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			attempts := 0
+			_, err := awaitRuntimeDatabaseReadiness(context.Background(), time.Second, time.Millisecond, func(context.Context) (product.RuntimeConfig, error) {
+				attempts++
+				return product.RuntimeConfig{}, test.failure
+			}, nil)
+			if attempts != 1 || !errors.Is(err, test.failure) {
+				t.Fatalf("unsafe retry: %d %v", attempts, err)
+			}
+		})
+	}
+}
+
+func TestRuntimeReadinessBoundedAndNoSecretInTimeout(t *testing.T) {
+	const secret = "postgres://sensitive-secret@localhost/test"
+	attempts := 0
+	_, err := awaitRuntimeDatabaseReadiness(context.Background(), 25*time.Millisecond, time.Millisecond, func(context.Context) (product.RuntimeConfig, error) {
+		attempts++
+		return product.RuntimeConfig{}, fmt.Errorf("%w: %s", product.ErrUnavailable, secret)
+	}, nil)
+	if !errors.Is(err, product.ErrUnavailable) || attempts < 1 || strings.Contains(err.Error(), secret) {
+		t.Fatalf("timeout must fail closed without secrets; attempts=%d err=%v", attempts, err)
+	}
+}
+
+func TestRuntimeReadinessHonorsCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	attempts := 0
+	_, err := awaitRuntimeDatabaseReadiness(ctx, time.Second, time.Millisecond, func(context.Context) (product.RuntimeConfig, error) {
+		attempts++
+		cancel()
+		return product.RuntimeConfig{}, product.ErrUnavailable
+	}, nil)
+	if attempts != 1 || !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancel did not stop retry: %d %v", attempts, err)
+	}
+}
+
+func TestRuntimeReadinessRejectsInvalidInternalParameters(t *testing.T) {
+	_, err := awaitRuntimeDatabaseReadiness(context.Background(), 0, time.Second, nil, nil)
+	if !errors.Is(err, product.ErrConfiguration) {
+		t.Fatalf("invalid helper parameters admitted: %v", err)
+	}
+}
