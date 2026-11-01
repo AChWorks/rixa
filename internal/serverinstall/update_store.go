@@ -131,6 +131,17 @@ func validUpdate(u *updateJournal) bool {
 			return false
 		}
 	}
+	// A two-key update journal always contains Control + site-a; a three-key
+	// journal additionally contains site-b. Merely permitting the new key
+	// alongside the previous length check would admit mismatched target sets.
+	if len(u.DatabaseTargets) > 0 {
+		if u.DatabaseTargets["control"] == "" || u.DatabaseTargets["site-a"] == "" {
+			return false
+		}
+		if len(u.DatabaseTargets) == 3 && u.DatabaseTargets["site-b"] == "" {
+			return false
+		}
+	}
 	known := map[string]bool{"executor": true, "remove": true}
 	for _, s := range updateStages {
 		known[s] = true

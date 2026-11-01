@@ -9,6 +9,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/AChWorks/rixa/internal/product"
 )
@@ -179,5 +180,29 @@ func TestNativeTwoSiteConservativePreStopCompatibility(t *testing.T) {
 	current.Sites[0], current.Sites[1] = current.Sites[1], current.Sites[0]
 	if err := preStopEditorialDecision(current); !errors.Is(err, ErrState) {
 		t.Fatalf("reordered site ledgers admitted: %v", err)
+	}
+}
+
+func TestNativeTwoSiteUpdateJournalRejectsMismatchedTargetSets(t *testing.T) {
+	base := frozenUpdate()
+	base.Updated = time.Now().UTC().Format(time.RFC3339Nano)
+	if !validUpdate(base) {
+		t.Fatal("existing single-site update journal rejected")
+	}
+	for _, targets := range []map[string]string{
+		{"control": "1:100", "site-b": "1:102"},
+		{"site-a": "1:101", "site-b": "1:102"},
+		{"control": "1:100", "site-a": "1:101", "unexpected": "1:105"},
+	} {
+		changed := *base
+		changed.DatabaseTargets = targets
+		if validUpdate(&changed) {
+			t.Fatal("mismatched control/site update identities admitted")
+		}
+	}
+	expanded := *base
+	expanded.DatabaseTargets = map[string]string{"control": "1:100", "site-a": "1:101", "site-b": "1:102"}
+	if !validUpdate(&expanded) {
+		t.Fatal("valid complete three-database update journal rejected")
 	}
 }
