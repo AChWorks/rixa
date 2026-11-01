@@ -155,75 +155,104 @@ func safePreflightError(ctx context.Context, cause error) error {
 	if cause == nil {
 		return fmt.Errorf("%w: missing database connection", ErrDatabaseAdmission)
 	}
-
-	var pgErr *pgconn.PgError
-	if errors.As(cause, &pgErr) {
-		switch {
-		case strings.HasPrefix(pgErr.Code, "28"):
-			return fmt.Errorf("%w: PostgreSQL authentication rejected", ErrDatabaseAdmission)
-		case pgErr.Code == "42501":
-			return fmt.Errorf("%w: PostgreSQL identity probe permission denied", ErrDatabaseAdmission)
-		case strings.HasPrefix(pgErr.Code, "08"),
-			pgErr.Code == "57P03", // cannot_connect_now
-			pgErr.Code == "57P01", // admin_shutdown
-			pgErr.Code == "57P02", // crash_shutdown
-			pgErr.Code == "53300": // too_many_connections
-			return ErrUnavailable
-		default:
-			return fmt.Errorf("%w: PostgreSQL rejected database identity probe", ErrDatabaseAdmission)
-		}
-	}
-
-	var verification *tls.CertificateVerificationError
-	var unknownCA x509.UnknownAuthorityError
-	var hostname x509.HostnameError
-	var invalidCert x509.CertificateInvalidError
-	var missingRoots x509.SystemRootsError
-	var header tls.RecordHeaderError
-	if errors.As(cause, &verification) ||
-		errors.As(cause, &unknownCA) || errors.As(cause, &hostname) ||
-		errors.As(cause, &invalidCert) || errors.As(cause, &missingRoots) ||
-		errors.As(cause, &header) {
-		return fmt.Errorf("%w: PostgreSQL TLS verification or protocol rejected", ErrDatabaseAdmission)
-	}
-
 	if errors.Is(cause, context.Canceled) {
 		return context.Canceled
 	}
-	// PostgreSQL's SafeToRetry only means that no data was sent. It does
-	// not prove that a connection failure is transient or recoverable.
-	// A permission/policy rejection remains permanent even when wrapped
-	// alongside an otherwise retryable transport or timeout error.
-	if errors.Is(cause, syscall.EACCES) || errors.Is(cause, syscall.EPERM) {
-		return fmt.Errorf("%w: PostgreSQL network operation rejected", ErrDatabaseAdmission)
-	}
-	if errors.Is(cause, context.DeadlineExceeded) || pgconn.Timeout(cause) {
+	// An errors.Join may contain both a transient and a permanent failure.
+	// Retry only when every effective cause is recognized as transient.
+	retryable, rejection := classifyDatabaseProbeCause(cause, 0)
+	if retryable {
 		return ErrUnavailable
 	}
-	var dnsErr *net.DNSError
-	if errors.As(cause, &dnsErr) {
-		if dnsErr.IsTimeout || dnsErr.IsTemporary {
-			return ErrUnavailable
+	return fmt.Errorf("%w: %s", ErrDatabaseAdmission, rejection)
+}
+
+const maxDatabaseProbeErrorDepth = 32
+
+// classifyDatabaseProbeCause never formats driver errors; those may contain
+// credentials and DSNs. Unknown causes fail closed, including joined failures.
+func classifyDatabaseProbeCause(cause error, depth int) (retryable bool, rejection string) {
+	const unknown = "PostgreSQL connection or identity probe rejected"
+	if cause == nil || depth >= maxDatabaseProbeErrorDepth {
+		return false, unknown
+	}
+	switch e := cause.(type) {
+	case *pgconn.PgError:
+		switch {
+		case strings.HasPrefix(e.Code, "28"):
+			return false, "PostgreSQL authentication rejected"
+		case e.Code == "42501":
+			return false, "PostgreSQL identity probe permission denied"
+		case strings.HasPrefix(e.Code, "08"),
+			e.Code == "57P03", // cannot_connect_now
+			e.Code == "57P01", // admin_shutdown
+			e.Code == "57P02", // crash_shutdown
+			e.Code == "53300": // too_many_connections
+			return true, ""
+		default:
+			return false, "PostgreSQL rejected database identity probe"
 		}
-		return fmt.Errorf("%w: PostgreSQL host resolution rejected", ErrDatabaseAdmission)
+	case *tls.CertificateVerificationError, x509.UnknownAuthorityError,
+		*x509.UnknownAuthorityError, x509.HostnameError, *x509.HostnameError,
+		x509.CertificateInvalidError, *x509.CertificateInvalidError,
+		x509.SystemRootsError, *x509.SystemRootsError,
+		tls.RecordHeaderError, *tls.RecordHeaderError:
+		return false, "PostgreSQL TLS verification or protocol rejected"
+	case *net.DNSError:
+		if e.IsNotFound {
+			return false, "PostgreSQL host resolution rejected"
+		}
+		if e.IsTimeout || e.IsTemporary {
+			return true, ""
+		}
+		return false, "PostgreSQL host resolution rejected"
+	case *net.OpError:
+		ok, _ := classifyDatabaseProbeCause(e.Err, depth+1)
+		if ok {
+			return true, ""
+		}
+		return false, "PostgreSQL network operation rejected"
+	}
+	// Go's errors.Is/As matches any branch of errors.Join, which cannot
+	// establish recoverability. Every branch must independently be transient.
+	if many, ok := cause.(interface{ Unwrap() []error }); ok {
+		children := many.Unwrap()
+		if len(children) == 0 {
+			return false, unknown
+		}
+		firstRejection := ""
+		for _, child := range children {
+			ok, category := classifyDatabaseProbeCause(child, depth+1)
+			if !ok && firstRejection == "" {
+				firstRejection = category
+			}
+		}
+		if firstRejection != "" {
+			return false, firstRejection
+		}
+		return true, ""
+	}
+	if single, ok := cause.(interface{ Unwrap() error }); ok {
+		if inner := single.Unwrap(); inner != nil {
+			return classifyDatabaseProbeCause(inner, depth+1)
+		}
+	}
+	// pgconn.Timeout's own wrapper exposes its actual context/net timeout
+	// with Unwrap. SafeToRetry only means no data was sent, not recoverability.
+	if errors.Is(cause, syscall.EACCES) || errors.Is(cause, syscall.EPERM) {
+		return false, "PostgreSQL network operation rejected"
+	}
+	if errors.Is(cause, context.DeadlineExceeded) {
+		return true, ""
 	}
 	var netErr net.Error
 	if errors.As(cause, &netErr) && netErr.Timeout() {
-		return ErrUnavailable
-	}
-	var opErr *net.OpError
-	if errors.As(cause, &opErr) {
-		// net.OpError alone does not imply a transient failure. Inspect
-		// its inner cause against the same narrow transport allowlist.
-		if transientDatabaseTransportError(opErr.Err) {
-			return ErrUnavailable
-		}
-		return fmt.Errorf("%w: PostgreSQL network operation rejected", ErrDatabaseAdmission)
+		return true, ""
 	}
 	if transientDatabaseTransportError(cause) {
-		return ErrUnavailable
+		return true, ""
 	}
-	return fmt.Errorf("%w: PostgreSQL connection or identity probe rejected", ErrDatabaseAdmission)
+	return false, unknown
 }
 
 func transientDatabaseTransportError(err error) bool {
