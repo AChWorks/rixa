@@ -62,7 +62,7 @@ func (m *Manager) validateInstalled(ctx context.Context, j *journal) error {
 	}
 
 	config, e := readPrivate(runtimeConfigPath, int(j.UID), 1<<20)
-	if e != nil || !bytes.Equal(config, configBytes(j.Draft, j.ControlPrincipal, j.SitePrincipal)) {
+	if e != nil || !bytes.Equal(config, configBytesWithSiteB(j.Draft, j.ControlPrincipal, j.SitePrincipal, j.SiteBPrincipal)) {
 		return ErrState
 	}
 	client, e := m.localClient(j)
@@ -70,7 +70,7 @@ func (m *Manager) validateInstalled(ctx context.Context, j *journal) error {
 		return e
 	}
 	defer client.CloseIdleConnections()
-	for _, origin := range []string{j.Draft.ControlOrigin, j.Draft.SiteOrigin} {
+	for _, origin := range nativeSiteOrigins(j.Draft) {
 		req, e := http.NewRequestWithContext(ctx, http.MethodGet, origin+"/admin/login", nil)
 		if e != nil {
 			return ErrInput
@@ -124,10 +124,14 @@ func (m *Manager) postflight(ctx context.Context, j *journal) error {
 		return e
 	}
 	defer client.CloseIdleConnections()
-	for _, p := range []struct{ origin, login, password, principal, page string }{
+	logins := []struct{ origin, login, password, principal, page string }{
 		{j.Draft.ControlOrigin, j.Draft.ControlLogin, j.Draft.ControlPassword, j.ControlPrincipal, "/admin/sites/"},
 		{j.Draft.SiteOrigin, j.Draft.SiteLogin, j.Draft.SitePassword, j.SitePrincipal, "/admin/content/"},
-	} {
+	}
+	if siteBRequested(j.Draft) {
+		logins = append(logins, struct{ origin, login, password, principal, page string }{j.Draft.SiteBOrigin, j.Draft.SiteBLogin, j.Draft.SiteBPassword, j.SiteBPrincipal, "/admin/content/"})
+	}
+	for _, p := range logins {
 		if e = verifyLogin(ctx, client, p.origin, p.login, p.password, p.principal, p.page); e != nil {
 			return e
 		}

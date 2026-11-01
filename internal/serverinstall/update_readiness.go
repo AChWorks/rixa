@@ -25,7 +25,7 @@ func (m *Manager) updateHTTPPostflight(parent context.Context, j *journal) error
 	// read-only proof shares one finite deadline, including all transport work.
 	ctx, cancel := context.WithTimeout(parent, 30*time.Second)
 	defer cancel()
-	for _, origin := range []string{j.Draft.ControlOrigin, j.Draft.SiteOrigin} {
+	for _, origin := range nativeSiteOrigins(j.Draft) {
 		for _, probe := range []struct {
 			path   string
 			status int

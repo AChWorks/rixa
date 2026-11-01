@@ -81,6 +81,27 @@
   reviewToken="";root.querySelector('[name="confirm_apply"]').checked=false;
   root.querySelector("[data-review]").hidden=true;
  }
+ // A successful Save carries the exact allowlisted public state persisted by
+ // the backend. Never infer saved credentials from submitted inputs or status.
+ function syncSavedDraft(snapshot) {
+  const fields=["control_origin","site_origin","site_b_origin","site_b_login","listen","control_login","site_login","language"];
+  const secrets=["control_dsn","site_dsn","site_b_dsn","control_password","site_password","site_b_password"];
+  if(!snapshot||typeof snapshot!=="object"||!snapshot.fields||!snapshot.secrets||
+     fields.some(name=>typeof snapshot.fields[name]!=="string")||
+     secrets.some(name=>typeof snapshot.secrets[name]!=="boolean"))throw {unknown:true};
+  for(const name of fields)configure.elements.namedItem(name).value=snapshot.fields[name];
+  for(const name of secrets){
+   const input=configure.elements.namedItem(name);
+   input.value="";
+   input.placeholder=snapshot.secrets[name]?t("saved_secret"):"";
+   input.required=!snapshot.secrets[name]&&!name.startsWith("site_b_");
+  }
+  configure.elements.namedItem("site_b_action").value="keep";
+  const hasSiteB=!!(snapshot.fields.site_b_origin||snapshot.fields.site_b_login||
+      snapshot.secrets.site_b_dsn||snapshot.secrets.site_b_password);
+  configure.querySelector("[data-optional-site-b]").open=hasSiteB;
+ }
+
  function lock(){
   const held=busy||!!pending;
   root.querySelector("[data-config]").hidden=!actions.includes("configure");
@@ -153,6 +174,8 @@
   try{
    const result=await request(attempt.path,attempt.body,false,false,attempt.artifactAttempt);
    if(attempt.action!=="artifact"&&!matches(result))throw {unknown:true};
+   // The server must positively bind each Save to the accepted private draft.
+   if(attempt.action==="configure"&&root.dataset.kind==="install"&&!result.saved_draft)throw {unknown:true};
    pending=null;
    if(attempt.action==="artifact"){
     if(result.artifact_attempt!==attempt.artifactAttempt)throw {unknown:true};
@@ -160,8 +183,8 @@
    }else{
     display(result);
     if(attempt.action==="configure"){
+     if(root.dataset.kind==="install")syncSavedDraft(result.saved_draft);
      configurationDirty=false;refreshDirty();clearReview();
-     configure.querySelectorAll('input[type="password"]').forEach(input=>{input.value="";input.required=false;input.placeholder=t("saved_secret");});
     }
     if(attempt.action==="review"&&!result.access_closed&&!dirty&&typeof result.review_token==="string")reviewToken=result.review_token;
     announce(result.access_closed?"access_complete":"updated");

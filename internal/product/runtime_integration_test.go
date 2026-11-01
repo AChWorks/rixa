@@ -443,6 +443,66 @@ func testTrustedTLSIngress(t *testing.T, parent context.Context, config Config, 
 		t.Fatalf("site login principal=%s want=%s", siteSession.principal, runtime.Sites["site-a"].adminPrincipal)
 	}
 
+	// Explicit negative HTTPS matrix: real site-specific session cookies,
+	// CSRF and Origin values are never portable to the other enabled site.
+	siteBSession := login("b.rixa.test", config.Sites[1].Origin, "site-b-admin", testSiteBPassword)
+	for _, pair := range []struct {
+		name, ownHost, foreignHost, ownOrigin, foreignOrigin string
+		own, foreign                                         authenticatedSession
+	}{
+		{"a-to-b", "a.rixa.test", "b.rixa.test", config.Sites[0].Origin, config.Sites[1].Origin, siteSession, siteBSession},
+		{"b-to-a", "b.rixa.test", "a.rixa.test", config.Sites[1].Origin, config.Sites[0].Origin, siteBSession, siteSession},
+	} {
+		t.Run("cross-site-session-"+pair.name, func(t *testing.T) {
+			local, err := request(pair.ownHost, http.MethodGet, "/auth/csrf", nil,
+				map[string]string{"X-Identity-Request": "1", "Referer": pair.ownOrigin + "/"}, pair.own.cookie)
+			if err != nil {
+				t.Fatal(err)
+			}
+			local.Body.Close()
+			if local.StatusCode != http.StatusOK {
+				t.Fatalf("valid same-site CSRF rejected: %d", local.StatusCode)
+			}
+
+			foreign, err := request(pair.foreignHost, http.MethodGet, "/auth/csrf", nil,
+				map[string]string{"X-Identity-Request": "1", "Referer": pair.foreignOrigin + "/"}, pair.own.cookie)
+			if err != nil {
+				t.Fatal(err)
+			}
+			foreign.Body.Close()
+			if foreign.StatusCode != http.StatusUnauthorized {
+				t.Fatalf("foreign-site cookie authorized CSRF: %d", foreign.StatusCode)
+			}
+
+			post := func(origin, csrf string, cookie *http.Cookie) int {
+				payload, err := json.Marshal(map[string]string{"operation_id": newOperationID()})
+				if err != nil {
+					t.Fatal(err)
+				}
+				res, err := request(pair.foreignHost, http.MethodPost, "/admin/content/operation", payload,
+					map[string]string{"Content-Type": "application/json", "Origin": origin,
+						"X-CSRF-Token": csrf, "X-Identity-Request": "1"}, cookie)
+				if err != nil {
+					t.Fatal(err)
+				}
+				res.Body.Close()
+				return res.StatusCode
+			}
+			for _, negative := range []struct {
+				name   string
+				status int
+			}{
+				{"foreign-cookie-and-csrf", post(pair.foreignOrigin, pair.own.csrf, pair.own.cookie)},
+				{"wrong-origin", post(pair.ownOrigin, pair.foreign.csrf, pair.foreign.cookie)},
+				{"wrong-csrf", post(pair.foreignOrigin, pair.own.csrf, pair.foreign.cookie)},
+			} {
+				if negative.status != http.StatusUnauthorized && negative.status != http.StatusForbidden {
+					t.Fatalf("%s accepted cross-site authentication: HTTP %d", negative.name, negative.status)
+				}
+			}
+		})
+	}
+
 	controlPage, requestErr := request("control.rixa.test", http.MethodGet, "/admin/sites", nil, nil, controlSession.cookie)
 	if requestErr != nil {
 		t.Fatal(requestErr)

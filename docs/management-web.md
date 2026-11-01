@@ -64,6 +64,34 @@ production and other control panels require their own supported profiles and
 real evidence. Missing mandatory capabilities require provider action rather
 than a privilege bypass.
 
+## Optional two-site first installation
+
+An install-kind console built from source with the native optional-site feature
+shows **site-b (optional)** in a collapsed section. One-site inputs remain the
+default. Expand the section only when preparing a second independently managed
+site; supply its distinct HTTPS origin, a third PostgreSQL 18 database URL,
+site-b administrator login and password. A supplied runtime certificate must
+cover Control, site-a and site-b. Native Review must prove three separately
+owned PostgreSQL databases with distinct non-privileged login roles and no
+cross-database CONNECT/role membership. Merely using separate DB names is
+insufficient; see the native operator guide.
+
+After a *positively acknowledged* Save, the browser synchronizes the visible
+draft fields and saved-secret presence indicators from the server's allowlisted
+acknowledgement. An explicit site-b draft removal clears the form, resets the
+selector to Keep, and preserves other saved credentials. Unknown Save outcomes
+remain gated behind inspection and exact operation reconciliation, not automatic
+replay. Review and Apply continue to use the single
+native lifecycle journal and executor, not a second installation mechanism.
+
+Saved second-site secrets remain private; blank password fields retain prior
+values. To remove a previously saved optional site **before Apply**, select
+*Clear optional site from this draft* and Save; merely collapsing the section
+does not discard credentials or change the reviewed installation. Read the
+[operator guide](server-management.md#optional-second-site-during-a-new-native-installation-development-source)
+for detailed constraints. Adding sites after installation and arbitrary
+schema-changing updates are not provided by this path.
+
 ## Open scoped access
 
 Use a trusted manager under root-owned, non-writable paths. Supply private regular

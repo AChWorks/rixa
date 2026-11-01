@@ -295,6 +295,33 @@
     },
     "discard_artifact_request": {
       "other": "Discard package request edits"
+    },
+    "site_b_optional": {
+      "other": "Optional second site (site-b)"
+    },
+    "site_b_help": {
+      "other": "One site is the default. To install two, supply all four fields, a separate prepared PostgreSQL 18 database and TLS covering the third hostname. Review both sites before Apply. Adding sites after installation is separate."
+    },
+    "site_b_origin": {
+      "other": "Second-site HTTPS origin"
+    },
+    "site_b_dsn": {
+      "other": "Second-site database URL"
+    },
+    "site_b_login": {
+      "other": "Second-site administrator login"
+    },
+    "site_b_password": {
+      "other": "Second-site administrator password"
+    },
+    "site_b_action": {
+      "other": "Second-site draft action"
+    },
+    "site_b_keep": {
+      "other": "Keep or configure optional site"
+    },
+    "site_b_remove": {
+      "other": "Clear optional site from this draft"
     }
   }
 }

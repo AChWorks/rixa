@@ -20,7 +20,7 @@ func updateEditorialPreflight(ctx context.Context, prior *journal) error {
 	if prior == nil {
 		return ErrState
 	}
-	config, err := product.ParseConfig(configBytes(prior.Draft, prior.ControlPrincipal, prior.SitePrincipal))
+	config, err := product.ParseConfig(configBytesWithSiteB(prior.Draft, prior.ControlPrincipal, prior.SitePrincipal, prior.SiteBPrincipal))
 	if err != nil {
 		return ErrState
 	}
@@ -40,18 +40,30 @@ func updateEditorialPreflight(ctx context.Context, prior *journal) error {
 // Even a "current" manager-owned ledger only allows the existing updater to
 // continue to its independent post-stop candidate compatibility check.
 func preStopEditorialDecision(observed product.EditorialMigrationInspection) error {
-	if observed.Scope != "rixa-editorial-only" || observed.Admission != "not-authorized" || len(observed.Sites) != 1 {
+	if observed.Scope != "rixa-editorial-only" || observed.Admission != "not-authorized" || (len(observed.Sites) != 1 && len(observed.Sites) != 2) {
 		return ErrState
 	}
-	site := observed.Sites[0]
-	if site.ID != "site-a" || site.Target < 1 || site.Current < 0 || site.Current > site.Target {
-		return ErrState
+	pending := false
+	for i, site := range observed.Sites {
+		expected := "site-a"
+		if i == 1 {
+			expected = "site-b"
+		}
+		if site.ID != expected || site.Target < 1 || site.Current < 0 || site.Current > site.Target {
+			return ErrState
+		}
+		if site.State == "pending" && site.Current < site.Target && len(site.Pending) == site.Target-site.Current {
+			pending = true
+			continue
+		}
+		if site.State != "current" || site.Current != site.Target || len(site.Pending) != 0 {
+			return ErrState
+		}
 	}
-	if site.State == "pending" && site.Current < site.Target && len(site.Pending) == site.Target-site.Current {
+	// A known pending migration can be the reason for safe pre-stop refusal
+	// only after all sites have been observed with structurally valid ledgers.
+	if pending {
 		return errPreStopEditorialPending
-	}
-	if site.State != "current" || site.Current != site.Target || len(site.Pending) != 0 {
-		return ErrState
 	}
 	return nil
 }

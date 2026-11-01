@@ -2,6 +2,11 @@
 
 **Rixa** (ریکسا), or **Rixa CMS**, is a lightweight CMS for blogs and small sites, built on AChrix. It combines independent site administration with semantic static publication.
 
+The native manager's source-level, initial-install optional two-site path,
+its separate PostgreSQL/TLS prerequisites and its unreleased acceptance status
+are documented in the [native operator guide](docs/server-management.md#optional-second-site-during-a-new-native-installation-development-source).
+Do not infer support in previously published binaries or after-install Add Site.
+
 ## What you can do
 
 - Run one site or several declared sites from one compatible product build, with separate site databases, accounts and private Media.

@@ -123,11 +123,22 @@ func validUpdate(u *updateJournal) bool {
 			return false
 		}
 	}
-	if len(u.DatabaseTargets) != 0 && len(u.DatabaseTargets) != 2 {
+	if len(u.DatabaseTargets) != 0 && (len(u.DatabaseTargets) != 2 && len(u.DatabaseTargets) != 3) {
 		return false
 	}
 	for k, v := range u.DatabaseTargets {
-		if (k != "control" && k != "site-a") || !databaseSyntax.MatchString(v) {
+		if (k != "control" && k != "site-a" && k != "site-b") || !databaseSyntax.MatchString(v) {
+			return false
+		}
+	}
+	// A two-key update journal always contains Control + site-a; a three-key
+	// journal additionally contains site-b. Merely permitting the new key
+	// alongside the previous length check would admit mismatched target sets.
+	if len(u.DatabaseTargets) > 0 {
+		if u.DatabaseTargets["control"] == "" || u.DatabaseTargets["site-a"] == "" {
+			return false
+		}
+		if len(u.DatabaseTargets) == 3 && u.DatabaseTargets["site-b"] == "" {
 			return false
 		}
 	}
@@ -197,7 +208,7 @@ func validUpdate(u *updateJournal) bool {
 		if u.Stage != "" && u.Stage != "review" {
 			return false
 		}
-		if u.State == "ready" && (u.ReviewToken == "" || u.ParentSHA256 == "" || u.ConfigSHA256 == "" || u.EnvironmentSHA256 == "" || u.ReviewedManagerSHA256 == "" || u.HelperSHA256 == "" || u.ArchiveSHA256 == "" || len(u.DatabaseTargets) != 2) {
+		if u.State == "ready" && (u.ReviewToken == "" || u.ParentSHA256 == "" || u.ConfigSHA256 == "" || u.EnvironmentSHA256 == "" || u.ReviewedManagerSHA256 == "" || u.HelperSHA256 == "" || u.ArchiveSHA256 == "" || (len(u.DatabaseTargets) != 2 && len(u.DatabaseTargets) != 3)) {
 			return false
 		}
 		if u.State != "draft" && u.State != "ready" && u.State != "blocked" {
@@ -208,7 +219,7 @@ func validUpdate(u *updateJournal) bool {
 	if u.Stage == "" || u.Stage == "review" || u.Attempts["executor"] == "" || !safePath(u.HelperPath) {
 		return false
 	}
-	if u.Frozen != updateDigest(u.Draft) || u.ParentSHA256 == "" || u.ConfigSHA256 == "" || u.EnvironmentSHA256 == "" || len(u.DatabaseTargets) != 2 || u.ManagerSHA256 == "" || u.HelperSHA256 == "" || u.ArchiveSHA256 == "" || u.ReviewedManagerSHA256 != u.ManagerSHA256 || u.ReviewToken == "" || u.ActiveRelease == "" || u.ExecutorGeneration < 1 {
+	if u.Frozen != updateDigest(u.Draft) || u.ParentSHA256 == "" || u.ConfigSHA256 == "" || u.EnvironmentSHA256 == "" || (len(u.DatabaseTargets) != 2 && len(u.DatabaseTargets) != 3) || u.ManagerSHA256 == "" || u.HelperSHA256 == "" || u.ArchiveSHA256 == "" || u.ReviewedManagerSHA256 != u.ManagerSHA256 || u.ReviewToken == "" || u.ActiveRelease == "" || u.ExecutorGeneration < 1 {
 		return false
 	}
 	if u.State == "draft" || u.State == "blocked" || u.State == "ready" {

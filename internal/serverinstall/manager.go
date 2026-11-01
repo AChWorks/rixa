@@ -201,10 +201,10 @@ func (m *Manager) review(ctx context.Context, j *journal) []Problem {
 				if !serverAuth {
 					add("tls_cert", "tls-usage", "The certificate must allow TLS server authentication.")
 				}
-				for _, o := range []string{d.ControlOrigin, d.SiteOrigin} {
+				for _, o := range nativeSiteOrigins(d) {
 					u, _ := url.Parse(o)
 					if u == nil || leaf.VerifyHostname(u.Hostname()) != nil {
-						add("tls_cert", "tls-hostnames", "The certificate must cover both exact control and site hostnames.")
+						add("tls_cert", "tls-hostnames", "The certificate must cover every configured control and site hostname.")
 					}
 				}
 			}
@@ -212,7 +212,11 @@ func (m *Manager) review(ctx context.Context, j *journal) []Problem {
 	}
 	identities, e := databaseIdentities(ctx, d)
 	if e != nil {
-		add("control_dsn", "database-prerequisite", "Provide distinct reachable PostgreSQL18 databases, schema authority and pg_control_system() identity permissions.")
+		if errors.Is(e, errNativeRoleIsolation) {
+			add("site_b_dsn", "database-role-isolation", "For optional two-site installation provide three distinct non-elevated PostgreSQL LOGIN database owners, separate passwords, no shared role membership or cross-database CONNECT; revoke PUBLIC CONNECT on all three databases.")
+		} else {
+			add("control_dsn", "database-prerequisite", "Provide distinct reachable PostgreSQL18 databases, schema authority and pg_control_system() identity permissions.")
+		}
 	} else {
 		j.DatabaseTargets = identities
 	}
@@ -266,6 +270,8 @@ func databaseLookup(d Draft) func(string) (string, bool) {
 			return d.ControlDSN, true
 		case "RIXA_SITE_DSN":
 			return d.SiteDSN, true
+		case "RIXA_SITE_B_DSN":
+			return d.SiteBDSN, siteBRequested(d)
 		}
 		return "", false
 	}

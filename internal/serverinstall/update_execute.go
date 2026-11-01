@@ -458,6 +458,9 @@ func (m *Manager) candidateCommand(parent context.Context, u *updateJournal, j *
 	cmd := exec.CommandContext(ctx, m.binaryPath(j), stage, "--config", runtimeConfigPath)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: j.UID, Gid: j.GID, Groups: []uint32{j.GID}}}
 	cmd.Env = []string{"PATH=/usr/sbin:/usr/bin:/sbin:/bin", "LANG=C.UTF-8", "LC_ALL=C.UTF-8", "HOME=/var/lib/rixa", "RIXA_CONTROL_DSN=" + j.Draft.ControlDSN, "RIXA_SITE_DSN=" + j.Draft.SiteDSN}
+	if siteBRequested(j.Draft) {
+		cmd.Env = append(cmd.Env, "RIXA_SITE_B_DSN="+j.Draft.SiteBDSN)
+	}
 	cmd.Dir = "/var/lib/rixa"
 	var out, diagnostic boundedOutput
 	cmd.Stdout = &out

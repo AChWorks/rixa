@@ -44,6 +44,16 @@ Ask only for information that cannot safely be discovered or generated. Explain 
 
 Keep valid entries when a field fails validation, and return focus to the affected input. Earlier choices remain reviewable; changing them revalidates dependent fields. Do not repeatedly request already-known values or lose ordinary progress on navigation.
 
+For the initial native installation, preserve a one-site default and make
+two-site setup an explicitly optional pre-install choice in the menu and
+temporary browser console. The second site
+needs distinct origin/TLS coverage, physical database, administrator identity,
+private Media/publication roots, and durable resume/evidence. A declared
+multi-site runtime alone does not prove native multi-site installation, and
+adding sites *after* installation needs a separate persisted topology-change
+contract. The [native guide](server-management.md#optional-second-site-during-a-new-native-installation-development-source)
+documents the bounded implemented source-level path and remaining acceptance.
+
 Persist configuration and resumable operation state in protected product-owned locations; do not place passwords, DSNs, tokens or private state in public roots, URLs or ordinary reports. A setup endpoint has an installation-specific, bounded authorization mechanism and is closed after successful setup. An uninitialized public page must not grant ownership to its first visitor.
 
 ## Terminal layout and feedback

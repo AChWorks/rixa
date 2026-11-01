@@ -697,7 +697,7 @@ func TestConsoleBrowserPreview(t *testing.T) {
 		}
 	}
 	previewKind := os.Getenv("RIXA_MANAGEWEB_PREVIEW_KIND")
-	if previewKind != "" && previewKind != "update-cleanup" && previewKind != "artifact-install" && previewKind != "artifact-update" && previewKind != "request-budget-install" && previewKind != "request-budget-update" {
+	if previewKind != "" && previewKind != "two-site" && previewKind != "update-cleanup" && previewKind != "artifact-install" && previewKind != "artifact-update" && previewKind != "request-budget-install" && previewKind != "request-budget-update" {
 		t.Fatal("unknown fake preview kind")
 	}
 	var h *harness
@@ -758,6 +758,14 @@ func TestConsoleBrowserPreview(t *testing.T) {
 		}
 		o.CatalogRoot = root
 	})
+	if previewKind == "two-site" {
+		// Browser-only source fixture: no real database, native install or
+		// privileged operation. Supply a previously selected fake artifact.
+		h.backend.draft = serverinstall.Draft{OperationID: "fixture-install", Release: "v1.2.3"}
+		h.backend.result.State = "draft"
+		h.backend.result.Code = "draft-saved"
+		h.backend.result.Actions = []string{"configure", "review", "status"}
+	}
 	if previewKind == "request-budget-install" || previewKind == "request-budget-update" {
 		h.backend.draft = serverinstall.Draft{OperationID: "fixture-install", Release: "v1.2.3"}
 		h.backend.result.State = "draft"

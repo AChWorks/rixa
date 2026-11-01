@@ -14,7 +14,7 @@ async function rixaManageWebBrowser({context,page,fixture,checkpoint,control,mod
  if(artifactMode)check(fixture.profile===mode,"artifact proof requires its exact fake profile");
  check(fixture.operation===((mode==="cleanup"||mode==="artifact-update"||mode==="request-budget-update")?"fixture-update":"fixture-install")&&typeof fixture.permit==="string"&&fixture.permit.length===43,"unexpected fake preview identity");
  check(typeof checkpoint==="function"&&typeof control==="function","private checkpoint/control callbacks required");
- check(["journey","expiry","cleanup","artifact-install","artifact-update","request-budget-install","request-budget-update"].includes(mode),"unsupported bounded browser mode");
+ check(["journey","expiry","cleanup","two-site","artifact-install","artifact-update","request-budget-install","request-budget-update"].includes(mode),"unsupported bounded browser mode");
  const checks=[],errors=[],counts={configure:0,apply:0,review:0,resume:0,status:0,artifact:0};
  const configureBodies=[];
  let reviewedToken="",applyUsesReview=false,artifactResponseLost=false;
@@ -120,6 +120,84 @@ async function rixaManageWebBrowser({context,page,fixture,checkpoint,control,mod
  });
 
 
+ if(mode==="two-site"){
+  const base={
+   control_origin:"https://control.example.invalid:9443",
+   site_origin:"https://site.example.invalid:9443",
+   listen:"0.0.0.0:9443",language:"en",
+   control_login:"control-admin",site_login:"site-admin",
+   ...secrets
+  };
+  const siteB={
+   site_b_origin:"https://b.example.invalid:9443",
+   site_b_login:"site-b-admin",
+   site_b_dsn:"postgres://siteb:browser-canary-second-db@127.0.0.1:5432/site_b?sslmode=disable",
+   site_b_password:"browser-canary-second-password-2026"
+  };
+  async function saveAndWait(expected) {
+   const before=counts.configure;
+   await form().locator("button[type=submit]").click();
+   await page.waitForFunction(()=>!document.querySelector("[data-inspect]").disabled);
+   await page.waitForFunction(expected);
+   check(counts.configure===before+1,"configure was retried or not submitted");
+   check(await page.locator("[data-pending]").isHidden(),"positive Save became uncertain");
+  }
+  async function assertSnapshot(present) {
+   check((await form().locator("[name=site_b_origin]").inputValue()==="https://b.example.invalid:9443")===present,"site-b origin and persisted draft disagree");
+   check((await form().locator("[name=site_b_login]").inputValue()==="site-b-admin")===present,"site-b login and persisted draft disagree");
+   for(const name of ["site_b_dsn","site_b_password"]){
+    const input=form().locator("[name="+name+"]");
+    check(await input.inputValue()==="","saved optional secret remains in DOM value");
+    check((await input.getAttribute("placeholder")||"").length>0===present,"site-b saved secret indicator is false");
+   }
+   check(await form().locator("[name=site_b_action]").inputValue()==="keep","removal action was retained");
+   for(const name of ["control_dsn","site_dsn","control_password","site_password"]){
+    const input=form().locator("[name="+name+"]");
+    check(await input.inputValue()===""&&(await input.getAttribute("placeholder")||"").length>0,"unrelated saved secret was cleared");
+   }
+   check(await page.locator("[data-optional-site-b]").evaluate(el=>el.open)===present,"optional disclosure state differs from saved draft");
+   check(!String(await page.content()).includes("browser-canary-"),"secret leaked in HTML after Save");
+  }
+  await step("two-site-save-review",async()=>{
+   await page.locator("[data-optional-site-b] summary").click();
+   for(const [name,value]of Object.entries({...base,...siteB})) {
+    const field=form().locator("[name="+name+"]");
+    if(name==="language")await field.selectOption(value);
+    else await field.fill(value);
+   }
+   await saveAndWait(()=>document.querySelector('[name="site_b_dsn"]').getAttribute("placeholder")!=="");
+   await assertSnapshot(true);
+   await page.locator("[data-action=review]").click();
+   await page.locator("[data-review]").waitFor({state:"visible"});
+   const review=await page.locator("[data-review]").textContent();
+   check(review.includes("b.example.invalid")&&!review.includes("browser-canary"),"site-b review missing or exposes private values");
+  });
+  await step("two-site-remove-synchronize-form",async()=>{
+   await form().locator("[name=site_b_action]").selectOption("remove");
+   await saveAndWait(()=>document.querySelector('[name="site_b_origin"]').value==="" &&
+     document.querySelector('[name="site_b_action"]').value==="keep");
+   await assertSnapshot(false);
+   await page.locator("[data-action=review]").click();
+   await page.locator("[data-review]").waitFor({state:"visible"});
+   check(!(await page.locator("[data-review]").textContent()).includes("b.example.invalid"),"removed site-b survives Review");
+  });
+  await step("two-site-readd-reload-l10n",async()=>{
+   await page.locator("[data-optional-site-b] summary").click();
+   for(const [name,value]of Object.entries(siteB))
+    await form().locator("[name="+name+"]").fill(value);
+   check(await form().locator("[name=site_b_action]").inputValue()==="keep","readd inherited previous remove action");
+   await saveAndWait(()=>document.querySelector('[name="site_b_origin"]').value==="https://b.example.invalid:9443" &&
+     document.querySelector('[name="site_b_dsn"]').value==="");
+   await assertSnapshot(true);
+   await page.reload({waitUntil:"domcontentloaded"});
+   await page.waitForFunction(()=>!document.querySelector("[data-inspect]").disabled);
+   await assertSnapshot(true);
+   await language("fa","rtl"); await assertSnapshot(true); await layout("two-site-fa");
+   await language("en","ltr"); await assertSnapshot(true); await layout("two-site-en");
+   await noStorage();
+  });
+  return finish();
+ }
  if(budgetMode) {
   let policyCases=0,elapsed=0;
   await step("relative-and-absolute-request-policy",async()=>{
