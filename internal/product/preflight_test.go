@@ -192,6 +192,24 @@ func TestDatabasePreflightClassifiesSanitizedConnectionErrors(t *testing.T) {
 	}
 }
 
+func TestNetworkWrapperPreservesSpecificPermanentCause(t *testing.T) {
+	for _, tc := range []struct {
+		name, category string
+		cause          error
+	}{
+		{"TLS", "TLS", x509.UnknownAuthorityError{}},
+		{"permission", "permission", &pgconn.PgError{Code: "42501"}},
+		{"DNS", "host resolution", &net.DNSError{IsNotFound: true}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := safePreflightError(context.Background(), &net.OpError{Op: "dial", Net: "tcp", Err: tc.cause})
+			if !errors.Is(err, ErrDatabaseAdmission) || !strings.Contains(err.Error(), tc.category) {
+				t.Fatalf("lost permanent admission category %s: %v", tc.category, err)
+			}
+		})
+	}
+}
+
 func TestDatabasePreflightCanceledAndMissingConnectionFailSafely(t *testing.T) {
 	dsn := "postgres://role:password@127.0.0.1:5432/app?sslmode=disable"
 	_, err := inspectDatabaseTargetWithConnector(context.Background(), dsn, func(context.Context, *pgx.ConnConfig) (*pgx.Conn, error) { return nil, nil })

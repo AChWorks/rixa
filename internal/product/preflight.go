@@ -216,11 +216,11 @@ func classifyDatabaseProbeCause(cause error, depth int) (databaseProbeOutcome, s
 		}
 		return databaseProbeAdmissionRejected, "PostgreSQL host resolution rejected"
 	case *net.OpError:
-		outcome, _ := classifyDatabaseProbeCause(e.Err, depth+1)
-		if outcome == databaseProbeAdmissionRejected {
+		outcome, rejection := classifyDatabaseProbeCause(e.Err, depth+1)
+		if outcome == databaseProbeAdmissionRejected && rejection == unknown {
 			return outcome, "PostgreSQL network operation rejected"
 		}
-		return outcome, ""
+		return outcome, rejection
 	}
 	// errors.Is/As matches any branch of errors.Join and cannot establish
 	// recoverability. Permanent rejection outranks cancellation, which in
