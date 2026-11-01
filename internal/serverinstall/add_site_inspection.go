@@ -131,7 +131,19 @@ func (m *Manager) InspectAddSite(ctx context.Context, proposed AddSiteInspection
 		result.Code = "update-ownership"
 		return result, ErrState
 	}
-	if err = m.validateInstalled(ctx, parent); err != nil || m.updateUnitFileState(ctx) != "enabled" {
+	// Bind to the original frozen manager's installed service receipt rather
+	// than requiring this newer inspector to generate identical systemd bytes.
+	// In contrast, Update/Remove intentionally retain exact-template checks.
+	originalManager := filepath.Join(managerRoot, parent.ManagerSHA256)
+	if !trustedExecutable(originalManager) {
+		result.Code = "installation-unhealthy"
+		return result, ErrPrerequisite
+	}
+	originalHash, managerError := hashFile(originalManager)
+	if managerError != nil || originalHash != parent.ManagerSHA256 ||
+		m.checkRecordedService(parent) != nil ||
+		m.validateInstalledApplication(ctx, parent) != nil ||
+		m.updateUnitFileState(ctx) != "enabled" {
 		result.Code = "installation-unhealthy"
 		return result, ErrPrerequisite
 	}

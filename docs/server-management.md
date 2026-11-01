@@ -151,14 +151,18 @@ review token permitting mutation. On success, `state=inspected` and
 `code=prerequisites-verified` mean **inspection passed, not installed**.
 An incomplete or unsafe draft is rejected before database access.
 
-The assessment rechecks the original installation owner, active one-site
-configuration, service and strict HTTPS health, absence of active/pending
+The assessment rechecks the original installation owner, original frozen
+manager and service-unit receipt, active one-site configuration, actual running
+executable and strict HTTPS health, absence of active/pending
 managed updates, and the original physical database identities. It tests
 the original Control/site-a and new site-b database owners as one
 three-way role-isolation group, including PostgreSQL membership and
 effective cross-database CONNECT privileges. For this bounded inspection
 the existing owned TLS certificate must **already** cover the new site-b
-hostname. Certificate replacement and reconfiguration are not supported.
+hostname. Certificate replacement and reconfiguration are not supported. Inspecting an
+unchanged older owned systemd unit is allowed based on its immutable original
+receipt; Update and Remove still enforce their existing exact supported unit
+template and do not adopt or modify that unit.
 
 Do not create or change a site, reuse an old demo, change PostgreSQL role
 grants, or mutate an active installation merely because inspection succeeds.
