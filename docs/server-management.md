@@ -45,8 +45,9 @@ followed by Review and explicit token-bound Apply. Do not paste the draft or
 its secrets into chat, commit it, or pass credentials as command arguments.
 The native `manage web` console presents an optional expandable second-site
 section; the default terminal `manage menu` retains its original single-site
-field sequence, while a private `--prefill` containing site-b fields opens the
-optional two-site fields. The web section has an explicit *Clear optional site
+field sequence and offers a separate **Configure optional two-site installation**
+menu choice; a private `--prefill` containing site-b fields also opens those
+optional fields. The web section has an explicit *Clear optional site
 from this draft* action; leaving saved password fields blank retains their
 existing private values.
 

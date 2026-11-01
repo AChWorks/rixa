@@ -126,6 +126,16 @@ func runManagement(ctx context.Context, backend serverinstall.Facade, options Op
 		actions := menuActions(allowed)
 		if profile != nil {
 			actions = profile.actions(allowed)
+		} else {
+			for _, allowedAction := range allowed {
+				if allowedAction == "configure" {
+					// Preserve the existing first action and the Exit position:
+					// optional two-site setup is a separate explicit journey.
+					last := len(actions) - 1
+					actions = append(actions[:last], menuAction{"configure-two-sites", "Configure optional two-site installation"}, actions[last])
+					break
+				}
+			}
 		}
 		if selected >= len(actions) {
 			selected = 0
@@ -182,6 +192,7 @@ func runManagement(ctx context.Context, backend serverinstall.Facade, options Op
 				"Use manage update --help to inspect the separate update interface.",
 				"No purge, PostgreSQL provisioner or panel adapter is offered here.",
 				"The terminal interface always uses English, independently of web language.",
+				"For two-site first installation, choose Configure optional two-site installation. Both sites share one managed service, not databases or site accounts.",
 			}
 			if profile != nil {
 				help = profile.help()
@@ -222,7 +233,7 @@ func runManagement(ctx context.Context, backend serverinstall.Facade, options Op
 			if err = showDetails(ctx, s, detail, draft); err != nil {
 				return err
 			}
-		case "configure":
+		case "configure", "configure-two-sites":
 			reviewedToken = ""
 			var completed bool
 			if draft.ArchivePath == "" && options.FetchRelease != nil {
@@ -235,7 +246,7 @@ func runManagement(ctx context.Context, backend serverinstall.Facade, options Op
 				}
 			}
 			if profile == nil {
-				current, completed, err = configure(ctx, s, backend, &draft, current)
+				current, completed, err = configureMode(ctx, s, backend, &draft, current, action == "configure-two-sites")
 			} else {
 				current, completed, err = profile.configure(ctx, s, &draft, current)
 			}
@@ -423,6 +434,10 @@ type field struct {
 }
 
 func draftFields(d *serverinstall.Draft) []field {
+	return draftFieldsMode(d, false)
+}
+
+func draftFieldsMode(d *serverinstall.Draft, includeOptionalSiteB bool) []field {
 	fields := []field{
 		{"archive", "Release archive", "Absolute path to the downloaded versioned Linux amd64 archive.", false, &d.ArchivePath},
 		{"bundle", "Attestation bundle", "Absolute path to the adjacent .sigstore.json; no signature bypass.", false, &d.BundlePath},
@@ -441,7 +456,7 @@ func draftFields(d *serverinstall.Draft) []field {
 		{"site_password", "Site administrator password", "Hidden; empty keeps a previously saved value.", true, &d.SitePassword},
 		{"language", "Web interface language", "Choose bundled en or fa for the web interface. The terminal always uses English.", false, &d.Language},
 	}
-	if d.SiteBOrigin != "" || d.SiteBDSN != "" || d.SiteBLogin != "" || d.SiteBPassword != "" {
+	if includeOptionalSiteB || d.SiteBOrigin != "" || d.SiteBDSN != "" || d.SiteBLogin != "" || d.SiteBPassword != "" {
 		fields = append(fields, []field{
 			{"site_b_origin", "Optional second-site URL", "Leave all four second-site fields blank for one site; otherwise use a third distinct HTTPS hostname.", false, &d.SiteBOrigin},
 			{"site_b_dsn", "Optional second-site database", "Separate prepared PostgreSQL18 database and role; Ctrl-U explicitly clears a saved secret.", true, &d.SiteBDSN},
@@ -452,7 +467,11 @@ func draftFields(d *serverinstall.Draft) []field {
 	return fields
 }
 func configure(ctx context.Context, s *session, backend serverinstall.Facade, d *serverinstall.Draft, current serverinstall.Result) (serverinstall.Result, bool, error) {
-	fields := draftFields(d)
+	return configureMode(ctx, s, backend, d, current, false)
+}
+
+func configureMode(ctx context.Context, s *session, backend serverinstall.Facade, d *serverinstall.Draft, current serverinstall.Result, includeOptionalSiteB bool) (serverinstall.Result, bool, error) {
+	fields := draftFieldsMode(d, includeOptionalSiteB)
 	return configureFields(ctx, s, backend, d, current, fields, initialField(fields, *d), func() []serverinstall.Problem { return serverinstall.ValidateDraftFields(*d) })
 }
 

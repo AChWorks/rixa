@@ -45,7 +45,8 @@ Ask only for information that cannot safely be discovered or generated. Explain 
 Keep valid entries when a field fails validation, and return focus to the affected input. Earlier choices remain reviewable; changing them revalidates dependent fields. Do not repeatedly request already-known values or lose ordinary progress on navigation.
 
 For the initial native installation, preserve a one-site default and make
-two-site setup an explicitly optional pre-install choice. The second site
+two-site setup an explicitly optional pre-install choice in the menu and
+temporary browser console. The second site
 needs distinct origin/TLS coverage, physical database, administrator identity,
 private Media/publication roots, and durable resume/evidence. A declared
 multi-site runtime alone does not prove native multi-site installation, and
