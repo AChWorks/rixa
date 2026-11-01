@@ -55,7 +55,7 @@ func TestRuntimeReadinessBoundedAndNoSecretInTimeout(t *testing.T) {
 		attempts++
 		return product.RuntimeConfig{}, fmt.Errorf("%w: %s", product.ErrUnavailable, secret)
 	}, nil)
-	if !errors.Is(err, product.ErrUnavailable) || attempts < 1 || strings.Contains(err.Error(), secret) {
+	if !errors.Is(err, product.ErrUnavailable) || errors.Is(err, context.DeadlineExceeded) || attempts < 1 || strings.Contains(err.Error(), secret) {
 		t.Fatalf("timeout must fail closed without secrets; attempts=%d err=%v", attempts, err)
 	}
 }
@@ -77,5 +77,19 @@ func TestRuntimeReadinessRejectsInvalidInternalParameters(t *testing.T) {
 	_, err := awaitRuntimeDatabaseReadiness(context.Background(), 0, time.Second, nil, nil)
 	if !errors.Is(err, product.ErrConfiguration) {
 		t.Fatalf("invalid helper parameters admitted: %v", err)
+	}
+}
+
+func TestRuntimeReadinessDeadlineAtLoopBoundaryKeepsUnavailable(t *testing.T) {
+	var deadline context.Context
+	called := 0
+	_, err := awaitRuntimeDatabaseReadiness(context.Background(), 20*time.Millisecond, time.Millisecond, func(ctx context.Context) (product.RuntimeConfig, error) {
+		deadline = ctx
+		called++
+		<-ctx.Done()
+		return product.RuntimeConfig{}, product.ErrUnavailable
+	}, nil)
+	if called != 1 || !errors.Is(err, product.ErrUnavailable) || errors.Is(err, context.DeadlineExceeded) || deadline == nil {
+		t.Fatalf("deadline at loop boundary must be bounded unavailable: calls=%d err=%v", called, err)
 	}
 }

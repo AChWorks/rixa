@@ -29,7 +29,10 @@ func awaitRuntimeDatabaseReadiness(parent context.Context, limit, interval time.
 	var attempts int
 	for {
 		if err := ctx.Err(); err != nil {
-			return product.RuntimeConfig{}, err
+			if parent.Err() != nil {
+				return product.RuntimeConfig{}, parent.Err()
+			}
+			return product.RuntimeConfig{}, fmt.Errorf("%w: runtime database readiness not established after %d read-only attempts", product.ErrUnavailable, attempts)
 		}
 		attempts++
 		result, err := resolve(ctx)
