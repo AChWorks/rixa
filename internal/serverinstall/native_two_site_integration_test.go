@@ -126,7 +126,11 @@ func TestNativeOptionalTwoSitePhysicalMigrationAndBootstrap(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	principals := map[string]string{}
 	for _, site := range []struct{ id, password string }{{"site-a", d.SitePassword}, {"site-b", d.SiteBPassword}} {
-		state := filepath.Join(t.TempDir(), "bootstrap.json")
+		root := t.TempDir()
+		if err := os.Chmod(root, 0700); err != nil {
+			t.Fatal(err)
+		}
+		state := filepath.Join(root, "bootstrap.json")
 		res, err := product.ApplyBootstrapOperation(ctx, product.BootstrapOperationRequest{
 			OperationID:   d.OperationID + "-bootstrap-" + site.id,
 			StatePath:     state,
