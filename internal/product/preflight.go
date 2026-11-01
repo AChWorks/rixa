@@ -153,19 +153,26 @@ type databaseProbeOutcome uint8
 const (
 	databaseProbeUnavailable databaseProbeOutcome = iota
 	databaseProbeCanceled
-	databaseProbeAdmissionRejected
+	databaseProbeAdmissionRejected // definite PostgreSQL, TLS, DNS or permission denial
+	databaseProbeUnknownRejected   // fail closed unless the probe context itself has terminated
 )
 
 func safePreflightError(ctx context.Context, cause error) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
 	if cause == nil {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		return fmt.Errorf("%w: missing database connection", ErrDatabaseAdmission)
 	}
-	// Retry only when every effective cause is transient. Cancellation stops
-	// without retries, but must not hide a joined permanent admission denial.
+	// Inspect the returned cause before the context. A canceled/expired probe
+	// must never hide a *definite* PostgreSQL, TLS or permission rejection.
+	// Unknown causes still fail closed while the context is live, but genuine
+	// parent/probe cancellation takes precedence when no definite rejection
+	// was observed.
 	outcome, rejection := classifyDatabaseProbeCause(cause, 0)
+	if err := ctx.Err(); err != nil && outcome != databaseProbeAdmissionRejected {
+		return err
+	}
 	switch outcome {
 	case databaseProbeUnavailable:
 		return ErrUnavailable
@@ -183,7 +190,7 @@ const maxDatabaseProbeErrorDepth = 32
 func classifyDatabaseProbeCause(cause error, depth int) (databaseProbeOutcome, string) {
 	const unknown = "PostgreSQL connection or identity probe rejected"
 	if cause == nil || depth >= maxDatabaseProbeErrorDepth {
-		return databaseProbeAdmissionRejected, unknown
+		return databaseProbeUnknownRejected, unknown
 	}
 	switch e := cause.(type) {
 	case *pgconn.PgError:
@@ -208,16 +215,33 @@ func classifyDatabaseProbeCause(cause error, depth int) (databaseProbeOutcome, s
 		tls.RecordHeaderError, *tls.RecordHeaderError:
 		return databaseProbeAdmissionRejected, "PostgreSQL TLS verification or protocol rejected"
 	case *net.DNSError:
+		// DNSError.UnwrapErr can carry cancellation, deadlines or nested
+		// permanent failures. Flags alone cannot determine retry safety.
+		// Prefer a definite nested rejection, then a definite NXDOMAIN,
+		// before honoring nested cancellation/transience/unknown causes.
+		if e.UnwrapErr != nil {
+			outcome, rejection := classifyDatabaseProbeCause(e.UnwrapErr, depth+1)
+			if outcome == databaseProbeAdmissionRejected {
+				return outcome, rejection
+			}
+			if e.IsNotFound {
+				return databaseProbeAdmissionRejected, "PostgreSQL host resolution rejected"
+			}
+			if outcome == databaseProbeUnknownRejected && rejection == unknown {
+				return outcome, "PostgreSQL host resolution rejected"
+			}
+			return outcome, rejection
+		}
 		if e.IsNotFound {
 			return databaseProbeAdmissionRejected, "PostgreSQL host resolution rejected"
 		}
 		if e.IsTimeout || e.IsTemporary {
 			return databaseProbeUnavailable, ""
 		}
-		return databaseProbeAdmissionRejected, "PostgreSQL host resolution rejected"
+		return databaseProbeUnknownRejected, "PostgreSQL host resolution rejected"
 	case *net.OpError:
 		outcome, rejection := classifyDatabaseProbeCause(e.Err, depth+1)
-		if outcome == databaseProbeAdmissionRejected && rejection == unknown {
+		if outcome == databaseProbeUnknownRejected && rejection == unknown {
 			return outcome, "PostgreSQL network operation rejected"
 		}
 		return outcome, rejection
@@ -228,21 +252,30 @@ func classifyDatabaseProbeCause(cause error, depth int) (databaseProbeOutcome, s
 	if many, ok := cause.(interface{ Unwrap() []error }); ok {
 		children := many.Unwrap()
 		if len(children) == 0 {
-			return databaseProbeAdmissionRejected, unknown
+			return databaseProbeUnknownRejected, unknown
 		}
-		firstRejection := ""
+		firstRejection, firstUnknown := "", ""
 		hasCancellation := false
 		for _, child := range children {
 			outcome, category := classifyDatabaseProbeCause(child, depth+1)
-			if outcome == databaseProbeAdmissionRejected && firstRejection == "" {
-				firstRejection = category
-			}
-			if outcome == databaseProbeCanceled {
+			switch outcome {
+			case databaseProbeAdmissionRejected:
+				if firstRejection == "" {
+					firstRejection = category
+				}
+			case databaseProbeUnknownRejected:
+				if firstUnknown == "" {
+					firstUnknown = category
+				}
+			case databaseProbeCanceled:
 				hasCancellation = true
 			}
 		}
 		if firstRejection != "" {
 			return databaseProbeAdmissionRejected, firstRejection
+		}
+		if firstUnknown != "" {
+			return databaseProbeUnknownRejected, firstUnknown
 		}
 		if hasCancellation {
 			return databaseProbeCanceled, ""
@@ -272,7 +305,7 @@ func classifyDatabaseProbeCause(cause error, depth int) (databaseProbeOutcome, s
 	if transientDatabaseTransportError(cause) {
 		return databaseProbeUnavailable, ""
 	}
-	return databaseProbeAdmissionRejected, unknown
+	return databaseProbeUnknownRejected, unknown
 }
 
 func transientDatabaseTransportError(err error) bool {

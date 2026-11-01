@@ -139,6 +139,19 @@ func TestDatabasePreflightClassifiesSanitizedConnectionErrors(t *testing.T) {
 		{"permanent-unrecognized", errors.New(secret), ErrDatabaseAdmission, "rejected"},
 		{"dns-permanent", &net.DNSError{Err: secret, Name: "private.host", IsNotFound: true}, ErrDatabaseAdmission, "host resolution"},
 		{"dns-temporary", &net.DNSError{Err: secret, Name: "private.host", IsTemporary: true}, ErrUnavailable, ""},
+		{"dns-unwrapped-cancel", &net.DNSError{UnwrapErr: context.Canceled, Err: secret, Name: "private.host"}, context.Canceled, ""},
+		{"dns-unwrapped-deadline", &net.DNSError{UnwrapErr: context.DeadlineExceeded, Err: secret, Name: "private.host"}, ErrUnavailable, ""},
+		{"dns-temporary-unwrapped-cancel", &net.DNSError{IsTemporary: true, UnwrapErr: context.Canceled, Err: secret}, context.Canceled, ""},
+		{"dns-timeout-without-inner", &net.DNSError{IsTimeout: true, Err: secret}, ErrUnavailable, ""},
+		{"dns-notfound-with-cancel", &net.DNSError{IsNotFound: true, UnwrapErr: context.Canceled, Err: secret}, ErrDatabaseAdmission, "host resolution"},
+		{"dns-temporary-nested-unknown-and-timeout", &net.DNSError{IsTemporary: true, UnwrapErr: errors.Join(errors.New(secret), context.DeadlineExceeded), Err: secret}, ErrDatabaseAdmission, "host resolution"},
+		{"dns-temporary-nested-pg-permission", &net.DNSError{IsTemporary: true, UnwrapErr: &pgconn.PgError{Code: "42501", Message: secret}, Err: secret}, ErrDatabaseAdmission, "permission"},
+		{"dns-temporary-nested-tls", &net.DNSError{IsTemporary: true, UnwrapErr: x509.UnknownAuthorityError{}, Err: secret}, ErrDatabaseAdmission, "TLS"},
+		{"dns-op-wrapped-cancel", &net.OpError{Op: "dial", Net: "tcp", Err: &net.DNSError{UnwrapErr: context.Canceled, Err: secret}}, context.Canceled, ""},
+		{"dns-op-wrapped-temporary", &net.OpError{Op: "dial", Net: "tcp", Err: &net.DNSError{IsTemporary: true, Err: secret}}, ErrUnavailable, ""},
+		{"dns-op-wrapped-notfound", &net.OpError{Op: "dial", Net: "tcp", Err: &net.DNSError{IsNotFound: true, Err: secret}}, ErrDatabaseAdmission, "host resolution"},
+		{"dns-op-wrapped-unknown-and-timeout", &net.OpError{Op: "dial", Net: "tcp", Err: &net.DNSError{IsTemporary: true, UnwrapErr: errors.Join(errors.New(secret), context.DeadlineExceeded), Err: secret}}, ErrDatabaseAdmission, "host resolution"},
+		{"dns-op-wrapped-permanent-tls", &net.OpError{Op: "dial", Net: "tcp", Err: &net.DNSError{IsTemporary: true, UnwrapErr: x509.UnknownAuthorityError{}, Err: secret}}, ErrDatabaseAdmission, "TLS"},
 		{"pg-starting-57P03", &pgconn.PgError{Code: "57P03", Message: secret}, ErrUnavailable, ""},
 		{"pg-connection-08006", &pgconn.PgError{Code: "08006", Message: secret}, ErrUnavailable, ""},
 		{"pg-busy-53300", &pgconn.PgError{Code: "53300", Message: secret}, ErrUnavailable, ""},
@@ -205,6 +218,60 @@ func TestNetworkWrapperPreservesSpecificPermanentCause(t *testing.T) {
 			err := safePreflightError(context.Background(), &net.OpError{Op: "dial", Net: "tcp", Err: tc.cause})
 			if !errors.Is(err, ErrDatabaseAdmission) || !strings.Contains(err.Error(), tc.category) {
 				t.Fatalf("lost permanent admission category %s: %v", tc.category, err)
+			}
+		})
+	}
+}
+
+func TestDatabasePreflightContextTerminationDoesNotMaskPermanentAdmission(t *testing.T) {
+	const secret = "postgres://private-role:private-password@127.0.0.1:5432/private"
+	const dsn = "postgres://role:fixture-password@127.0.0.1:5432/app?sslmode=disable"
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	expired, stopDeadline := context.WithTimeout(context.Background(), 0)
+	defer stopDeadline()
+	tests := []struct {
+		name     string
+		ctx      context.Context
+		cause    error
+		want     error
+		category string
+	}{
+		{"canceled-auth", canceled, errors.Join(&pgconn.PgError{Code: "28P01", Message: secret}, context.Canceled), ErrDatabaseAdmission, "authentication"},
+		{"canceled-permission", canceled, errors.Join(&pgconn.PgError{Code: "42501", Message: secret}, context.Canceled), ErrDatabaseAdmission, "permission"},
+		{"canceled-tls", canceled, errors.Join(x509.UnknownAuthorityError{}, context.Canceled), ErrDatabaseAdmission, "TLS"},
+		{"expired-auth", expired, &pgconn.PgError{Code: "28P01", Message: secret}, ErrDatabaseAdmission, "authentication"},
+		{"expired-permission", expired, &pgconn.PgError{Code: "42501", Message: secret}, ErrDatabaseAdmission, "permission"},
+		{"expired-tls", expired, x509.UnknownAuthorityError{}, ErrDatabaseAdmission, "TLS"},
+		{"canceled-network-permission", canceled, &net.OpError{Op: "dial", Net: "tcp", Err: syscall.EACCES}, ErrDatabaseAdmission, "network"},
+		{"canceled-nested-dns-permission", canceled, &net.DNSError{IsTemporary: true, UnwrapErr: &pgconn.PgError{Code: "42501", Message: secret}}, ErrDatabaseAdmission, "permission"},
+		{"expired-nested-dns-tls", expired, &net.DNSError{IsTimeout: true, UnwrapErr: x509.UnknownAuthorityError{}}, ErrDatabaseAdmission, "TLS"},
+		{"canceled-dns-notfound", canceled, &net.DNSError{IsNotFound: true, Err: secret}, ErrDatabaseAdmission, "host resolution"},
+		{"canceled-nested-dns-cancellation", canceled, &net.DNSError{UnwrapErr: context.Canceled}, context.Canceled, ""},
+		{"canceled-dns-temporary", canceled, &net.DNSError{IsTemporary: true}, context.Canceled, ""},
+		{"expired-nested-dns-unknown", expired, &net.DNSError{IsTemporary: true, UnwrapErr: errors.New(secret)}, context.DeadlineExceeded, ""},
+		{"canceled-transient", canceled, &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED}, context.Canceled, ""},
+		{"canceled-unknown", canceled, &net.OpError{Op: "dial", Net: "tcp", Err: errors.New(secret)}, context.Canceled, ""},
+		{"expired-transient", expired, context.DeadlineExceeded, context.DeadlineExceeded, ""},
+		{"expired-unknown", expired, errors.New(secret), context.DeadlineExceeded, ""},
+		{"canceled-missing-connection", canceled, nil, context.Canceled, ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			attempts := 0
+			_, err := inspectDatabaseTargetWithConnector(tc.ctx, dsn, func(context.Context, *pgx.ConnConfig) (*pgx.Conn, error) {
+				attempts++
+				return nil, tc.cause
+			})
+			if attempts != 1 || !errors.Is(err, tc.want) {
+				t.Fatalf("preflight attempts=%d result=%v expected=%v", attempts, err, tc.want)
+			}
+			if tc.category != "" && !strings.Contains(err.Error(), tc.category) {
+				t.Fatalf("permanent classification lost category %q: %v", tc.category, err)
+			}
+			if strings.Contains(err.Error(), secret) || tc.want == ErrDatabaseAdmission &&
+				(errors.Is(err, ErrUnavailable) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
+				t.Fatalf("unsafe or retryable classification: %v", err)
 			}
 		})
 	}

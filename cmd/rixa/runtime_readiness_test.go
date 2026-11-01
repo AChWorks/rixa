@@ -57,6 +57,33 @@ func TestRuntimeReadinessDoesNotRetryConfigurationOrUnsafeErrors(t *testing.T) {
 	}
 }
 
+func TestRuntimeReadinessPermanentAdmissionWinsInFlightContextTermination(t *testing.T) {
+	t.Run("parent-canceled", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		attempts := 0
+		_, err := awaitRuntimeDatabaseReadiness(ctx, time.Second, time.Millisecond, func(context.Context) (product.RuntimeConfig, error) {
+			attempts++
+			cancel()
+			return product.RuntimeConfig{}, fmt.Errorf("database target control: %w: authentication rejected", product.ErrDatabaseAdmission)
+		}, nil)
+		if attempts != 1 || !errors.Is(err, product.ErrDatabaseAdmission) {
+			t.Fatalf("permanent admission hidden by cancellation: attempts=%d err=%v", attempts, err)
+		}
+	})
+	t.Run("probe-deadline", func(t *testing.T) {
+		attempts := 0
+		_, err := awaitRuntimeDatabaseReadiness(context.Background(), 15*time.Millisecond, time.Millisecond, func(ctx context.Context) (product.RuntimeConfig, error) {
+			attempts++
+			<-ctx.Done()
+			return product.RuntimeConfig{}, fmt.Errorf("database target site-a: %w: TLS verification rejected", product.ErrDatabaseAdmission)
+		}, nil)
+		if attempts != 1 || !errors.Is(err, product.ErrDatabaseAdmission) {
+			t.Fatalf("permanent admission hidden by deadline: attempts=%d err=%v", attempts, err)
+		}
+	})
+}
+
 func TestRuntimeReadinessBoundedAndNoSecretInTimeout(t *testing.T) {
 	const secret = "postgres://sensitive-secret@localhost/test"
 	attempts := 0
