@@ -65,6 +65,23 @@ func TestPreflightRealPostgreSQLAdmissionAndPhysicalIdentity(t *testing.T) {
 	u.Path = "/" + dbName
 	u.User = url.UserPassword(roleName, roleSecret)
 	validRoleDSN := u.String()
+	// PostgreSQL 18's default PUBLIC execute grant on this catalog function
+	// can admit an ordinary login. Force a known permission-denied fixture
+	// only inside the freshly created, test-owned database before probing.
+	dbAdminDSN := *u
+	adminURL, parseErr := url.Parse(adminDSN)
+	if parseErr != nil {
+		t.Fatal("test admin DSN invalid")
+	}
+	dbAdminDSN.User = adminURL.User
+	withinDB, e := pgx.Connect(ctx, dbAdminDSN.String())
+	if e != nil {
+		t.Fatal("disposable PostgreSQL database admin connection unavailable")
+	}
+	defer withinDB.Close(context.Background())
+	if _, e = withinDB.Exec(ctx, "REVOKE EXECUTE ON FUNCTION pg_catalog.pg_control_system() FROM PUBLIC"); e != nil {
+		t.Fatal("cannot restrict disposable physical identity observation fixture")
+	}
 	badPassword := *u
 	badPassword.User = url.UserPassword(roleName, "deliberately-incorrect-test-password")
 	_, err = inspectDatabaseTarget(ctx, badPassword.String())
@@ -79,17 +96,6 @@ func TestPreflightRealPostgreSQLAdmissionAndPhysicalIdentity(t *testing.T) {
 	if !errors.Is(err, ErrDatabaseAdmission) || errors.Is(err, ErrUnavailable) || !strings.Contains(err.Error(), "permission") || strings.Contains(err.Error(), roleSecret) {
 		t.Fatalf("real PostgreSQL pg_control_system denial incorrectly classified: %v", err)
 	}
-	dbAdminDSN := *u
-	adminURL, parseErr := url.Parse(adminDSN)
-	if parseErr != nil {
-		t.Fatal("test admin DSN invalid")
-	}
-	dbAdminDSN.User = adminURL.User
-	withinDB, e := pgx.Connect(ctx, dbAdminDSN.String())
-	if e != nil {
-		t.Fatal("disposable PostgreSQL database admin connection unavailable")
-	}
-	defer withinDB.Close(context.Background())
 	if _, e = withinDB.Exec(ctx, "GRANT EXECUTE ON FUNCTION pg_catalog.pg_control_system() TO "+roleIdent); e != nil {
 		t.Fatal("grant disposable physical identity observation failed")
 	}
