@@ -190,8 +190,14 @@ func safePreflightError(ctx context.Context, cause error) error {
 	if errors.Is(cause, context.Canceled) {
 		return context.Canceled
 	}
-	if errors.Is(cause, context.DeadlineExceeded) ||
-		pgconn.Timeout(cause) || pgconn.SafeToRetry(cause) {
+	// PostgreSQL's SafeToRetry only means that no data was sent. It does
+	// not prove that a connection failure is transient or recoverable.
+	// A permission/policy rejection remains permanent even when wrapped
+	// alongside an otherwise retryable transport or timeout error.
+	if errors.Is(cause, syscall.EACCES) || errors.Is(cause, syscall.EPERM) {
+		return fmt.Errorf("%w: PostgreSQL network operation rejected", ErrDatabaseAdmission)
+	}
+	if errors.Is(cause, context.DeadlineExceeded) || pgconn.Timeout(cause) {
 		return ErrUnavailable
 	}
 	var dnsErr *net.DNSError
@@ -207,16 +213,25 @@ func safePreflightError(ctx context.Context, cause error) error {
 	}
 	var opErr *net.OpError
 	if errors.As(cause, &opErr) {
-		return ErrUnavailable
+		// net.OpError alone does not imply a transient failure. Inspect
+		// its inner cause against the same narrow transport allowlist.
+		if transientDatabaseTransportError(opErr.Err) {
+			return ErrUnavailable
+		}
+		return fmt.Errorf("%w: PostgreSQL network operation rejected", ErrDatabaseAdmission)
 	}
-	if errors.Is(cause, syscall.ECONNREFUSED) || errors.Is(cause, syscall.ECONNRESET) ||
-		errors.Is(cause, syscall.ECONNABORTED) || errors.Is(cause, syscall.ETIMEDOUT) ||
-		errors.Is(cause, syscall.EHOSTUNREACH) || errors.Is(cause, syscall.ENETUNREACH) ||
-		errors.Is(cause, syscall.ENETDOWN) || errors.Is(cause, io.EOF) ||
-		errors.Is(cause, io.ErrUnexpectedEOF) || errors.Is(cause, pgconn.ErrConnClosed) {
+	if transientDatabaseTransportError(cause) {
 		return ErrUnavailable
 	}
 	return fmt.Errorf("%w: PostgreSQL connection or identity probe rejected", ErrDatabaseAdmission)
+}
+
+func transientDatabaseTransportError(err error) bool {
+	return errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.ECONNRESET) ||
+		errors.Is(err, syscall.ECONNABORTED) || errors.Is(err, syscall.ETIMEDOUT) ||
+		errors.Is(err, syscall.EHOSTUNREACH) || errors.Is(err, syscall.ENETUNREACH) ||
+		errors.Is(err, syscall.ENETDOWN) || errors.Is(err, io.EOF) ||
+		errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, pgconn.ErrConnClosed)
 }
 
 func validateDeclaredMediaRoots(sites []SiteConfig) error {

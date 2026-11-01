@@ -35,6 +35,11 @@ func TestRuntimeReadinessDoesNotRetryConfigurationOrUnsafeErrors(t *testing.T) {
 		{"authentication", fmt.Errorf("database target control: %w: authentication rejected", product.ErrDatabaseAdmission)},
 		{"permission", fmt.Errorf("database target site-a: %w: identity probe permission denied", product.ErrDatabaseAdmission)},
 		{"tls", fmt.Errorf("database target site-b: %w: TLS verification", product.ErrDatabaseAdmission)},
+		// Actual net.OpError causes are classified and sanitized in product preflight.
+		// The run-only readiness loop must invoke its resolver just once for each.
+		{"net-op-eacces", fmt.Errorf("database target control: %w: PostgreSQL network operation rejected", product.ErrDatabaseAdmission)},
+		{"net-op-eperm", fmt.Errorf("database target site-a: %w: PostgreSQL network operation rejected", product.ErrDatabaseAdmission)},
+		{"net-op-unknown", fmt.Errorf("database target site-b: %w: PostgreSQL network operation rejected", product.ErrDatabaseAdmission)},
 		{"permanent-even-when-joined-to-transient", errors.Join(product.ErrDatabaseAdmission, product.ErrUnavailable)},
 		{"unclassified", errors.New("unexpected internal failure")},
 		{"canceled", context.Canceled},

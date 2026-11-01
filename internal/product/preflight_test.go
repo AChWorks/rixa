@@ -19,6 +19,13 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// SafeToRetry only confirms that no data was sent, not recoverability.
+type replaySafePreflightError struct{ cause error }
+
+func (e replaySafePreflightError) Error() string     { return e.cause.Error() }
+func (e replaySafePreflightError) Unwrap() error     { return e.cause }
+func (e replaySafePreflightError) SafeToRetry() bool { return true }
+
 func TestDatabasePreflightRejectsUnsafeRemoteBeforeConnect(t *testing.T) {
 	tests := []struct {
 		name string
@@ -136,6 +143,19 @@ func TestDatabasePreflightClassifiesSanitizedConnectionErrors(t *testing.T) {
 		{"pg-connection-08006", &pgconn.PgError{Code: "08006", Message: secret}, ErrUnavailable, ""},
 		{"pg-busy-53300", &pgconn.PgError{Code: "53300", Message: secret}, ErrUnavailable, ""},
 		{"connection-refused", &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED}, ErrUnavailable, ""},
+		{"net-op-eacces", &net.OpError{Op: "dial", Net: "tcp", Err: syscall.EACCES}, ErrDatabaseAdmission, "network"},
+		{"net-op-eperm", &net.OpError{Op: "dial", Net: "tcp", Err: syscall.EPERM}, ErrDatabaseAdmission, "network"},
+		{"net-op-unclassified", &net.OpError{Op: "dial", Net: "tcp", Err: errors.New(secret)}, ErrDatabaseAdmission, "network"},
+		{"net-op-unclassified-eio", &net.OpError{Op: "dial", Net: "tcp", Err: syscall.EIO}, ErrDatabaseAdmission, "network"},
+		{"net-op-reset", &net.OpError{Op: "read", Net: "tcp", Err: syscall.ECONNRESET}, ErrUnavailable, ""},
+		{"net-op-EOF", &net.OpError{Op: "read", Net: "tcp", Err: io.EOF}, ErrUnavailable, ""},
+		{"net-op-unknown-joined-transient", errors.Join(&net.OpError{Op: "dial", Net: "tcp", Err: errors.New(secret)}, syscall.ECONNREFUSED), ErrDatabaseAdmission, "network"},
+		{"net-op-permission-joined-timeout", errors.Join(&net.OpError{Op: "dial", Net: "tcp", Err: syscall.EACCES}, context.DeadlineExceeded), ErrDatabaseAdmission, "network"},
+		{"safe-to-replay-eacces", replaySafePreflightError{cause: &net.OpError{Op: "dial", Net: "tcp", Err: syscall.EACCES}}, ErrDatabaseAdmission, "network"},
+		{"safe-to-replay-unknown", replaySafePreflightError{cause: &net.OpError{Op: "dial", Net: "tcp", Err: errors.New(secret)}}, ErrDatabaseAdmission, "network"},
+		{"safe-to-replay-refused", replaySafePreflightError{cause: &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED}}, ErrUnavailable, ""},
+		{"pg-auth-joined-transient", errors.Join(&pgconn.PgError{Code: "28P01", Message: secret}, syscall.ECONNREFUSED), ErrDatabaseAdmission, "authentication"},
+		{"tls-joined-transient", errors.Join(x509.UnknownAuthorityError{}, syscall.ECONNREFUSED), ErrDatabaseAdmission, "TLS"},
 		{"reset", fmt.Errorf("socket closed: %w", syscall.ECONNRESET), ErrUnavailable, ""},
 		{"network-unreachable", fmt.Errorf("socket: %w", syscall.ENETUNREACH), ErrUnavailable, ""},
 		{"EOF", io.EOF, ErrUnavailable, ""},
@@ -143,6 +163,9 @@ func TestDatabasePreflightClassifiesSanitizedConnectionErrors(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			if strings.HasPrefix(tc.name, "safe-to-replay") && !pgconn.SafeToRetry(tc.cause) {
+				t.Fatal("fixture must satisfy pgconn.SafeToRetry")
+			}
 			calls := 0
 			_, err := inspectDatabaseTargetWithConnector(context.Background(), dsn, func(context.Context, *pgx.ConnConfig) (*pgx.Conn, error) {
 				calls++
