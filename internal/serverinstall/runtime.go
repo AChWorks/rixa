@@ -31,6 +31,7 @@ type runtimeTask struct {
 	KeyPEM           []byte            `json:"key_pem,omitempty"`
 	ControlPrincipal string            `json:"control_principal,omitempty"`
 	SitePrincipal    string            `json:"site_principal,omitempty"`
+	SiteBPrincipal   string            `json:"site_b_principal,omitempty"`
 }
 type stageReceipt struct {
 	Stage     string `json:"stage"`
@@ -86,7 +87,11 @@ func RuntimeStage(parent context.Context, args []string) error {
 	receipt := stageReceipt{Stage: args[0], Code: "verified"}
 	switch args[0] {
 	case "prepare":
-		for _, p := range []string{runtimeRoot + "/tls", "/var/lib/rixa/site-a", "/var/lib/rixa/site-a/media", "/var/lib/rixa/site-a/public"} {
+		paths := []string{runtimeRoot + "/tls", "/var/lib/rixa/site-a", "/var/lib/rixa/site-a/media", "/var/lib/rixa/site-a/public"}
+		if siteBRequested(task.Draft) {
+			paths = append(paths, "/var/lib/rixa/site-b", "/var/lib/rixa/site-b/media", "/var/lib/rixa/site-b/public")
+		}
+		for _, p := range paths {
 			if e = privateDir(p, os.Geteuid(), true); e != nil {
 				return e
 			}
@@ -108,10 +113,15 @@ func RuntimeStage(parent context.Context, args []string) error {
 		if e = product.Migrate(ctx, c, databaseLookup(task.Draft)); e != nil {
 			return fmt.Errorf("runtime stage %s failed: %w", args[0], e)
 		}
-	case "bootstrap-control", "bootstrap-site":
+	case "bootstrap-control", "bootstrap-site", "bootstrap-site-b":
 		scope, login, password, path := "control", task.Draft.ControlLogin, task.Draft.ControlPassword, runtimeRoot+"/bootstrap-control.json"
 		if args[0] == "bootstrap-site" {
 			scope, login, password, path = "site:site-a", task.Draft.SiteLogin, task.Draft.SitePassword, runtimeRoot+"/bootstrap-site.json"
+		} else if args[0] == "bootstrap-site-b" {
+			if !siteBRequested(task.Draft) {
+				return ErrInput
+			}
+			scope, login, password, path = "site:site-b", task.Draft.SiteBLogin, task.Draft.SiteBPassword, runtimeRoot+"/bootstrap-site-b.json"
 		}
 		r, e := product.ApplyBootstrapOperation(ctx, product.BootstrapOperationRequest{
 			OperationID: task.OperationID + "-" + args[0], StatePath: path, Configuration: configBytes(task.Draft, "", ""), Scope: scope, Login: login, Password: password,
@@ -121,7 +131,7 @@ func RuntimeStage(parent context.Context, args []string) error {
 		}
 		receipt.Principal = r.Principal
 	case "setup":
-		data := configBytes(task.Draft, task.ControlPrincipal, task.SitePrincipal)
+		data := configBytesWithSiteB(task.Draft, task.ControlPrincipal, task.SitePrincipal, task.SiteBPrincipal)
 		r, e := product.ApplySetup(ctx, product.SetupRequest{OperationID: task.OperationID + "-config", TargetPath: runtimeConfigPath, Configuration: data}, databaseLookup(task.Draft))
 		if e != nil {
 			return fmt.Errorf("runtime stage %s failed: %w", args[0], e)
@@ -130,7 +140,7 @@ func RuntimeStage(parent context.Context, args []string) error {
 			return fmt.Errorf("%w: setup state=%s code=%s", ErrPrerequisite, r.State, r.Code)
 		}
 	case "check":
-		c, e := product.ParseConfig(configBytes(task.Draft, task.ControlPrincipal, task.SitePrincipal))
+		c, e := product.ParseConfig(configBytesWithSiteB(task.Draft, task.ControlPrincipal, task.SitePrincipal, task.SiteBPrincipal))
 		if e != nil {
 			return e
 		}
@@ -151,7 +161,7 @@ func RuntimeStage(parent context.Context, args []string) error {
 	return json.NewEncoder(os.Stdout).Encode(receipt)
 }
 func (m *Manager) childStage(ctx context.Context, j *journal, stage string) (stageReceipt, error) {
-	task := runtimeTask{DatabaseTargets: j.DatabaseTargets, OperationID: j.Draft.OperationID, UID: j.UID, GID: j.GID, Draft: j.Draft, ControlPrincipal: j.ControlPrincipal, SitePrincipal: j.SitePrincipal}
+	task := runtimeTask{DatabaseTargets: j.DatabaseTargets, OperationID: j.Draft.OperationID, UID: j.UID, GID: j.GID, Draft: j.Draft, ControlPrincipal: j.ControlPrincipal, SitePrincipal: j.SitePrincipal, SiteBPrincipal: j.SiteBPrincipal}
 	if stage == "prepare" {
 		var e error
 		task.CertPEM, e = readPrivate(m.tlsSnapshotPath(j, false), m.ownerUID, 1<<20)

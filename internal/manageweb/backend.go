@@ -202,13 +202,18 @@ func (c *Console) artifactState(ctx context.Context) (artifact, string, bool, er
 type configureInput struct {
 	ControlOrigin   string `json:"control_origin"`
 	SiteOrigin      string `json:"site_origin"`
+	SiteBOrigin     string `json:"site_b_origin"`
+	SiteBAction     string `json:"site_b_action"`
 	Listen          string `json:"listen"`
 	ControlDSN      string `json:"control_dsn"`
 	SiteDSN         string `json:"site_dsn"`
+	SiteBDSN        string `json:"site_b_dsn"`
 	ControlLogin    string `json:"control_login"`
 	SiteLogin       string `json:"site_login"`
+	SiteBLogin      string `json:"site_b_login"`
 	ControlPassword string `json:"control_password"`
 	SitePassword    string `json:"site_password"`
+	SiteBPassword   string `json:"site_b_password"`
 	Language        string `json:"language"`
 }
 
@@ -252,6 +257,20 @@ func (c *Console) configure(ctx context.Context, in configureInput) (serverinsta
 	d.TLSKeyPath = c.options.RuntimeKey
 	d.ControlOrigin = in.ControlOrigin
 	d.SiteOrigin = in.SiteOrigin
+	if in.SiteBAction != "" && in.SiteBAction != "keep" && in.SiteBAction != "remove" {
+		return serverinstall.Result{}, serverinstall.ErrInput
+	}
+	if in.SiteBAction == "remove" {
+		d.SiteBOrigin, d.SiteBDSN, d.SiteBLogin, d.SiteBPassword = "", "", "", ""
+	} else {
+		d.SiteBOrigin, d.SiteBLogin = in.SiteBOrigin, in.SiteBLogin
+		if in.SiteBDSN != "" {
+			d.SiteBDSN = in.SiteBDSN
+		}
+		if in.SiteBPassword != "" {
+			d.SiteBPassword = in.SiteBPassword
+		}
+	}
 	d.Listen = in.Listen
 	d.ControlLogin = in.ControlLogin
 	d.SiteLogin = in.SiteLogin
@@ -327,7 +346,7 @@ func (c *Console) operation(w http.ResponseWriter, r *http.Request, locale *loca
 		if !c.authorizeEffect(w, r) {
 			return
 		}
-		supplied = []string{in.ControlDSN, in.SiteDSN, in.ControlPassword, in.SitePassword}
+		supplied = []string{in.ControlDSN, in.SiteDSN, in.SiteBDSN, in.ControlPassword, in.SitePassword, in.SiteBPassword}
 		result, e = c.configure(r.Context(), in)
 	} else {
 		var input struct {
@@ -433,7 +452,11 @@ func (c *Console) reviewSummary(ctx context.Context) (map[string]string, error) 
 	if e != nil {
 		return nil, e
 	}
-	return map[string]string{"release": d.Release, "source": d.SourceCommit, "control_origin": d.ControlOrigin, "site_origin": d.SiteOrigin, "listen": d.Listen, "control_login": d.ControlLogin, "site_login": d.SiteLogin, "control_dsn": redactedDatabase(d.ControlDSN), "site_dsn": redactedDatabase(d.SiteDSN)}, nil
+	summary := map[string]string{"release": d.Release, "source": d.SourceCommit, "control_origin": d.ControlOrigin, "site_origin": d.SiteOrigin, "listen": d.Listen, "control_login": d.ControlLogin, "site_login": d.SiteLogin, "control_dsn": redactedDatabase(d.ControlDSN), "site_dsn": redactedDatabase(d.SiteDSN)}
+	if d.SiteBOrigin != "" || d.SiteBDSN != "" || d.SiteBLogin != "" || d.SiteBPassword != "" {
+		summary["site_b_origin"], summary["site_b_login"], summary["site_b_dsn"] = d.SiteBOrigin, d.SiteBLogin, redactedDatabase(d.SiteBDSN)
+	}
+	return summary, nil
 }
 func redactedDatabase(raw string) string {
 	u, e := url.Parse(raw)

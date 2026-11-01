@@ -287,6 +287,9 @@ func runManagement(ctx context.Context, backend serverinstall.Facade, options Op
 				"Only the exact reviewed operation will be queued.",
 				"Closing this menu does not stop an already queued operation.",
 			}
+			if profile == nil && (draft.SiteBOrigin != "" || draft.SiteBDSN != "" || draft.SiteBLogin != "" || draft.SiteBPassword != "") {
+				confirmation = append(confirmation, "Optional site-b: "+SafeText(draft.SiteBOrigin)+"; separate database and administrator.")
+			}
 			if profile != nil {
 				title, word, confirmation = profile.confirmation(action, id, current)
 			}
@@ -396,7 +399,7 @@ func publicError(err error, d serverinstall.Draft) string {
 		return ""
 	}
 	value := err.Error()
-	for _, secret := range []string{d.ControlDSN, d.SiteDSN, d.ControlPassword, d.SitePassword} {
+	for _, secret := range []string{d.ControlDSN, d.SiteDSN, d.SiteBDSN, d.ControlPassword, d.SitePassword, d.SiteBPassword} {
 		if secret != "" {
 			value = strings.ReplaceAll(value, secret, "[redacted]")
 		}
@@ -420,7 +423,7 @@ type field struct {
 }
 
 func draftFields(d *serverinstall.Draft) []field {
-	return []field{
+	fields := []field{
 		{"archive", "Release archive", "Absolute path to the downloaded versioned Linux amd64 archive.", false, &d.ArchivePath},
 		{"bundle", "Attestation bundle", "Absolute path to the adjacent .sigstore.json; no signature bypass.", false, &d.BundlePath},
 		{"release", "Release tag", "Exact selected tag, for example v0.2.0.", false, &d.Release},
@@ -438,8 +441,16 @@ func draftFields(d *serverinstall.Draft) []field {
 		{"site_password", "Site administrator password", "Hidden; empty keeps a previously saved value.", true, &d.SitePassword},
 		{"language", "Web interface language", "Choose bundled en or fa for the web interface. The terminal always uses English.", false, &d.Language},
 	}
+	if d.SiteBOrigin != "" || d.SiteBDSN != "" || d.SiteBLogin != "" || d.SiteBPassword != "" {
+		fields = append(fields, []field{
+			{"site_b_origin", "Optional second-site URL", "Leave all four second-site fields blank for one site; otherwise use a third distinct HTTPS hostname.", false, &d.SiteBOrigin},
+			{"site_b_dsn", "Optional second-site database", "Separate prepared PostgreSQL18 database and role; Ctrl-U explicitly clears a saved secret.", true, &d.SiteBDSN},
+			{"site_b_login", "Optional second-site administrator", "Required only when enabling site-b; site accounts stay independent.", false, &d.SiteBLogin},
+			{"site_b_password", "Optional second-site password", "Required only when enabling site-b; Ctrl-U explicitly clears a saved secret.", true, &d.SiteBPassword},
+		}...)
+	}
+	return fields
 }
-
 func configure(ctx context.Context, s *session, backend serverinstall.Facade, d *serverinstall.Draft, current serverinstall.Result) (serverinstall.Result, bool, error) {
 	fields := draftFields(d)
 	return configureFields(ctx, s, backend, d, current, fields, initialField(fields, *d), func() []serverinstall.Problem { return serverinstall.ValidateDraftFields(*d) })
@@ -450,6 +461,7 @@ func configureFields(ctx context.Context, s *session, backend serverinstall.Faca
 	for {
 		f := fields[index]
 		value := *f.value
+		clearedSecret := false
 		if f.secret {
 			value = ""
 		}
@@ -535,6 +547,7 @@ func configureFields(ctx context.Context, s *session, backend serverinstall.Faca
 				continue
 			case "clear":
 				value = ""
+				clearedSecret = true
 				first = true
 				continue
 			case "backspace":
@@ -550,7 +563,7 @@ func configureFields(ctx context.Context, s *session, backend serverinstall.Faca
 				}
 				continue
 			case "back", "up":
-				if !f.secret || value != "" {
+				if !f.secret || value != "" || clearedSecret {
 					*f.value = value
 				}
 				if index == 0 {
@@ -560,7 +573,7 @@ func configureFields(ctx context.Context, s *session, backend serverinstall.Faca
 				notice = ""
 				break
 			case "enter", "next", "down":
-				if !f.secret || value != "" {
+				if !f.secret || value != "" || clearedSecret {
 					*f.value = value
 				}
 				problems := validate()
@@ -692,7 +705,7 @@ func confirm(ctx context.Context, s *session, title string, lines []string, word
 }
 
 func publicValue(value string, d serverinstall.Draft) string {
-	for _, secret := range []string{d.ControlDSN, d.SiteDSN, d.ControlPassword, d.SitePassword} {
+	for _, secret := range []string{d.ControlDSN, d.SiteDSN, d.SiteBDSN, d.ControlPassword, d.SitePassword, d.SiteBPassword} {
 		if secret != "" {
 			value = strings.ReplaceAll(value, secret, "[redacted]")
 		}

@@ -58,7 +58,7 @@ func (m *Manager) RunOperation(ctx context.Context, id string) (Result, error) {
 		return m.fail(j, "installation-conflict", "The installation owner record does not match this operation.")
 	}
 	j.Attempts["executor"] = "verified"
-	for _, stage := range []string{"payload", "account", "runtime-paths", "prepare", "migrate", "bootstrap-control", "bootstrap-site", "setup", "check", "service", "postflight"} {
+	for _, stage := range nativeInstallStages(j.Draft) {
 		if e = ctx.Err(); e != nil {
 			return m.fail(j, "interrupted", "Execution stopped; inspect the retained stage before continuation.")
 		}
@@ -88,12 +88,19 @@ func (m *Manager) RunOperation(ctx context.Context, id string) (Result, error) {
 			return Result{}, e
 		}
 	}
-	j.State, j.Code, j.Message = "installed", "installed", "Service installation and both initial administrator logins verified."
-	j.Draft.ControlPassword, j.Draft.SitePassword = "", ""
+	j.State, j.Code, j.Message = "installed", "installed", "Service installation and all configured administrator logins verified."
+	j.Draft.ControlPassword, j.Draft.SitePassword, j.Draft.SiteBPassword = "", "", ""
 	if e = m.save(j); e != nil {
 		return Result{}, e
 	}
 	return result(j), nil
+}
+func nativeInstallStages(d Draft) []string {
+	stages := []string{"payload", "account", "runtime-paths", "prepare", "migrate", "bootstrap-control", "bootstrap-site"}
+	if siteBRequested(d) {
+		stages = append(stages, "bootstrap-site-b")
+	}
+	return append(stages, "setup", "check", "service", "postflight")
 }
 func (m *Manager) inExecutor(j *journal) bool {
 	b, e := os.ReadFile("/proc/self/cgroup")
@@ -117,19 +124,22 @@ func (m *Manager) execute(ctx context.Context, j *journal, stage string) error {
 		return m.createAccount(ctx, j)
 	case "runtime-paths":
 		return m.runtimePaths(j)
-	case "prepare", "migrate", "bootstrap-control", "bootstrap-site", "setup", "check":
+	case "prepare", "migrate", "bootstrap-control", "bootstrap-site", "bootstrap-site-b", "setup", "check":
 		r, e := m.childStage(ctx, j, stage)
 		if e != nil {
 			return e
 		}
-		if stage == "bootstrap-control" || stage == "bootstrap-site" {
+		if stage == "bootstrap-control" || stage == "bootstrap-site" || stage == "bootstrap-site-b" {
 			if !principalSyntax.MatchString(r.Principal) {
 				return ErrState
 			}
-			if stage == "bootstrap-control" {
+			switch stage {
+			case "bootstrap-control":
 				j.ControlPrincipal = r.Principal
-			} else {
+			case "bootstrap-site":
 				j.SitePrincipal = r.Principal
+			case "bootstrap-site-b":
+				j.SiteBPrincipal = r.Principal
 			}
 		}
 		return nil
@@ -165,7 +175,7 @@ func (m *Manager) reconcile(ctx context.Context, j *journal, stage string) error
 		return m.runtimePaths(j)
 	case "prepare", "migrate", "check":
 		return m.execute(ctx, j, stage)
-	case "bootstrap-control", "bootstrap-site", "setup":
+	case "bootstrap-control", "bootstrap-site", "bootstrap-site-b", "setup":
 		// These operations own durable attempted-effect records. The executor cgroup
 		// and parent lock fence prior child work before any operator continuation.
 		return m.execute(ctx, j, stage)
@@ -315,7 +325,11 @@ func (m *Manager) serviceBytes(j *journal) []byte {
 }
 func environmentFile(d Draft) []byte {
 	quote := func(s string) string { return "\"" + strings.NewReplacer("\\", "\\\\", "\"", "\\\"").Replace(s) + "\"" }
-	return []byte("RIXA_CONTROL_DSN=" + quote(d.ControlDSN) + "\nRIXA_SITE_DSN=" + quote(d.SiteDSN) + "\n")
+	env := "RIXA_CONTROL_DSN=" + quote(d.ControlDSN) + "\nRIXA_SITE_DSN=" + quote(d.SiteDSN) + "\n"
+	if siteBRequested(d) {
+		env += "RIXA_SITE_B_DSN=" + quote(d.SiteBDSN) + "\n"
+	}
+	return []byte(env)
 }
 func (m *Manager) installService(ctx context.Context, j *journal) error {
 	if e := m.observeAccount(j); e != nil {

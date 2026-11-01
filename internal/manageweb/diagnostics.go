@@ -42,7 +42,7 @@ func (c *Console) diagnosticRedactor(request *http.Request, reviewToken string, 
 	if err != nil || len(permit) != 44 || permit[43] != '\n' {
 		return nil, false
 	}
-	values := []string{draft.ControlDSN, draft.SiteDSN, draft.ControlPassword, draft.SitePassword,
+	values := []string{draft.ControlDSN, draft.SiteDSN, draft.SiteBDSN, draft.ControlPassword, draft.SitePassword, draft.SiteBPassword,
 		strings.TrimSuffix(string(permit), "\n"), request.Header.Get("X-CSRF-Token"), reviewToken}
 	for _, cookie := range request.Cookies() {
 		if cookie.Name == c.cookieName {

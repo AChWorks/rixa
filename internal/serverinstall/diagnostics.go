@@ -28,12 +28,12 @@ func (d Draft) LogValue() slog.Value {
 	return slog.GroupValue(slog.String("operation_id", id), slog.String("protected", "[redacted]"))
 }
 func redactDiagnostic(s string, d Draft) string {
-	for _, secret := range []string{d.ControlPassword, d.SitePassword} {
+	for _, secret := range []string{d.ControlPassword, d.SitePassword, d.SiteBPassword} {
 		if secret != "" {
 			s = strings.ReplaceAll(s, secret, "[redacted]")
 		}
 	}
-	for _, dsn := range []string{d.ControlDSN, d.SiteDSN} {
+	for _, dsn := range []string{d.ControlDSN, d.SiteDSN, d.SiteBDSN} {
 		u, e := url.Parse(dsn)
 		if e == nil && u.User != nil {
 			if password, ok := u.User.Password(); ok && password != "" {

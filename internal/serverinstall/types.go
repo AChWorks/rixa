@@ -27,15 +27,19 @@ type Draft struct {
 	SourceCommit    string `json:"source_commit"`
 	ControlOrigin   string `json:"control_origin"`
 	SiteOrigin      string `json:"site_origin"`
+	SiteBOrigin     string `json:"site_b_origin,omitempty"`
 	Listen          string `json:"listen"`
 	TLSCertPath     string `json:"tls_cert"`
 	TLSKeyPath      string `json:"tls_key"`
 	ControlDSN      string `json:"control_dsn"`
 	SiteDSN         string `json:"site_dsn"`
+	SiteBDSN        string `json:"site_b_dsn,omitempty"`
 	ControlLogin    string `json:"control_login"`
 	SiteLogin       string `json:"site_login"`
+	SiteBLogin      string `json:"site_b_login,omitempty"`
 	ControlPassword string `json:"control_password"`
 	SitePassword    string `json:"site_password"`
+	SiteBPassword   string `json:"site_b_password,omitempty"`
 	Language        string `json:"language"`
 }
 

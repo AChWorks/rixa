@@ -27,7 +27,7 @@ func changedReviewedEvidence(before reviewedEvidence, j *journal) []Problem {
 		add("tls_key", "The supplied private key changed. Review the intended TLS material again.")
 	}
 	if !maps.Equal(before.databases, j.DatabaseTargets) {
-		add("control_dsn", "The physical control/site database targets changed. Inspect both database connections and review again.")
+		add("control_dsn", "The physical control/site database targets changed. Inspect all database connections and review again.")
 	}
 	if before.helper != j.HelperSHA256 {
 		add("archive", "The trusted verification helper changed. Review the selected helper and artifact again.")

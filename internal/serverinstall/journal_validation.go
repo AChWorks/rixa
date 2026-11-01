@@ -12,7 +12,7 @@ import (
 var hashSyntax = regexp.MustCompile(`^[0-9a-f]{64}$`)
 var databaseSyntax = regexp.MustCompile(`^[0-9]+:[0-9]+$`)
 var codeSyntax = regexp.MustCompile(`^[a-z0-9-]{1,64}$`)
-var knownStages = map[string]bool{"executor": true, "payload": true, "account": true, "runtime-paths": true, "prepare": true, "migrate": true, "bootstrap-control": true, "bootstrap-site": true, "setup": true, "check": true, "service": true, "postflight": true, "remove": true}
+var knownStages = map[string]bool{"executor": true, "payload": true, "account": true, "runtime-paths": true, "prepare": true, "migrate": true, "bootstrap-control": true, "bootstrap-site": true, "bootstrap-site-b": true, "setup": true, "check": true, "service": true, "postflight": true, "remove": true}
 
 func validJournal(j *journal) bool {
 	for k, v := range j.TransportEnv {
@@ -36,20 +36,27 @@ func validJournal(j *journal) bool {
 			return false
 		}
 	}
-	for _, p := range []string{j.ControlPrincipal, j.SitePrincipal} {
+	for _, p := range []string{j.ControlPrincipal, j.SitePrincipal, j.SiteBPrincipal} {
 		if p != "" && !principalSyntax.MatchString(p) {
 			return false
 		}
 	}
 	for k, v := range j.DatabaseTargets {
-		if k != "control" && k != "site-a" || !databaseSyntax.MatchString(v) {
+		if k != "control" && k != "site-a" && (k != "site-b" || !siteBRequested(j.Draft)) || !databaseSyntax.MatchString(v) {
 			return false
 		}
 	}
-	if len(j.DatabaseTargets) != 0 && len(j.DatabaseTargets) != 2 {
+	if len(j.DatabaseTargets) != 0 && len(j.DatabaseTargets) != databaseTargetCount(j.Draft) {
 		return false
 	}
-	if j.ControlPrincipal != "" && j.Attempts["bootstrap-control"] != "verified" || j.SitePrincipal != "" && j.Attempts["bootstrap-site"] != "verified" {
+	if j.ControlPrincipal != "" && j.Attempts["bootstrap-control"] != "verified" || j.SitePrincipal != "" && j.Attempts["bootstrap-site"] != "verified" || j.SiteBPrincipal != "" && j.Attempts["bootstrap-site-b"] != "verified" {
+		return false
+	}
+	if siteBRequested(j.Draft) {
+		if j.DatabaseTargets != nil && len(j.DatabaseTargets) != 0 && j.DatabaseTargets["site-b"] == "" {
+			return false
+		}
+	} else if j.SiteBPrincipal != "" || j.Attempts["bootstrap-site-b"] != "" || j.DatabaseTargets["site-b"] != "" {
 		return false
 	}
 	if j.Frozen == "" {
@@ -60,7 +67,7 @@ func validJournal(j *journal) bool {
 			return false
 		}
 	} else {
-		if !hashSyntax.MatchString(j.ManagerSHA256) || !hashSyntax.MatchString(j.ArchiveSHA256) || !hashSyntax.MatchString(j.CertSHA256) || !hashSyntax.MatchString(j.KeySHA256) || len(j.DatabaseTargets) != 2 || j.ExecutorGeneration < 1 || j.ReviewToken == "" || !hashSyntax.MatchString(j.HelperSHA256) || !safePath(j.HelperPath) {
+		if !hashSyntax.MatchString(j.ManagerSHA256) || !hashSyntax.MatchString(j.ArchiveSHA256) || !hashSyntax.MatchString(j.CertSHA256) || !hashSyntax.MatchString(j.KeySHA256) || len(j.DatabaseTargets) != databaseTargetCount(j.Draft) || j.ExecutorGeneration < 1 || j.ReviewToken == "" || !hashSyntax.MatchString(j.HelperSHA256) || !safePath(j.HelperPath) {
 			return false
 		}
 		if j.State == "draft" || j.State == "ready" || j.State == "blocked" {
@@ -70,14 +77,14 @@ func validJournal(j *journal) bool {
 	if j.Frozen != "" && j.ReviewedManagerSHA256 != "" && j.ReviewedManagerSHA256 != j.ManagerSHA256 {
 		return false
 	}
-	if j.State == "ready" && (j.ReviewToken == "" || j.ArchiveSHA256 == "" || j.CertSHA256 == "" || j.KeySHA256 == "" || len(j.DatabaseTargets) != 2) {
+	if j.State == "ready" && (j.ReviewToken == "" || j.ArchiveSHA256 == "" || j.CertSHA256 == "" || j.KeySHA256 == "" || len(j.DatabaseTargets) != databaseTargetCount(j.Draft)) {
 		return false
 	}
 	if j.State == "installed" || j.State == "removed" {
-		if j.UID == 0 || j.GID == 0 || j.ControlPrincipal == "" || j.SitePrincipal == "" || j.BinarySHA256 == "" || j.UnitSHA256 == "" || j.Draft.ControlPassword != "" || j.Draft.SitePassword != "" {
+		if j.UID == 0 || j.GID == 0 || j.ControlPrincipal == "" || j.SitePrincipal == "" || j.BinarySHA256 == "" || j.UnitSHA256 == "" || j.Draft.ControlPassword != "" || j.Draft.SitePassword != "" || j.Draft.SiteBPassword != "" || (siteBRequested(j.Draft) && j.SiteBPrincipal == "") {
 			return false
 		}
-		for _, s := range []string{"payload", "account", "runtime-paths", "prepare", "migrate", "bootstrap-control", "bootstrap-site", "setup", "check", "service", "postflight"} {
+		for _, s := range nativeInstallStages(j.Draft) {
 			if j.Attempts[s] != "verified" {
 				return false
 			}
@@ -92,6 +99,9 @@ func validJournal(j *journal) bool {
 	}
 	if d.SitePassword == "" && j.Attempts["bootstrap-site"] == "verified" {
 		d.SitePassword = strings.Repeat("x", 15)
+	}
+	if siteBRequested(d) && d.SiteBPassword == "" && j.Attempts["bootstrap-site-b"] == "verified" {
+		d.SiteBPassword = strings.Repeat("x", 15)
 	}
 	return len(ValidateDraft(d)) == 0
 }

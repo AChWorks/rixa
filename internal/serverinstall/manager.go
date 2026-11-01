@@ -201,10 +201,10 @@ func (m *Manager) review(ctx context.Context, j *journal) []Problem {
 				if !serverAuth {
 					add("tls_cert", "tls-usage", "The certificate must allow TLS server authentication.")
 				}
-				for _, o := range []string{d.ControlOrigin, d.SiteOrigin} {
+				for _, o := range nativeSiteOrigins(d) {
 					u, _ := url.Parse(o)
 					if u == nil || leaf.VerifyHostname(u.Hostname()) != nil {
-						add("tls_cert", "tls-hostnames", "The certificate must cover both exact control and site hostnames.")
+						add("tls_cert", "tls-hostnames", "The certificate must cover every configured control and site hostname.")
 					}
 				}
 			}
@@ -266,6 +266,8 @@ func databaseLookup(d Draft) func(string) (string, bool) {
 			return d.ControlDSN, true
 		case "RIXA_SITE_DSN":
 			return d.SiteDSN, true
+		case "RIXA_SITE_B_DSN":
+			return d.SiteBDSN, siteBRequested(d)
 		}
 		return "", false
 	}

@@ -16,6 +16,58 @@ The initial native profile requires:
 - distinct control/site HTTPS hostnames, matching the selected listener port, and bounded regular certificate/key files covering both hostnames;
 - positively available installation paths and unused `rixa` account/group/service names.
 
+### Optional second site during a new native installation (development source)
+
+The default native installation remains **one site**: Control plus `site-a`, each
+with its own physical PostgreSQL 18 database and private account namespace.
+A manager built from source containing the optional site-b implementation can
+also install **exactly two sites at initial installation**; this is not evidence
+that an earlier prerelease binary already supports it.
+
+For the two-site path, the infrastructure operator must supply a **third**
+independent PostgreSQL 18 database and role, and a valid runtime TLS
+certificate covering three distinct exact hostnames: Control, site-a and
+site-b. The first site's `site_origin`, `site_dsn`, `site_login` and
+`site_password` inputs are unchanged. Add all four optional private draft
+fields for site-b:
+
+| Private draft field | Meaning |
+| --- | --- |
+| `site_b_origin` | The distinct second-site HTTPS origin with the selected listener port |
+| `site_b_dsn` | The third independent loopback PostgreSQL 18 URL, using explicit password credentials |
+| `site_b_login` | An independent initial site-b administrator login |
+| `site_b_password` | The independent initial site-b administrator password |
+
+An incomplete second-site group is invalid. Save the *entire* draft in a
+root-owned `0600` regular JSON file outside any web root and use the existing
+`rixa manage draft --operation first-install --source /root/private/first-install.json`
+followed by Review and explicit token-bound Apply. Do not paste the draft or
+its secrets into chat, commit it, or pass credentials as command arguments.
+The native `manage web` console presents an optional expandable second-site
+section; the default terminal `manage menu` retains its original single-site
+field sequence, while a private `--prefill` containing site-b fields opens the
+optional two-site fields. The web section has an explicit *Clear optional site
+from this draft* action; leaving saved password fields blank retains their
+existing private values.
+
+Review binds all three physical database identities, confirms one TLS
+certificate covers all three hostnames, and authenticates the exact Rixa
+release. Apply serializes one installation with separate `site-a` and
+`site-b` bootstrap receipts, private Media/publication roots and verified
+initial administrator logins. Ordinary Remove still retains **all** data,
+databases, private configuration and Media. Restart and status use the same
+systemd-owned service and immutable operation journal.
+
+**Limits:** This initial path cannot add a site to a *running* installation,
+cannot provision a third database automatically, and does not grant arbitrary
+schema-changing updates. The managed updater remains constrained by its
+existing negative read-only pre-stop editorial guard and authenticated,
+stopped-service candidate check. The v0.7-to-v0.8 managed schema-changing
+migration and candidate-bound AChrix/Editorial compatibility, verified backup
+and restoration remain separate Issue #29 acceptance requirements. Treat
+source-level capability as unreleased until authenticated artifact, physical
+installation acceptance, independent review and authorized release are recorded.
+
 The loopback database restriction makes the reviewed credential source identical under root and the non-login runtime user. Implicit environment/password-file credentials, Unix peer authentication, remote database profiles, service-file options and silent database major upgrades are not supported by this adapter. A missing prerequisite produces a field-specific result; the operator supplies or corrects it before applying.
 
 Supplied TLS material is checked for key pairing, time, hostnames and server usage, then privately staged. Local postflight uses that supplied certificate to verify the exact HTTPS endpoints. This does not establish public DNS resolution, browser CA trust, firewall reachability or automatic certificate renewal.

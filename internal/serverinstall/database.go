@@ -46,7 +46,7 @@ func databaseIdentities(parent context.Context, d Draft) (map[string]string, err
 		}
 		identities[target.ID] = server + ":" + database
 	}
-	if len(identities) != 2 {
+	if len(identities) != databaseTargetCount(d) {
 		return nil, ErrInput
 	}
 	return identities, nil

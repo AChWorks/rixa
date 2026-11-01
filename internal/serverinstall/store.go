@@ -43,6 +43,7 @@ type journal struct {
 	GID                   uint32            `json:"gid,omitempty"`
 	ControlPrincipal      string            `json:"control_principal,omitempty"`
 	SitePrincipal         string            `json:"site_principal,omitempty"`
+	SiteBPrincipal        string            `json:"site_b_principal,omitempty"`
 	Attempts              map[string]string `json:"attempts"`
 	UnitSHA256            string            `json:"unit_sha256,omitempty"`
 	Updated               string            `json:"updated"`
@@ -52,6 +53,7 @@ func digest(b []byte) string { s := sha256.Sum256(b); return hex.EncodeToString(
 func draftDigest(d Draft) string {
 	d.ControlPassword = ""
 	d.SitePassword = ""
+	d.SiteBPassword = ""
 	b, _ := json.Marshal(d)
 	return digest(b)
 }
