@@ -129,12 +129,19 @@ authenticated native Update may be its predecessor. A second Add Site,
 arbitrary topology edits, automatic certificate replacement, and an
 unreviewed installation are **not** accepted.
 
-This source-level implementation has passed unit/race/static checks and
-physical **Review** on an isolated test VM. **Effectful physical Apply/Resume,
-cold boot, interrupted-stage recovery, and topology-aware Update/Remove
-acceptance remain unverified.** It is not part of an authorized release or a
-production-supported procedure. Do not treat the commands below as permission
-to run an unreviewed candidate against production.
+The source candidate at `8c78f17` passed unit/vet/race checks and real
+**Inspect → Draft → Review → Apply → Commit** on an isolated Debian 13,
+PostgreSQL 18, KVM test VM. All nine Add Site stages were independently
+observed as verified, with three distinct database identities, Control and
+site-a retained, and trusted HTTPS/SNI endpoints for all three hosts. The
+committed Add Site remained **installed/healthy** after a controlled VM
+stop and cold boot. See the [exact physical acceptance checkpoint](https://github.com/AChWorks/rixa/issues/29#issuecomment-6591463069).
+This establishes a positive development test, **not** full operational
+acceptance: interrupted Apply/Resume, post-addition effectful Update,
+ordinary retained-data Remove and separate schema-changing backup/restore
+remain unverified. The code has not received final independent approval and
+is neither an authorized release nor a production-supported procedure.
+Do not run the candidate on production.
 
 ### Read-only inspection and protected input
 
@@ -236,12 +243,15 @@ are **not** treated as success or blindly replayed.
 ### Evidence and operational gates
 
 This is a **development candidate**, not a production runbook.
-Before advertising effectful Add Site as supported, obtain exact-candidate
-physical activation including HTTPS/SNI, three-way database isolation,
-interrupted Apply/Resume, reboot persistence, failure-path retention and
-topology-aware Update/ordinary Remove verification. An independent
-HIGH_ASSURANCE review and fresh Owner authorization are mandatory before
-Merge or any release. General destructive Purge is separately gated.
+The exact development candidate has positive physical Add Site activation,
+HTTPS/SNI, database isolation and cold-boot evidence, but this is not a
+finished production acceptance matrix. Before advertising support, verify
+interrupted Apply/Resume, failure-path retention, topology-aware effectful
+Update and ordinary retained-data Remove on disposable test guests. Keep the
+distinct schema-changing upgrade, actual backup restoration and CLI/TUI
+operational evidence separate; one positive Add Site run proves none of them.
+An independent HIGH_ASSURANCE review and fresh Owner authorization remain
+mandatory before Merge or any release. Destructive Purge is separately gated.
 
 ## Temporary browser access
 
