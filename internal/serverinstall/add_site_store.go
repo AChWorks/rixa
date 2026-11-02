@@ -135,7 +135,11 @@ func validAddSiteJournal(j *addSiteJournal) bool {
 			}
 		}
 	}
-	if j.SiteBPrincipal != "" && j.Attempts["bootstrap-site-b"] != "verified" {
+	// The independently bootstrapped site administrator is part of the
+	// durable success receipt. It cannot be claimed before bootstrap, and
+	// a verified bootstrap cannot have an unknown resulting principal.
+	if (j.SiteBPrincipal != "" && j.Attempts["bootstrap-site-b"] != "verified") ||
+		(j.Attempts["bootstrap-site-b"] == "verified" && j.SiteBPrincipal == "") {
 		return false
 	}
 	if len(j.DatabaseTargets) > 0 {
@@ -153,10 +157,75 @@ func validAddSiteJournal(j *addSiteJournal) bool {
 			}
 		}
 	}
+	// A draft/review has never dispatched an executor. Refuse both an
+	// arbitrary stage name and a review without the complete host bindings,
+	// including the recorded 0644 systemd unit fingerprint.
+	if j.Frozen == "" {
+		if len(j.Attempts) != 0 || j.ExecutorGeneration != 0 || j.ExecutorAcknowledged ||
+			j.ManagerSHA256 != "" || j.State == "applying" ||
+			j.State == "reconciliation-required" || j.State == "installed" {
+			return false
+		}
+		switch j.State {
+		case "draft":
+			return j.Stage == ""
+		case "blocked":
+			return j.Stage == "" || j.Stage == "review"
+		case "ready":
+			return j.Stage == "review" && j.ReviewToken != "" &&
+				j.ParentSHA256 != "" && j.ConfigSHA256 != "" &&
+				j.EnvironmentSHA256 != "" && j.UnitSHA256 != "" &&
+				j.ReviewedManagerSHA256 != "" && len(j.DatabaseTargets) == 3
+		}
+		return false
+	}
+
+	// Frozen is an explicit intent-before-effect boundary, not merely a
+	// matching draft hash. Even a crash before systemd-run acknowledgement
+	// must retain the executor attempt and a meaningful current stage. An
+	// acknowledged queue may legitimately remain executor=attempted until
+	// its child starts; never invent a verified start or completed stage.
+	if j.State != "applying" && j.State != "reconciliation-required" && j.State != "installed" ||
+		j.Stage == "" || j.Stage == "review" || j.Attempts["executor"] == "" ||
+		j.ExecutorGeneration < 1 || j.ParentSHA256 == "" ||
+		j.ConfigSHA256 == "" || j.EnvironmentSHA256 == "" || j.UnitSHA256 == "" ||
+		j.ManagerSHA256 == "" || j.ReviewedManagerSHA256 != j.ManagerSHA256 ||
+		len(j.DatabaseTargets) != 3 {
+		return false
+	}
+	if j.Stage == "executor" {
+		// Before the first ordinary stage, no stage can claim a result.
+		for _, stage := range addSiteStages {
+			if j.Attempts[stage] != "" {
+				return false
+			}
+		}
+	} else {
+		// Ordinary effects can begin only after the child has verified its
+		// executor identity. The current stage must have a durable receipt,
+		// and no *later* stage may have started (including after a crash).
+		if j.Attempts["executor"] != "verified" || j.Attempts[j.Stage] == "" {
+			return false
+		}
+		current := -1
+		for i, stage := range addSiteStages {
+			if stage == j.Stage {
+				current = i
+				break
+			}
+		}
+		if current < 0 {
+			return false
+		}
+		for _, stage := range addSiteStages[current+1:] {
+			if j.Attempts[stage] != "" {
+				return false
+			}
+		}
+	}
 	if j.State == "installed" {
-		if j.Attempts["executor"] != "verified" || j.SiteBPrincipal == "" || j.Frozen == "" ||
-			j.ParentSHA256 == "" || j.ConfigSHA256 == "" || j.EnvironmentSHA256 == "" ||
-			j.UnitSHA256 == "" || j.ManagerSHA256 == "" || len(j.DatabaseTargets) != 3 ||
+		if j.Stage != "commit" || !j.ExecutorAcknowledged ||
+			j.Attempts["executor"] != "verified" || j.SiteBPrincipal == "" ||
 			j.Draft.SiteBPassword != "" {
 			return false
 		}
@@ -166,23 +235,7 @@ func validAddSiteJournal(j *addSiteJournal) bool {
 			}
 		}
 	}
-	if j.Frozen == "" {
-		if len(j.Attempts) != 0 || j.ExecutorGeneration != 0 || j.ExecutorAcknowledged ||
-			j.ManagerSHA256 != "" || j.State == "applying" ||
-			j.State == "reconciliation-required" || j.State == "installed" {
-			return false
-		}
-		if j.State == "ready" && (j.ReviewToken == "" || j.ParentSHA256 == "" ||
-			len(j.DatabaseTargets) != 3 || j.ConfigSHA256 == "" || j.EnvironmentSHA256 == "" || j.ReviewedManagerSHA256 == "") {
-			return false
-		}
-	} else {
-		if j.State == "draft" || j.State == "ready" || j.State == "blocked" ||
-			j.ManagerSHA256 == "" || j.ParentSHA256 == "" ||
-			j.ExecutorGeneration == 0 || len(j.DatabaseTargets) != 3 {
-			return false
-		}
-	}
+
 	return true
 }
 
