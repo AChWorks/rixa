@@ -57,6 +57,34 @@ func (m *Manager) topologyView(original, current *journal) (*journal, error) {
 	return addSiteView(current, j), nil
 }
 
+// Post-addition Update Status must retain the Add Site TLS leaf/SNI
+// identity check, not just a root-CA HTTPS request. Native original two-site
+// installations without an independent Add Site retain their existing
+// updateHTTPPostflight checks.
+func (m *Manager) verifyCommittedUpdateSiteBTLS(ctx context.Context, u *updateJournal, currentParent *journal) error {
+	if currentParent == nil {
+		return ErrState
+	}
+	active, err := m.addSiteMarker("active-add-site")
+	if err != nil {
+		return ErrState
+	}
+	if active == "" {
+		return nil
+	}
+	addition, err := m.loadAddSite(active)
+	if err != nil || addition.State != "installed" ||
+		addition.Draft.InstallationOperation != u.Draft.InstallationOperation ||
+		currentParent.Draft.SiteBOrigin != addition.Draft.SiteBOrigin {
+		return ErrState
+	}
+	original, err := m.load(u.Draft.InstallationOperation)
+	if err != nil {
+		return ErrState
+	}
+	return m.verifyCurrentSiteBTLS(ctx, original, addition.Draft.SiteBOrigin)
+}
+
 func (m *Manager) installedAddSiteStatus(ctx context.Context, j *addSiteJournal) (Result, error) {
 	r := addSiteResult(j)
 	parent, pe := m.load(j.Draft.InstallationOperation)

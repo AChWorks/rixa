@@ -47,6 +47,19 @@ func (m *Manager) updateStatus(ctx context.Context, u *updateJournal) (Result, e
 		return r, nil
 	}
 	if u.State == "installed" {
+		// Match the ordinary installation Status gate: a pending Add Site
+		// owns the topology, and a historical Update must not advertise a
+		// healthy one-site runtime while its config is being expanded.
+		pendingSite, pe := m.addSiteMarker("pending-add-site")
+		if pe != nil {
+			return r, pe
+		}
+		if pendingSite != "" {
+			r.State, r.Code, r.Message, r.Actions = "reconciliation-required", "topology-pending",
+				"An Add Site executor owns the native installation; inspect the Add Site operation.",
+				[]string{"status"}
+			return r, nil
+		}
 		active, e := m.updateMarker("active-update")
 		if e != nil {
 			return r, e
@@ -74,7 +87,8 @@ func (m *Manager) updateStatus(ctx context.Context, u *updateJournal) (Result, e
 			r.Code, r.Message, r.Actions = "update-pending", "A newer update is pending; inspect that operation before removal.", []string{"status"}
 			return r, nil
 		}
-		if m.boundUpdateRuntime(ctx, u, parent) != nil || m.checkOwnedService(current) != nil || m.loadedUpdateService(ctx, current, true) != nil || m.updateUnitFileState(ctx) != "enabled" || m.updateHTTPPostflight(ctx, current) != nil {
+		if m.boundUpdateRuntime(ctx, u, parent) != nil || m.checkOwnedService(current) != nil || m.loadedUpdateService(ctx, current, true) != nil || m.updateUnitFileState(ctx) != "enabled" || m.updateHTTPPostflight(ctx, current) != nil ||
+			m.verifyCommittedUpdateSiteBTLS(ctx, u, parent) != nil {
 			r.Code, r.Message, r.Actions = "installed-unhealthy", "Updated native installation is retained, but current runtime, service or TLS checks did not verify. Inspect its owned service and journal.", []string{"status"}
 			if m.checkOwnedService(current) == nil && m.loadedUpdateService(ctx, current, false) == nil {
 				r.Actions = []string{"status", "remove"}

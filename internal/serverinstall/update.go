@@ -181,6 +181,23 @@ func (m *Manager) reviewUpdate(ctx context.Context, u *updateJournal) []Problem 
 	}
 	u.ConfigSHA256, u.EnvironmentSHA256 = digest(config), digest(environment)
 	u.DatabaseTargets = parent.DatabaseTargets
+	// The projected topology is already verified by activePredecessor.
+	// Persist its exact independent receipt without editing older Update or
+	// Add Site journals. Apply rechecks this pin through sameUpdateEvidence.
+	u.ActiveAddSiteSHA256 = ""
+	activeSite, se := m.addSiteMarker("active-add-site")
+	if se != nil {
+		add("installation_operation", "topology-receipt", "The active Add Site marker could not be validated.")
+		return problems
+	}
+	if activeSite != "" {
+		raw, re := readPrivate(m.addSitePath(activeSite), m.ownerUID, maxStateBytes)
+		if re != nil || len(parent.DatabaseTargets) != 3 {
+			add("installation_operation", "topology-receipt", "The committed Add Site journal is unavailable or the physical topology differs.")
+			return problems
+		}
+		u.ActiveAddSiteSHA256 = digest(raw)
+	}
 	// Review can refuse a definitely unsupported Rixa editorial schema change
 	// without staging or interrupting the live service. This is not candidate
 	// or Foundation-wide schema admission; the executor repeats this observation
@@ -277,13 +294,77 @@ func (m *Manager) updateRuntimeEvidence(ctx context.Context, parent *journal) ([
 	}
 	return config, env, nil
 }
+
+// The historical Update receipt pins the configuration *before* its own
+// effect. An independently committed Add Site after that Update expands the
+// live config/DSNs without changing those immutable historical hashes.
+// Every caller still needs full current physical runtime evidence first.
 func (m *Manager) boundUpdateRuntime(ctx context.Context, u *updateJournal, parent *journal) error {
-	config, env, e := m.updateRuntimeEvidence(ctx, parent)
-	if e != nil || digest(config) != u.ConfigSHA256 || digest(env) != u.EnvironmentSHA256 || !reflect.DeepEqual(parent.DatabaseTargets, u.DatabaseTargets) {
+	config, env, err := m.updateRuntimeEvidence(ctx, parent)
+	if err != nil {
 		return ErrState
 	}
-	snapshot, e := readPrivate(m.updateConfigPath(u), m.ownerUID, 1<<20)
-	if e != nil || digest(snapshot) != u.ConfigSHA256 || !bytes.Equal(snapshot, config) {
+	snapshot, err := readPrivate(m.updateConfigPath(u), m.ownerUID, 1<<20)
+	if err != nil || digest(snapshot) != u.ConfigSHA256 {
+		return ErrState
+	}
+	if reflect.DeepEqual(parent.DatabaseTargets, u.DatabaseTargets) {
+		return matchUpdateRuntimeEvidence(u, parent, config, env, snapshot, nil, nil, nil)
+	}
+
+	// Only an Update completed *before* the separately committed Add Site
+	// can retain a two-target historical snapshot against a three-target
+	// active runtime. Later Updates are bound to all three targets normally.
+	active, err := m.addSiteMarker("active-add-site")
+	if err != nil || active == "" {
+		return ErrState
+	}
+	addition, err := m.loadAddSite(active)
+	if err != nil || addition.State != "installed" || addition.ActiveUpdate != u.Draft.OperationID {
+		return ErrState
+	}
+	original, current, err := m.addSitePredecessors(addition)
+	if err != nil || !reflect.DeepEqual(updateView(parent, u), addSiteView(current, addition)) {
+		return ErrState
+	}
+	before, err := m.addSiteOriginal(addition)
+	if err != nil {
+		return ErrState
+	}
+	_, _, candidate, err := m.addSiteConfigState(addition, original)
+	if err != nil {
+		return ErrState
+	}
+	return matchUpdateRuntimeEvidence(u, parent, config, env, snapshot, addition, before, candidate)
+}
+
+// The pure comparison is intentionally independent of system files: unit
+// tests can prove that adding site-B does not silently relax the old Update
+// receipt, arbitrary config drift, exact site ownership or three-way DB ID.
+func matchUpdateRuntimeEvidence(u *updateJournal, parent *journal,
+	config, env, snapshot []byte, addition *addSiteJournal, original, candidate []byte) error {
+	if u == nil || parent == nil || digest(snapshot) != u.ConfigSHA256 {
+		return ErrState
+	}
+	if reflect.DeepEqual(parent.DatabaseTargets, u.DatabaseTargets) {
+		if bytes.Equal(config, snapshot) && digest(env) == u.EnvironmentSHA256 {
+			return nil
+		}
+		return ErrState
+	}
+	if addition == nil || addition.State != "installed" ||
+		addition.Attempts["commit"] != "verified" ||
+		addition.ActiveUpdate != u.Draft.OperationID ||
+		addition.ConfigSHA256 != u.ConfigSHA256 ||
+		addition.EnvironmentSHA256 != u.EnvironmentSHA256 ||
+		len(u.DatabaseTargets) != 2 || len(parent.DatabaseTargets) != 3 ||
+		parent.Draft.SiteBOrigin != addition.Draft.SiteBOrigin ||
+		parent.SiteBPrincipal != addition.SiteBPrincipal ||
+		!reflect.DeepEqual(parent.DatabaseTargets, addition.DatabaseTargets) ||
+		u.DatabaseTargets["control"] != parent.DatabaseTargets["control"] ||
+		u.DatabaseTargets["site-a"] != parent.DatabaseTargets["site-a"] ||
+		!bytes.Equal(snapshot, original) || !bytes.Equal(config, candidate) ||
+		!bytes.Equal(env, environmentFile(parent.Draft)) {
 		return ErrState
 	}
 	return nil

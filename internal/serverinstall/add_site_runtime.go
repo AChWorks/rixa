@@ -203,7 +203,19 @@ func addSiteConfigCandidate(config []byte, j *addSiteJournal, parent *journal) (
 	if j == nil || parent == nil {
 		return nil, ErrState
 	}
-	plan, err := composeAddSiteConfig(config, environmentFile(parent.Draft), parent, j.Draft.AddSiteInspectionDraft, j.SiteBPrincipal)
+	proposed := j.Draft.AddSiteInspectionDraft
+	if proposed.SiteBPassword == "" {
+		// The already committed Add Site journal intentionally erased its
+		// bootstrap password. Validate the fixed current configuration with
+		// a non-secret in-memory shape placeholder, but ONLY after a fully
+		// verified terminal journal. Never weaken pre-Apply password policy.
+		if j.State != "installed" || j.Attempts["bootstrap-site-b"] != "verified" ||
+			!validAddSiteJournal(j) || !principalSyntax.MatchString(j.SiteBPrincipal) {
+			return nil, ErrState
+		}
+		proposed.SiteBPassword = "verified-bootstrapped-site"
+	}
+	plan, err := composeAddSiteConfig(config, environmentFile(parent.Draft), parent, proposed, j.SiteBPrincipal)
 	if err != nil {
 		return nil, err
 	}

@@ -202,7 +202,13 @@ The original installation and completed update journals remain immutable;
 the separate committed Add Site journal owns its new topology receipt.
 A pending topology change fences ordinary Update and Remove. Successful
 commit is observable by native Status; ordinary Remove is intended to retain
-both sites' data and private configuration.
+both sites' data and private configuration. If a compatible Update completed
+before Add Site, its historical configuration/environment hashes remain pinned
+to the original single-site runtime; current Status verifies the independent
+committed Add Site topology and its exact TLS/SNI, owned service and database
+targets instead of rewriting those hashes. A later reviewed three-target Update
+binds the exact committed Add Site journal hash, and unexpected changes to
+either historical receipt block further managed effects.
 
 If the executor stops, inspect the exact frozen systemd unit
 `rixa-add-site-<new-add-site-operation>-<generation>.service`, its journal,

@@ -19,20 +19,24 @@ var updateStages = []string{"payload", "stop", "compatibility", "migrate", "chec
 // receipt. It records the exact predecessor and current configuration; it never
 // carries replacement bootstrap passwords or reconstructs configuration.
 type updateJournal struct {
-	Schema                string            `json:"schema"`
-	Draft                 UpdateDraft       `json:"draft"`
-	State                 string            `json:"state"`
-	Stage                 string            `json:"stage,omitempty"`
-	Code                  string            `json:"code"`
-	Message               string            `json:"message,omitempty"`
-	ReviewToken           string            `json:"review_token,omitempty"`
-	Frozen                string            `json:"frozen,omitempty"`
-	ParentSHA256          string            `json:"parent_sha256,omitempty"`
-	PriorUpdate           string            `json:"prior_update,omitempty"`
-	PriorSHA256           string            `json:"prior_sha256,omitempty"`
-	ActiveRelease         string            `json:"active_release,omitempty"`
-	ConfigSHA256          string            `json:"config_sha256,omitempty"`
-	EnvironmentSHA256     string            `json:"environment_sha256,omitempty"`
+	Schema            string      `json:"schema"`
+	Draft             UpdateDraft `json:"draft"`
+	State             string      `json:"state"`
+	Stage             string      `json:"stage,omitempty"`
+	Code              string      `json:"code"`
+	Message           string      `json:"message,omitempty"`
+	ReviewToken       string      `json:"review_token,omitempty"`
+	Frozen            string      `json:"frozen,omitempty"`
+	ParentSHA256      string      `json:"parent_sha256,omitempty"`
+	PriorUpdate       string      `json:"prior_update,omitempty"`
+	PriorSHA256       string      `json:"prior_sha256,omitempty"`
+	ActiveRelease     string      `json:"active_release,omitempty"`
+	ConfigSHA256      string      `json:"config_sha256,omitempty"`
+	EnvironmentSHA256 string      `json:"environment_sha256,omitempty"`
+	// A native Update reviewed after an independent Add Site pins its
+	// committed immutable topology receipt. Updates preceding Add Site retain
+	// an empty pin; original native two-site installs do not have this marker.
+	ActiveAddSiteSHA256   string            `json:"active_add_site_sha256,omitempty"`
 	DatabaseTargets       map[string]string `json:"database_targets,omitempty"`
 	ReviewedManagerSHA256 string            `json:"reviewed_manager_sha256,omitempty"`
 	ManagerSHA256         string            `json:"manager_sha256,omitempty"`
@@ -101,7 +105,7 @@ func validUpdate(u *updateJournal) bool {
 	if _, e := time.Parse(time.RFC3339Nano, u.Updated); e != nil {
 		return false
 	}
-	for _, h := range []string{u.Frozen, u.ReviewToken, u.ParentSHA256, u.PriorSHA256, u.ConfigSHA256, u.EnvironmentSHA256, u.ReviewedManagerSHA256, u.ManagerSHA256, u.HelperSHA256, u.ArchiveSHA256, u.BinarySHA256, u.UnitSHA256} {
+	for _, h := range []string{u.Frozen, u.ReviewToken, u.ParentSHA256, u.PriorSHA256, u.ConfigSHA256, u.EnvironmentSHA256, u.ActiveAddSiteSHA256, u.ReviewedManagerSHA256, u.ManagerSHA256, u.HelperSHA256, u.ArchiveSHA256, u.BinarySHA256, u.UnitSHA256} {
 		if h != "" && !hashSyntax.MatchString(h) {
 			return false
 		}
@@ -122,6 +126,9 @@ func validUpdate(u *updateJournal) bool {
 		if !transportKeys[k] || len(v) > 4096 || strings.ContainsAny(v, "\r\n\x00") {
 			return false
 		}
+	}
+	if u.ActiveAddSiteSHA256 != "" && len(u.DatabaseTargets) != 3 {
+		return false
 	}
 	if len(u.DatabaseTargets) != 0 && (len(u.DatabaseTargets) != 2 && len(u.DatabaseTargets) != 3) {
 		return false
@@ -342,9 +349,54 @@ func updateView(parent *journal, u *updateJournal) *journal {
 	j.UnitSHA256 = u.UnitSHA256
 	return &j
 }
+
+// Before Add Site, an Update has only two database targets. After Add Site,
+// every newly reviewed three-target Update must pin the exact committed
+// Add Site journal bytes. A pre-add Update is accepted only when the Add Site
+// itself pins that Update as its historical active predecessor. An original
+// native two-site installation has no independent Add Site.
+func (m *Manager) verifyUpdateActiveAddSite(u *updateJournal) error {
+	active, err := m.addSiteMarker("active-add-site")
+	if err != nil {
+		return ErrState
+	}
+	if active == "" {
+		if u.ActiveAddSiteSHA256 != "" {
+			return ErrState
+		}
+		return nil
+	}
+	raw, err := readPrivate(m.addSitePath(active), m.ownerUID, maxStateBytes)
+	if err != nil {
+		return ErrState
+	}
+	var addition addSiteJournal
+	if decode(raw, &addition) != nil || !validAddSiteJournal(&addition) ||
+		addition.Draft.OperationID != active || addition.State != "installed" ||
+		addition.Attempts["commit"] != "verified" ||
+		addition.Draft.InstallationOperation != u.Draft.InstallationOperation {
+		return ErrState
+	}
+	if u.ActiveAddSiteSHA256 != "" {
+		if len(u.DatabaseTargets) != 3 || digest(raw) != u.ActiveAddSiteSHA256 {
+			return ErrState
+		}
+	} else if u.Frozen == "" {
+		// Unfrozen draft/Review does not yet carry a topology pin. Only
+		// Review may bind it; Apply must independently observe the same hash.
+		return nil
+	} else if len(u.DatabaseTargets) != 2 || addition.ActiveUpdate != u.Draft.OperationID {
+		return ErrState
+	}
+	return nil
+}
+
 func (m *Manager) predecessor(u *updateJournal) (*journal, error) {
 	j, e := m.originalUpdateParent(u)
 	if e != nil {
+		return nil, e
+	}
+	if e = m.verifyUpdateActiveAddSite(u); e != nil {
 		return nil, e
 	}
 	if u.PriorUpdate == "" {
