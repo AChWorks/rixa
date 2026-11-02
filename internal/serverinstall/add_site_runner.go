@@ -71,6 +71,11 @@ func (m *Manager) RunAddSiteOperation(ctx context.Context, id string) (Result, e
 	if err != nil {
 		return m.addSiteFailure(j, "predecessor-changed", "The original or active updated installation lineage changed.", err)
 	}
+	// The process has already proved exact cgroup membership and its frozen
+	// executable identity. This positive observation is stronger than the
+	// parent's potentially lost systemd-run acknowledgement; without it an
+	// otherwise completed child could be rejected as "not acknowledged".
+	j.ExecutorAcknowledged = true
 	j.Attempts["executor"] = "verified"
 	if err = m.saveAddSite(j); err != nil {
 		return Result{}, err
@@ -304,16 +309,28 @@ func (m *Manager) activateAddSiteBytes(parent *journal, original, candidate, old
 	return replaceOwnedExact(runtimeConfigPath, original, candidate, parent.UID, parent.GID)
 }
 func replaceOwnedExact(path string, old, next []byte, uid, gid uint32) error {
+	// Site topology effects are restricted to two fixed, positively owned
+	// files. The lower-level primitive is also tested on disposable private
+	// files; exposing it here must never broaden root mutation authority.
+	if (path != runtimeConfigPath && path != "/etc/rixa/service.env") ||
+		!safePath(path) ||
+		(path == runtimeConfigPath && privateDir(runtimeRoot, int(uid), false) != nil) ||
+		(path != runtimeConfigPath && !trustedRootParent(path)) {
+		return ErrState
+	}
+	return replaceOwnedExactFile(path, old, next, uid, gid)
+}
+
+// replaceOwnedExactFile is the bounded old-or-new, file-atomic continuation.
+// Its caller must first authorize and pin the exact target path. In particular
+// this helper never creates a missing file or adopts different existing bytes.
+func replaceOwnedExactFile(path string, old, next []byte, uid, gid uint32) error {
 	current, err := readPrivate(path, int(uid), 1<<20)
 	if err != nil || (!bytes.Equal(current, old) && !bytes.Equal(current, next)) {
 		return ErrState
 	}
 	if bytes.Equal(current, next) {
 		return nil
-	}
-	if !safePath(path) || (path != runtimeConfigPath && !trustedRootParent(path)) ||
-		(path == runtimeConfigPath && privateDir(runtimeRoot, int(uid), false) != nil) {
-		return ErrState
 	}
 	f, err := os.CreateTemp(filepath.Dir(path), ".rixa-topology-")
 	if err != nil {
