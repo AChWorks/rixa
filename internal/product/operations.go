@@ -59,10 +59,15 @@ func MigrateAddedSite(parent context.Context, config Config, getenv func(string)
 	if err != nil || len(targets) != 3 {
 		return ErrConfiguration
 	}
+	foundSiteB := false
 	for _, target := range targets {
 		if target.ID != "site-b" {
 			continue
 		}
+		if foundSiteB {
+			return ErrConfiguration
+		}
+		foundSiteB = true
 		if target.Kind != DatabaseSite {
 			return ErrConfiguration
 		}

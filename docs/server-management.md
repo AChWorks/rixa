@@ -119,126 +119,115 @@ The loopback database restriction makes the reviewed credential source identical
 
 Supplied TLS material is checked for key pairing, time, hostnames and server usage, then privately staged. Local postflight uses that supplied certificate to verify the exact HTTPS endpoints. This does not establish public DNS resolution, browser CA trust, firewall reachability or automatic certificate renewal.
 
-## Inspect adding a site after installation (read-only source capability)
+## Add Site after an existing native installation (development source; not released)
 
-A manager built from source with `manage add-site inspect` can **assess**
-an optional `site-b` on a currently **installed, healthy, single-site**
-native operation. This inspection is a separate operator command from the
-initial two-site installation path. It is **not Add Site execution**:
-there is no Apply, Resume, topology mutation, site-b migration, bootstrap,
-service restart, browser-console flow or release/host support claim yet.
+This source introduces a **distinct, manually confirmed Add Site** lifecycle.
+It is separate from the optional second site selected during **first**
+installation. Only an existing, positively healthy **single-site** native
+Debian 13/systemd/PostgreSQL 18 installation is admitted. A completed,
+authenticated native Update may be its predecessor. A second Add Site,
+arbitrary topology edits, automatic certificate replacement, and an
+unreviewed installation are **not** accepted.
 
-Create an operator-owned **0600** private JSON file outside the web root,
-containing exactly:
+This source-level implementation has passed unit/race/static checks and
+physical **Review** on an isolated test VM. **Effectful physical Apply/Resume,
+cold boot, interrupted-stage recovery, and topology-aware Update/Remove
+acceptance remain unverified.** It is not part of an authorized release or a
+production-supported procedure. Do not treat the commands below as permission
+to run an unreviewed candidate against production.
+
+### Read-only inspection and protected input
+
+Supply a root-owned, mode **0600** JSON file outside repository and web roots:
 
 | Field | Meaning |
 | --- | --- |
-| `installation_operation` | Original installed one-site native operation ID |
-| `site_b_origin` | Third distinct HTTPS origin at the existing listener port |
-| `site_b_dsn` | Third independent explicit loopback PostgreSQL 18 password URL |
-| `site_b_login` | Intended independent site-b administrator login |
-| `site_b_password` | Intended new administrator password; remains private |
+| `installation_operation` | Original installed single-site native operation ID |
+| `site_b_origin` | Distinct HTTPS origin on the existing listener |
+| `site_b_dsn` | Third separate PostgreSQL 18 database-owner password URL, loopback-only |
+| `site_b_login` | New site-B administrator login |
+| `site_b_password` | Private initial site-B administrator password |
 
-Then inspect with an independently trusted manager containing this command:
+A separately managed Add Site draft adds one more field, the new
+`operation_id`. It must differ from the original installation and all
+other operations. Inputs never belong in shell arguments, ordinary logs,
+public JSON, URLs or issue comments.
+
+The passive inspection command is always non-applying:
 
 ```bash
 sudo rixa manage add-site inspect --source /root/private/add-site-inspection.json
 ```
 
-The CLI emits only a bounded, credential-free JSON result and reasoned
-field problems. It does not retain or print the draft and does not return a
-review token permitting mutation. On success, `state=inspected` and
-`code=prerequisites-verified` mean **inspection passed, not installed**.
-An incomplete or unsafe draft is rejected before database access.
+`inspected / prerequisites-verified` means the live one-site service and
+the proposed third database passed read-only admission; **it does not add a
+site or grant an Apply token**. The manager verifies the installation owner,
+frozen manager and completed update lineage, current owned service/unit and
+configuration, isolated databases/roles including cross-database CONNECT,
+and the exact original pinned TLS certificate/key. An actual TLS handshake
+using site-B SNI must present the **same pinned leaf**, not merely another
+certificate trusted by the same root.
 
-The assessment rechecks the original installation owner and frozen manager,
-current owned service-unit receipt, active one-site configuration, actual
-running executable and strict HTTPS health, absence of **pending** managed
-updates, and the original physical database identities. An **active-update**
-receipt is supported *only* when it identifies a fully completed, installed
-compatible update with intact original-parent and every chained prior-update
-receipt, frozen managers/helpers and current active configuration snapshot.
-The observed service must run the exact active update's authenticated binary;
-a merely recorded completion, unknown prior update, interrupted stage,
-modified receipt or stale configuration cannot pass. A supported completed
-update is not restarted, resumed or reapplied. Its actual active release
-is returned in the inspection result. The current update can retain supported
-presentation settings: its private configuration snapshot, not old generated
-bytes, is the read-only comparison baseline. Other topology changes remain
-unsupported. Historical chains longer than the bounded verification limit
-require operator reconciliation rather than an unsafe partial admission.
+### Durable Draft, Review, Apply and Resume (candidate only)
 
-The inspection tests the original Control/site-a and new site-b database owners as one
-three-way role-isolation group, including PostgreSQL membership and
-effective cross-database CONNECT privileges. For this bounded inspection
-the existing owned TLS certificate must **already** cover the new site-b
-hostname. The inspection requires both currently installed private TLS files
-(certificate **and** key) to match the immutable original snapshots and their
-recorded digests; a genuine TLS-only handshake against the already running
-local listener, using site-b SNI, must present the **exact** pinned leaf with
-valid server trust and site-b hostname coverage. Trusting a different leaf
-through the original certificate's CA chain is not sufficient. Mismatches,
-unavailable files or uncertain handshakes fail closed with a credential-safe
-result. Certificate replacement and reconfiguration are not supported.
-
-Inspecting an unchanged older owned systemd unit is allowed based on its
-immutable original receipt. For an already updated installation, the current
-active update's own unit receipt is required, not the superseded original
-unit hash. Update and Remove still enforce their existing exact supported
-unit template and do not adopt or modify historical units.
-
-### Prepared after-install Add Site draft (development source only)
-
-Newer source managers also support a **preparation-only** workflow alongside
-passive inspection. This is not a released Add Site activation path. A distinct
-`operation_id` identifies a private Add Site journal without changing the
-original frozen installation receipt or a completed Update journal. Use a
-same-operator private `0600` JSON source with the five fields shown above plus
-`operation_id` (a new unique native operation ID, different from the original
-installation and all existing updates).
+With an independently reviewed and permitted candidate, the explicit
+effect-bearing interface is:
 
 ```bash
 sudo rixa manage add-site draft --source /root/private/add-site-draft.json
 sudo rixa manage add-site review --operation <new-add-site-operation>
+sudo rixa manage add-site apply --operation <new-add-site-operation> --review-token <token-from-latest-review>
 sudo rixa manage add-site status --operation <new-add-site-operation>
 ```
 
-`draft` stores private inputs with strict permissions. `review` rechecks the
-currently owned, running one-site installation, any completed managed-update
-lineage, the exact served certificate, existing owned unit, current config and
-environment, and the third isolated PostgreSQL database. It retains a separate
-private review receipt with the expected predecessor and host digests. Any
-re-review revokes the old review token before probing the host; errors leave
-no usable prior token. `status` rechecks the current live service, TLS hostname,
-physical database role isolation and all recorded file/effect identities. If
-any prerequisite or digest changes, it reports `blocked` without changing the
-private reviewed receipt; the operator must repeat `review` after reconciling
-the underlying host. Consequently `ready` represents current positively observed
-read-only evidence, **not** an authorization to install a site. Neither `review`
-nor `status` reveals tokens, administrator passwords or database URLs.
+`review` durably revokes prior confirmation and revalidates the whole live
+source before returning a **one-use** `review_token`; `status` never
+discloses one. A successful read-only Review is still `ready`, not
+`installed`. `apply` rechecks exact reviewed evidence, freezes a trusted
+manager and the original operator configuration, claims exclusive topology
+ownership, and queues a fixed systemd executor that survives SSH detachment.
 
-The current Review and ready Status also prove that a prospective two-site
-configuration can be composed from the installed configuration without
-reverting language, resource limits, publication policy, timeouts, existing
-origins or administrator identities to installer defaults. The site-b database
-environment and private Media/publication roots remain separate. The same
-path-component-aware catalog isolation rule as the running product rejects a
-retained `catalog_root` equal to, enclosing, or inside either proposed site-b
-storage root; unrelated similarly named siblings remain allowed. This pure
-check does not require creating prospective site-b directories. Both projected
-config and private environment stay memory-only during this check; it performs
-no activation or mutation.
+The independent `add-site` journal records `attempted` and `verified`
+stages: `prepare`, `migrate`, `bootstrap-site-b`, `stop`, `activate`,
+`check`, `start`, `postflight` and `commit`. Site-B schema migration and
+bootstrap execute as the unprivileged `rixa` account and use a separate
+migration/bootstrap identity. The existing Control and site-A database
+targets, administrator identities and retained presentation/resources are
+not regenerated or replaced. Site-B configuration and private environment
+are composed and verified against the exact accepted predecessor before
+controlled service activation. HTTPS verification binds original pinned
+TLS/SNI and the independently authenticated administrator session.
 
-There is still **no** `rixa manage add-site apply` or `resume`. Neither a
-passing inspection nor a prepared receipt can bootstrap site-b, run migrations,
-change configuration, restart the service or change Update/Remove ownership.
-The supported installed-host effectful lifecycle requires separately reviewed
-implementation, validation, and specific operator authorization.
+The original installation and completed update journals remain immutable;
+the separate committed Add Site journal owns its new topology receipt.
+A pending topology change fences ordinary Update and Remove. Successful
+commit is observable by native Status; ordinary Remove is intended to retain
+both sites' data and private configuration.
 
-Do not create or change a site, reuse an old demo, change PostgreSQL role
-grants, or mutate an active installation merely because inspection succeeds.
-A separately reviewed persisted Add Site lifecycle and actual host acceptance
-are required before an executable Add Site path can be advertised.
+If the executor stops, inspect the exact frozen systemd unit
+`rixa-add-site-<new-add-site-operation>-<generation>.service`, its journal,
+and private retained diagnostics. Do not disclose the protected journal,
+DSNs or passwords. Status reports whether a bounded Resume is admissible:
+
+```bash
+sudo rixa manage add-site resume --operation <new-add-site-operation>
+```
+
+Resume requires the original executor to be positively quiescent, frozen
+identity and predecessor unchanged, and stage-specific positive evidence.
+Idempotent migration/bootstrap ledger steps may be reconciled; unknown
+service-start, database identity, HTTPS login/logout and activation outcomes
+are **not** treated as success or blindly replayed.
+
+### Evidence and operational gates
+
+This is a **development candidate**, not a production runbook.
+Before advertising effectful Add Site as supported, obtain exact-candidate
+physical activation including HTTPS/SNI, three-way database isolation,
+interrupted Apply/Resume, reboot persistence, failure-path retention and
+topology-aware Update/ordinary Remove verification. An independent
+HIGH_ASSURANCE review and fresh Owner authorization are mandatory before
+Merge or any release. General destructive Purge is separately gated.
 
 ## Temporary browser access
 

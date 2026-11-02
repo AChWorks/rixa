@@ -237,6 +237,12 @@ func (m *Manager) executeAddSiteStage(ctx context.Context, j *addSiteJournal, pa
 			m.loadedUpdateService(ctx, view, true) != nil {
 			return "", ErrState
 		}
+		// HTTPS validation through the pinned trust pool alone would allow
+		// a different CA-signed leaf. Re-observe the exact original cert/key
+		// and the actual served site-B SNI identity before creating sessions.
+		if err = m.verifyCurrentSiteBTLS(ctx, parent, j.Draft.SiteBOrigin); err != nil {
+			return "", err
+		}
 		if err = m.updateHTTPPostflight(ctx, view); err != nil {
 			return "", err
 		}
@@ -261,6 +267,7 @@ func (m *Manager) executeAddSiteStage(ctx context.Context, j *addSiteJournal, pa
 		view := addSiteView(current, j)
 		if m.updateUnitFileState(ctx) != "enabled" || m.checkOwnedService(view) != nil ||
 			m.loadedUpdateService(ctx, view, true) != nil ||
+			m.verifyCurrentSiteBTLS(ctx, parent, j.Draft.SiteBOrigin) != nil ||
 			m.updateHTTPPostflight(ctx, view) != nil {
 			return "", ErrState
 		}

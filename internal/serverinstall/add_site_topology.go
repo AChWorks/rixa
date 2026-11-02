@@ -118,7 +118,9 @@ func (m *Manager) installedAddSiteStatus(ctx context.Context, j *addSiteJournal)
 	targets, err := databaseIdentities(ctx, view.Draft)
 	if err != nil || !reflect.DeepEqual(targets, j.DatabaseTargets) ||
 		m.checkOwnedService(view) != nil || m.loadedUpdateService(ctx, view, true) != nil ||
-		m.updateUnitFileState(ctx) != "enabled" || m.updateHTTPPostflight(ctx, view) != nil {
+		m.updateUnitFileState(ctx) != "enabled" ||
+		m.verifyCurrentSiteBTLS(ctx, parent, j.Draft.SiteBOrigin) != nil ||
+		m.updateHTTPPostflight(ctx, view) != nil {
 		r.Code, r.Message = "installed-unhealthy", "Site-B remains committed, but one or more runtime/identity proofs did not pass."
 		return r, ErrPrerequisite
 	}
