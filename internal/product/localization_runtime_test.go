@@ -365,3 +365,46 @@ func TestInterfaceLanguageTransportPreservesOriginalRequest(t *testing.T) {
 		t.Fatal("original request was mutated")
 	}
 }
+
+// The source-only Add Site composer and the actual running product must share
+// the exact same catalog-storage overlap rule. Prospective site paths do not
+// need to exist during this pure path preflight.
+func TestCatalogStorageIsolationPlanMatchesRuntimeAdmission(t *testing.T) {
+	base := t.TempDir()
+	catalog := filepath.Join(base, "catalog")
+	if err := os.Mkdir(catalog, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name, media, public string
+		blocked             bool
+	}{
+		{"exact-media", catalog, filepath.Join(base, "site-b", "public"), true},
+		{"exact-public", filepath.Join(base, "site-b", "media"), catalog, true},
+		{"catalog-parent-of-media", filepath.Join(catalog, "site-b", "media"), filepath.Join(base, "site-b", "public"), true},
+		{"catalog-parent-of-public", filepath.Join(base, "site-b", "media"), filepath.Join(catalog, "site-b", "public"), true},
+		{"catalog-child-of-media", base, filepath.Join(base, "site-b", "public"), true},
+		{"catalog-child-of-public", filepath.Join(base, "site-b", "media"), base, true},
+		{"similarly-named-sibling", filepath.Join(base, "catalog-media", "media"), filepath.Join(base, "catalog-public", "public"), false},
+		{"unrelated-paths", filepath.Join(base, "site-b", "media"), filepath.Join(base, "site-b", "public"), false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := Config{CatalogRoot: catalog, Sites: []SiteConfig{{ID: "site-b", MediaRoot: tc.media, PublicRoot: tc.public}}}
+			planErr := cfg.ValidateCatalogStorageIsolation()
+			_, runtimeErr := cfg.catalogSources()
+			if tc.blocked {
+				// BuildRuntime must observe the same error before trying to
+				// create any database-backed application component.
+				_, buildErr := BuildRuntime(RuntimeConfig{Config: cfg}, nil)
+				if !errors.Is(planErr, ErrConfiguration) || !errors.Is(runtimeErr, ErrConfiguration) ||
+					!errors.Is(buildErr, ErrConfiguration) || !strings.Contains(planErr.Error(), "overlaps site storage") ||
+					planErr.Error() != runtimeErr.Error() || planErr.Error() != buildErr.Error() {
+					t.Fatalf("plan/runtime/BuildRuntime catalog isolation diverged: plan=%v runtime=%v build=%v", planErr, runtimeErr, buildErr)
+				}
+			} else if planErr != nil || runtimeErr != nil {
+				t.Fatalf("unrelated storage was rejected: plan=%v runtime=%v", planErr, runtimeErr)
+			}
+		})
+	}
+}

@@ -221,9 +221,13 @@ The current Review and ready Status also prove that a prospective two-site
 configuration can be composed from the installed configuration without
 reverting language, resource limits, publication policy, timeouts, existing
 origins or administrator identities to installer defaults. The site-b database
-environment and private Media/publication roots remain separate. Both
-projected config and private environment stay memory-only during this check;
-it performs no activation or mutation.
+environment and private Media/publication roots remain separate. The same
+path-component-aware catalog isolation rule as the running product rejects a
+retained `catalog_root` equal to, enclosing, or inside either proposed site-b
+storage root; unrelated similarly named siblings remain allowed. This pure
+check does not require creating prospective site-b directories. Both projected
+config and private environment stay memory-only during this check; it performs
+no activation or mutation.
 
 There is still **no** `rixa manage add-site apply` or `resume`. Neither a
 passing inspection nor a prepared receipt can bootstrap site-b, run migrations,

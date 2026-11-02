@@ -27,17 +27,10 @@ func (c Config) catalogSources() ([]fs.FS, error) {
 	if c.CatalogRoot == "" {
 		return sources, nil
 	}
+	if err := c.ValidateCatalogStorageIsolation(); err != nil {
+		return nil, err
+	}
 	root := c.CatalogRoot
-	if !filepath.IsAbs(root) || filepath.Clean(root) != root || root == "/" {
-		return nil, fmt.Errorf("%w: catalog_root must be a private absolute directory", ErrConfiguration)
-	}
-	for _, site := range c.Sites {
-		for _, dataRoot := range []string{site.MediaRoot, site.PublicRoot} {
-			if dataRoot != "" && overlappingLocaleRoots(root, dataRoot) {
-				return nil, fmt.Errorf("%w: catalog_root overlaps site storage", ErrConfiguration)
-			}
-		}
-	}
 	info, err := os.Lstat(root)
 	if err != nil {
 		return nil, fmt.Errorf("%w: catalog_root: %w", ErrConfiguration, err)
@@ -47,6 +40,29 @@ func (c Config) catalogSources() ([]fs.FS, error) {
 		return nil, fmt.Errorf("%w: catalog_root must be a private directory without symlink aliases", ErrConfiguration)
 	}
 	return append(sources, os.DirFS(root)), nil
+}
+
+// ValidateCatalogStorageIsolation shares the runtime's exact catalog-to-site
+// path constraint with source-only configuration planning. It is deliberately
+// a pure path check: proposed site storage need not exist before activation.
+// catalogSources separately verifies the *existing* catalog directory's
+// private filesystem ownership, mode and symlink safety at runtime.
+func (c Config) ValidateCatalogStorageIsolation() error {
+	if c.CatalogRoot == "" {
+		return nil
+	}
+	root := c.CatalogRoot
+	if !filepath.IsAbs(root) || filepath.Clean(root) != root || root == "/" {
+		return fmt.Errorf("%w: catalog_root must be a private absolute directory", ErrConfiguration)
+	}
+	for _, site := range c.Sites {
+		for _, dataRoot := range []string{site.MediaRoot, site.PublicRoot} {
+			if dataRoot != "" && overlappingLocaleRoots(root, dataRoot) {
+				return fmt.Errorf("%w: catalog_root overlaps site storage", ErrConfiguration)
+			}
+		}
+	}
+	return nil
 }
 
 func overlappingLocaleRoots(a, b string) bool {

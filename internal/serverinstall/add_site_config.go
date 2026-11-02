@@ -74,8 +74,12 @@ func composeAddSiteConfig(originalConfig, originalEnv []byte, parent *journal, p
 		return addSiteConfigPlan{}, ErrState
 	}
 	parsed, err := product.ParseConfig(result.Configuration)
-	if err != nil || len(parsed.Sites) != 2 || !reflect.DeepEqual(parsed.Sites[0], original.Sites[0]) ||
-		!reflect.DeepEqual(parsed.Sites[1], candidate) {
+	// ParseConfig checks structural constraints; the actual product runtime
+	// also rejects catalog roots overlapping any site's Media/Public roots.
+	// Use the same pure check as BuildRuntime's catalogSources admission.
+	// Future site-b storage paths must not need to exist at Review time.
+	if err != nil || parsed.ValidateCatalogStorageIsolation() != nil || len(parsed.Sites) != 2 ||
+		!reflect.DeepEqual(parsed.Sites[0], original.Sites[0]) || !reflect.DeepEqual(parsed.Sites[1], candidate) {
 		return addSiteConfigPlan{}, ErrState
 	}
 	// No other existing semantic field is permitted to change.
