@@ -140,12 +140,10 @@ func (m *Manager) ReviewAddSite(ctx context.Context, id string) (Result, error) 
 	activeHash := ""
 	current := parent
 	if active != "" {
-		rawActive, readErr := readPrivate(m.updatePath(active), m.ownerUID, maxStateBytes)
-		if readErr != nil {
-			return addSiteResult(j), ErrState
-		}
-		u, loadErr := m.loadUpdate(active)
-		if loadErr != nil || u.State != "installed" || u.Attempts["executor"] != "verified" {
+		// Bind the same trusted private bytes that were decoded. A second
+		// independent load could observe a different update receipt.
+		u, rawActive, readErr := m.readCompletedAddSiteUpdate(active)
+		if readErr != nil || u.State != "installed" || u.Attempts["executor"] != "verified" {
 			return addSiteResult(j), ErrState
 		}
 		activeHash = digest(rawActive)
