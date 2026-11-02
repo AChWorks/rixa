@@ -8,6 +8,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -204,8 +205,11 @@ func verifyLogin(ctx context.Context, client *http.Client, origin, login, passwo
 	} // an unknown login is not replayed
 	body, e := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
 	_ = resp.Body.Close()
-	if e != nil || resp.StatusCode != http.StatusOK {
-		return ErrPrerequisite
+	if e != nil {
+		return fmt.Errorf("%w: administrator-login-response-read", ErrPrerequisite)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("%w: administrator-login-http-%d", ErrPrerequisite, resp.StatusCode)
 	}
 	var session struct {
 		Principal string `json:"principal"`
@@ -284,8 +288,11 @@ func verifyLogin(ctx context.Context, client *http.Client, origin, login, passwo
 	}
 	_, e = io.Copy(io.Discard, io.LimitReader(r.Body, 2<<20))
 	_ = r.Body.Close()
-	if e != nil || r.StatusCode != http.StatusOK {
-		return ErrPrerequisite
+	if e != nil {
+		return fmt.Errorf("%w: administrator-page-response-read", ErrPrerequisite)
+	}
+	if r.StatusCode != http.StatusOK {
+		return fmt.Errorf("%w: administrator-page-http-%d", ErrPrerequisite, r.StatusCode)
 	}
 	return nil
 }

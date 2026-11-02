@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -120,6 +121,15 @@ func (m *Manager) RunAddSiteOperation(ctx context.Context, id string) (Result, e
 		if err = ctx.Err(); err != nil {
 			return m.addSiteFailure(j, "interrupted", "The Add Site executor stopped; retained effects need inspection.", err)
 		}
+		// Read-only readiness is not a session attempt. If the service is
+		// still starting, retain the verified start receipt and permit a
+		// fenced Resume instead of permanently declaring login unknown.
+		if stage == "postflight" && j.Attempts[stage] == "" {
+			if err = m.addSitePostflightReadiness(ctx, j, parent, current); err != nil {
+				return m.addSiteFailure(j, "postflight-readiness-required",
+					"Site-B HTTPS/TLS readiness is not established; inspect diagnostics and use a fenced Resume after recovery.", err)
+			}
+		}
 		j.Stage = stage
 		attempted := j.Attempts[stage] == "attempted"
 		if !attempted {
@@ -155,6 +165,28 @@ func (m *Manager) RunAddSiteOperation(ctx context.Context, id string) (Result, e
 		return addSiteResult(j), err
 	}
 	return addSiteResult(j), nil
+}
+
+// addSitePostflightReadiness performs only observational checks. A valid
+// systemd start receipt does not mean the HTTPS listener is accepting requests.
+// Run the bounded HTTP startup wait before the strict pinned TLS/SNI proof;
+// both must complete before the first session-producing postflight attempt.
+func (m *Manager) addSitePostflightReadiness(ctx context.Context, j *addSiteJournal, parent, current *journal) error {
+	if j == nil || parent == nil || current == nil {
+		return ErrState
+	}
+	view := addSiteView(current, j)
+	if m.updateUnitFileState(ctx) != "enabled" || m.checkOwnedService(view) != nil ||
+		m.loadedUpdateService(ctx, view, true) != nil {
+		return fmt.Errorf("%w: site-b-owned-service-not-ready", ErrPrerequisite)
+	}
+	if err := m.updateHTTPPostflight(ctx, view); err != nil {
+		return fmt.Errorf("%w: site-b-https-readiness: %v", ErrPrerequisite, err)
+	}
+	if err := m.verifyCurrentSiteBTLS(ctx, parent, j.Draft.SiteBOrigin); err != nil {
+		return fmt.Errorf("%w: site-b-pinned-tls-sni-not-ready", ErrPrerequisite)
+	}
+	return nil
 }
 
 func (m *Manager) executeAddSiteStage(ctx context.Context, j *addSiteJournal, parent, current *journal, stage string, attempted bool) (string, error) {
@@ -270,18 +302,10 @@ func (m *Manager) executeAddSiteStage(ctx context.Context, j *addSiteJournal, pa
 		if attempted {
 			return "", ErrState
 		} // login/logout acknowledgement is not replayed
-		view := addSiteView(current, j)
-		if m.updateUnitFileState(ctx) != "enabled" || m.checkOwnedService(view) != nil ||
-			m.loadedUpdateService(ctx, view, true) != nil {
-			return "", ErrState
-		}
-		// HTTPS validation through the pinned trust pool alone would allow
-		// a different CA-signed leaf. Re-observe the exact original cert/key
-		// and the actual served site-B SNI identity before creating sessions.
-		if err = m.verifyCurrentSiteBTLS(ctx, parent, j.Draft.SiteBOrigin); err != nil {
-			return "", err
-		}
-		if err = m.updateHTTPPostflight(ctx, view); err != nil {
+		// Verify live readiness again immediately before issuing a session.
+		// The preceding no-effect admission ensures a transient start-up
+		// refusal never becomes an unreplayable login attempt.
+		if err = m.addSitePostflightReadiness(ctx, j, parent, current); err != nil {
 			return "", err
 		}
 		if !principalSyntax.MatchString(j.SiteBPrincipal) || j.Draft.SiteBPassword == "" {
