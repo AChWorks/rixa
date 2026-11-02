@@ -2,9 +2,12 @@
 package serverinstall
 
 import (
+	"bytes"
 	"context"
+	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
+	"net"
 	"net/url"
 	"path/filepath"
 	"strings"
@@ -77,6 +80,86 @@ func tlsCoversAddSite(certPEM []byte, origin string, now time.Time) bool {
 	return len(leaf.ExtKeyUsage) == 0
 }
 
+// readBoundTLSFiles accepts only the exact private regular certificate and key
+// owned by the expected account. This is an observation, not permission to
+// replace or repair TLS material. The leaf and key must form a valid pair.
+func readBoundTLSFiles(certPath, keyPath string, owner int, certHash, keyHash string) ([]byte, []byte, error) {
+	if filepath.Dir(certPath) != filepath.Dir(keyPath) || privateDir(filepath.Dir(certPath), owner, false) != nil {
+		return nil, nil, ErrState
+	}
+	cert, certErr := readPrivate(certPath, owner, 1<<20)
+	key, keyErr := readPrivate(keyPath, owner, 1<<20)
+	if certErr != nil || keyErr != nil || digest(cert) != certHash || digest(key) != keyHash {
+		return nil, nil, ErrState
+	}
+	if _, err := tls.X509KeyPair(cert, key); err != nil {
+		return nil, nil, ErrState
+	}
+	return cert, key, nil
+}
+
+// proveServedSiteBCertificate performs a genuine, bounded TLS handshake on the
+// already owned local listener, with SNI for the proposed site-b. It requires
+// ordinary verified TLS server-auth AND the exact originally pinned leaf, not
+// merely a different leaf signed by the same trusted CA. No HTTP request or
+// application operation is sent to the unconfigured site.
+func proveServedSiteBCertificate(ctx context.Context, endpoint, origin string, pinnedCert []byte) error {
+	u, err := url.Parse(origin)
+	if err != nil || u == nil || u.Scheme != "https" || u.Hostname() == "" {
+		return ErrPrerequisite
+	}
+	block, _ := pem.Decode(pinnedCert)
+	pool := x509.NewCertPool()
+	if block == nil || block.Type != "CERTIFICATE" || !pool.AppendCertsFromPEM(pinnedCert) {
+		return ErrPrerequisite
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, 7*time.Second)
+	defer cancel()
+	dialer := &tls.Dialer{NetDialer: &net.Dialer{Timeout: 3 * time.Second}, Config: &tls.Config{
+		RootCAs: pool, MinVersion: tls.VersionTLS12, ServerName: u.Hostname(),
+	}}
+	conn, err := dialer.DialContext(probeCtx, "tcp", endpoint)
+	if err != nil {
+		return ErrPrerequisite
+	}
+	defer conn.Close()
+	tlsConn, ok := conn.(*tls.Conn)
+	if !ok {
+		return ErrPrerequisite
+	}
+	state := tlsConn.ConnectionState()
+	if len(state.PeerCertificates) == 0 || !bytes.Equal(state.PeerCertificates[0].Raw, block.Bytes) {
+		return ErrPrerequisite
+	}
+	return nil
+}
+
+// verifyCurrentSiteBTLS binds original immutable snapshots to both current
+// private runtime files and the actual currently served TLS leaf. No changing
+// TLS files, starting a service or provisioning site-b is allowed.
+func (m *Manager) verifyCurrentSiteBTLS(ctx context.Context, j *journal, origin string) error {
+	originalCert, originalKey, err := readBoundTLSFiles(
+		m.tlsSnapshotPath(j, false), m.tlsSnapshotPath(j, true),
+		m.ownerUID, j.CertSHA256, j.KeySHA256,
+	)
+	if err != nil {
+		return ErrPrerequisite
+	}
+	currentCert, currentKey, err := readBoundTLSFiles(
+		runtimeRoot+"/tls/cert.pem", runtimeRoot+"/tls/key.pem",
+		int(j.UID), j.CertSHA256, j.KeySHA256,
+	)
+	if err != nil || !bytes.Equal(currentCert, originalCert) || !bytes.Equal(currentKey, originalKey) ||
+		!tlsCoversAddSite(currentCert, origin, time.Now()) {
+		return ErrPrerequisite
+	}
+	endpoint, err := localNativeEndpoint(j.Draft.Listen)
+	if err != nil {
+		return ErrPrerequisite
+	}
+	return proveServedSiteBCertificate(ctx, endpoint, origin, currentCert)
+}
+
 func addSiteInspectionResult(operation string) Result {
 	return Result{OperationKind: "add-site-inspection", InstallationOperation: operation, OperationID: operation,
 		State: "blocked", Code: "not-reviewed", Message: "Inspection only; no Add Site effect, review token, or Apply capability is available.",
@@ -147,10 +230,9 @@ func (m *Manager) InspectAddSite(ctx context.Context, proposed AddSiteInspection
 		result.Code = "installation-unhealthy"
 		return result, ErrPrerequisite
 	}
-	cert, err := readPrivate(m.tlsSnapshotPath(parent, false), m.ownerUID, 1<<20)
-	if err != nil || digest(cert) != parent.CertSHA256 || !tlsCoversAddSite(cert, proposed.SiteBOrigin, time.Now()) {
-		result.Code = "tls-hostname-unavailable"
-		result.Problems = []Problem{{Field: "site_b_origin", Code: "tls-hostname", Message: "The currently owned TLS certificate must already cover site-b; replacing certificates is not supported by this inspection."}}
+	if m.verifyCurrentSiteBTLS(ctx, parent, proposed.SiteBOrigin) != nil {
+		result.Code = "tls-runtime-unverified"
+		result.Problems = []Problem{{Field: "site_b_origin", Code: "tls-binding", Message: "The installed TLS certificate/key and currently served leaf must match the original owned evidence and cover site-b. Inspection cannot replace TLS material."}}
 		return result, ErrPrerequisite
 	}
 	candidate := proposed.withInstallation(parent.Draft)

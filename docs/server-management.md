@@ -159,10 +159,18 @@ the original Control/site-a and new site-b database owners as one
 three-way role-isolation group, including PostgreSQL membership and
 effective cross-database CONNECT privileges. For this bounded inspection
 the existing owned TLS certificate must **already** cover the new site-b
-hostname. Certificate replacement and reconfiguration are not supported. Inspecting an
-unchanged older owned systemd unit is allowed based on its immutable original
-receipt; Update and Remove still enforce their existing exact supported unit
-template and do not adopt or modify that unit.
+hostname. The inspection requires both currently installed private TLS files
+(certificate **and** key) to match the immutable original snapshots and their
+recorded digests; a genuine TLS-only handshake against the already running
+local listener, using site-b SNI, must present the **exact** pinned leaf with
+valid server trust and site-b hostname coverage. Trusting a different leaf
+through the original certificate's CA chain is not sufficient. Mismatches,
+unavailable files or uncertain handshakes fail closed with a credential-safe
+result. Certificate replacement and reconfiguration are not supported.
+
+Inspecting an unchanged older owned systemd unit is allowed based on its
+immutable original receipt; Update and Remove still enforce their existing
+exact supported unit template and do not adopt or modify that unit.
 
 Do not create or change a site, reuse an old demo, change PostgreSQL role
 grants, or mutate an active installation merely because inspection succeeds.

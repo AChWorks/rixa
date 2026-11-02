@@ -120,6 +120,27 @@ func (m *Manager) validateInstalledApplication(ctx context.Context, j *journal) 
 	}
 	return nil
 }
+
+// localNativeEndpoint is shared by the established HTTPS health client and
+// the site-b TLS-only probe so both observe the same owned service listener.
+func localNativeEndpoint(listen string) (string, error) {
+	host, port, err := net.SplitHostPort(listen)
+	if err != nil {
+		return "", ErrInput
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return "", ErrInput
+	}
+	if ip.IsUnspecified() {
+		host = "127.0.0.1"
+		if ip.To4() == nil {
+			host = "::1"
+		}
+	}
+	return net.JoinHostPort(host, port), nil
+}
+
 func (m *Manager) localClient(j *journal) (*http.Client, error) {
 	cert, e := readPrivate(m.tlsSnapshotPath(j, false), m.ownerUID, 1<<20)
 	if e != nil || digest(cert) != j.CertSHA256 {
@@ -129,21 +150,10 @@ func (m *Manager) localClient(j *journal) (*http.Client, error) {
 	if !pool.AppendCertsFromPEM(cert) {
 		return nil, ErrInput
 	}
-	host, port, e := net.SplitHostPort(j.Draft.Listen)
+	endpoint, e := localNativeEndpoint(j.Draft.Listen)
 	if e != nil {
-		return nil, ErrInput
+		return nil, e
 	}
-	ip := net.ParseIP(host)
-	if ip == nil {
-		return nil, ErrInput
-	}
-	if ip.IsUnspecified() {
-		host = "127.0.0.1"
-		if ip.To4() == nil {
-			host = "::1"
-		}
-	}
-	endpoint := net.JoinHostPort(host, port)
 	transport := &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}, DisableKeepAlives: true,
 		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
 			return (&net.Dialer{Timeout: 3 * time.Second}).DialContext(ctx, "tcp", endpoint)
