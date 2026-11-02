@@ -151,11 +151,24 @@ review token permitting mutation. On success, `state=inspected` and
 `code=prerequisites-verified` mean **inspection passed, not installed**.
 An incomplete or unsafe draft is rejected before database access.
 
-The assessment rechecks the original installation owner, original frozen
-manager and service-unit receipt, active one-site configuration, actual running
-executable and strict HTTPS health, absence of active/pending
-managed updates, and the original physical database identities. It tests
-the original Control/site-a and new site-b database owners as one
+The assessment rechecks the original installation owner and frozen manager,
+current owned service-unit receipt, active one-site configuration, actual
+running executable and strict HTTPS health, absence of **pending** managed
+updates, and the original physical database identities. An **active-update**
+receipt is supported *only* when it identifies a fully completed, installed
+compatible update with intact original-parent and every chained prior-update
+receipt, frozen managers/helpers and current active configuration snapshot.
+The observed service must run the exact active update's authenticated binary;
+a merely recorded completion, unknown prior update, interrupted stage,
+modified receipt or stale configuration cannot pass. A supported completed
+update is not restarted, resumed or reapplied. Its actual active release
+is returned in the inspection result. The current update can retain supported
+presentation settings: its private configuration snapshot, not old generated
+bytes, is the read-only comparison baseline. Other topology changes remain
+unsupported. Historical chains longer than the bounded verification limit
+require operator reconciliation rather than an unsafe partial admission.
+
+The inspection tests the original Control/site-a and new site-b database owners as one
 three-way role-isolation group, including PostgreSQL membership and
 effective cross-database CONNECT privileges. For this bounded inspection
 the existing owned TLS certificate must **already** cover the new site-b
@@ -169,8 +182,10 @@ unavailable files or uncertain handshakes fail closed with a credential-safe
 result. Certificate replacement and reconfiguration are not supported.
 
 Inspecting an unchanged older owned systemd unit is allowed based on its
-immutable original receipt; Update and Remove still enforce their existing
-exact supported unit template and do not adopt or modify that unit.
+immutable original receipt. For an already updated installation, the current
+active update's own unit receipt is required, not the superseded original
+unit hash. Update and Remove still enforce their existing exact supported
+unit template and do not adopt or modify historical units.
 
 Do not create or change a site, reuse an old demo, change PostgreSQL role
 grants, or mutate an active installation merely because inspection succeeds.
