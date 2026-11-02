@@ -122,61 +122,18 @@ func (m *Manager) ReviewAddSite(ctx context.Context, id string) (Result, error) 
 		result.Problems = inspected.Problems
 		return result, inspectErr
 	}
-	// Rebind the exact predecessor and observed host bytes after positive
-	// inspection. The lock excludes every other Rixa manager effect; future
-	// Apply additionally must prove that these bindings are still current.
-	parent, err := m.load(j.Draft.InstallationOperation)
+	// Capture a single complete, host-bound evidence snapshot after the
+	// positive no-effects admission. All future Apply implementations must
+	// independently recheck these bindings before their first host effect.
+	observed, err := m.observedAddSiteEvidence(ctx, j.Draft)
 	if err != nil {
-		return addSiteResult(j), ErrState
-	}
-	rawParent, err := readPrivate(m.statePath(parent.Draft.OperationID), m.ownerUID, maxStateBytes)
-	if err != nil {
-		return addSiteResult(j), ErrState
-	}
-	active, err := m.updateMarker("active-update")
-	if err != nil {
-		return addSiteResult(j), ErrState
-	}
-	activeHash := ""
-	current := parent
-	if active != "" {
-		// Bind the same trusted private bytes that were decoded. A second
-		// independent load could observe a different update receipt.
-		u, rawActive, readErr := m.readCompletedAddSiteUpdate(active)
-		if readErr != nil || u.State != "installed" || u.Attempts["executor"] != "verified" {
-			return addSiteResult(j), ErrState
-		}
-		activeHash = digest(rawActive)
-		current = updateView(parent, u)
-	}
-	config, env, err := m.updateRuntimeEvidence(ctx, parent)
-	if err != nil {
-		return addSiteResult(j), ErrState
-	}
-	// systemd units are owned 0644 files, not private 0600 journals. Reuse
-	// the exact recorded-service unit verifier rather than readPrivate.
-	unit, err := m.recordedServiceUnit(current)
-	if err != nil {
-		return addSiteResult(j), ErrState
-	}
-	targets, err := databaseIdentities(ctx, j.Draft.AddSiteInspectionDraft.withInstallation(parent.Draft))
-	if err != nil || len(targets) != 3 || targets["control"] != parent.DatabaseTargets["control"] ||
-		targets["site-a"] != parent.DatabaseTargets["site-a"] || targets["site-b"] == "" {
-		return addSiteResult(j), ErrState
-	}
-	image, err := currentManagerImage()
-	if err != nil {
-		return addSiteResult(j), ErrManagerChanged
+		return addSiteResult(j), err
 	}
 	token := make([]byte, 32)
 	if _, err = rand.Read(token); err != nil {
 		return Result{}, ErrState
 	}
-	j.ParentSHA256, j.ActiveUpdate, j.ActiveUpdateSHA256 = digest(rawParent), active, activeHash
-	j.ConfigSHA256, j.EnvironmentSHA256 = digest(config), digest(env)
-	j.UnitSHA256 = digest(unit)
-	j.DatabaseTargets = targets
-	j.ReviewedManagerSHA256 = digest(image)
+	observed.bind(j)
 	j.ReviewToken = hex.EncodeToString(token)
 	j.State, j.Stage, j.Code = "ready", "review", "ready"
 	j.Message = "Durable Add Site prerequisites reviewed; no topology change or execution occurred. Apply/Resume are not yet available in this source slice."
@@ -229,6 +186,20 @@ func (m *Manager) AddSiteStatus(ctx context.Context, id string) (Result, error) 
 		r.Actions = []string{"status"}
 		return r, ErrState
 	}
-	r.Message = strings.TrimSpace(r.Message) + " Apply is unavailable in this source slice."
+	// A stored predecessor marker is not sufficient evidence of continued
+	// readiness: TLS, systemd, current config/environment, the actual binary
+	// and physical database bindings can drift without altering any journal.
+	if _, inspectErr := m.inspectAddSiteLocked(ctx, j.Draft.AddSiteInspectionDraft); inspectErr != nil {
+		r.State, r.Code, r.Message = "blocked", "prerequisite-changed", "The current installed host, TLS or database isolation could not be verified; repeat Review."
+		r.Actions = []string{"review", "status"}
+		return r, ErrPrerequisite
+	}
+	observed, observeErr := m.observedAddSiteEvidence(ctx, j.Draft)
+	if observeErr != nil || !observed.matches(j) {
+		r.State, r.Code, r.Message = "blocked", "review-evidence-changed", "The current host or reviewed evidence differs from the saved Add Site receipt; repeat Review."
+		r.Actions = []string{"review", "status"}
+		return r, ErrState
+	}
+	r.Message = strings.TrimSpace(r.Message) + " Read-only host evidence remains current; Apply is unavailable in this source slice."
 	return r, nil
 }

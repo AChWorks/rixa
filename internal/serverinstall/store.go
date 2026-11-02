@@ -224,34 +224,39 @@ func (m *Manager) lock(ctx context.Context, create bool) (func(), error) {
 }
 func (m *Manager) statePath(id string) string { return filepath.Join(m.stateRoot, id+".json") }
 func (m *Manager) load(id string) (*journal, error) {
+	j, _, err := m.readInstallationJournal(id)
+	return j, err
+}
+
+// readInstallationJournal binds the validated original installation to the
+// same private bytes used for lineage hashing. Never decode a different read
+// from the one authenticated by a saved predecessor digest.
+func (m *Manager) readInstallationJournal(id string) (*journal, []byte, error) {
 	if !operationSyntax.MatchString(id) {
-		return nil, ErrInput
+		return nil, nil, ErrInput
 	}
-	b, e := readPrivate(m.statePath(id), m.ownerUID, maxStateBytes)
-	if e != nil {
-		return nil, e
+	raw, err := readPrivate(m.statePath(id), m.ownerUID, maxStateBytes)
+	if err != nil {
+		return nil, nil, err
 	}
 	var j journal
-	if e = decode(b, &j); e != nil || j.Schema != "rixa.native-install.v1" || j.Draft.OperationID != id || j.Attempts == nil {
-		return nil, ErrState
+	if err = decode(raw, &j); err != nil || j.Schema != "rixa.native-install.v1" || j.Draft.OperationID != id || j.Attempts == nil {
+		return nil, nil, ErrState
 	}
 	switch j.State {
 	case "draft", "ready", "applying", "installed", "blocked", "reconciliation-required", "removed":
 	default:
-		return nil, ErrState
+		return nil, nil, ErrState
 	}
-	if !validJournal(&j) {
-		return nil, ErrState
-	}
-	if j.Frozen != "" && j.Frozen != draftDigest(j.Draft) {
-		return nil, ErrState
+	if !validJournal(&j) || (j.Frozen != "" && j.Frozen != draftDigest(j.Draft)) {
+		return nil, nil, ErrState
 	}
 	for _, stage := range j.Attempts {
 		if stage != "attempted" && stage != "verified" {
-			return nil, ErrState
+			return nil, nil, ErrState
 		}
 	}
-	return &j, nil
+	return &j, raw, nil
 }
 func (m *Manager) save(j *journal) error {
 	j.Updated = time.Now().UTC().Format(time.RFC3339Nano)

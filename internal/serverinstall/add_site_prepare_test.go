@@ -184,8 +184,10 @@ func TestAddSiteStatusBindsOriginalAndCompletedUpdateWithoutExposingToken(t *tes
 		t.Fatal(err)
 	}
 	got, err := m.AddSiteStatus(context.Background(), j.Draft.OperationID)
-	if err != nil || got.State != "ready" || got.ReviewToken != "" {
-		t.Fatalf("unchanged parent not observed as reviewed, secret-free: %+v %v", got, err)
+	// Journal equality alone cannot establish a healthy live host. This
+	// synthetic fixture intentionally has no actual TLS/systemd/PG runtime.
+	if !errors.Is(err, ErrPrerequisite) || got.State != "blocked" || got.Code != "prerequisite-changed" || got.ReviewToken != "" {
+		t.Fatalf("missing physical host was incorrectly reported ready: %+v %v", got, err)
 	}
 	u := completeAddSiteUpdate(parent, digest(parentBytes), "compatible-active-update", "v0.7.0", "", "", parent.Draft.Release)
 	if err := m.saveUpdate(u); err != nil {
@@ -205,8 +207,8 @@ func TestAddSiteStatusBindsOriginalAndCompletedUpdateWithoutExposingToken(t *tes
 		t.Fatal(err)
 	}
 	got, err = m.AddSiteStatus(context.Background(), j.Draft.OperationID)
-	if err != nil || got.State != "ready" || got.ReviewToken != "" {
-		t.Fatalf("exact completed update predecessor not observed: %+v %v", got, err)
+	if !errors.Is(err, ErrPrerequisite) || got.State != "blocked" || got.Code != "prerequisite-changed" || got.ReviewToken != "" {
+		t.Fatalf("matching completed update still lacks positive live host evidence: %+v %v", got, err)
 	}
 	u.Message = "different persisted update receipt"
 	if err := m.saveUpdate(u); err != nil {

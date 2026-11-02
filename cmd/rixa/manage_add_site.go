@@ -20,7 +20,8 @@ const manageAddSiteHelp = "Rixa after-install Add Site (development source; no A
 	"site_b_login and site_b_password. A saved Draft additionally requires\n" +
 	"a separate operation_id. Both sources must be same-operator 0600 JSON.\n" +
 	"Review verifies the current systemd, TLS and three independent database\n" +
-	"identities and persists private evidence. No token is emitted until Add Site Apply exists.\n" +
+	"identities and persists private evidence. Status rechecks live prerequisites.\n" +
+	"No token is emitted until Add Site Apply exists.\n" +
 	"No Add Site Apply, Resume, service restart, migration or bootstrap exists.\n"
 
 func manageAddSiteInspectionWithFacade(ctx context.Context, args []string, output io.Writer, backend serverinstall.AddSiteInspectionFacade) error {
