@@ -19,26 +19,52 @@ import (
 	"github.com/AChWorks/achrix/identity"
 )
 
-func (m *Manager) checkOwnedService(j *journal) error {
+// recordedServiceUnit is a read-only original-installation binding. The
+// native manager that *created* the installation owns the frozen unit receipt:
+// later source versions can legitimately generate a different unit template.
+// Do not use this weaker receipt-only check to authorize existing Update,
+// Remove or installation effect paths: they keep checkOwnedService below.
+func (m *Manager) recordedServiceUnit(j *journal) ([]byte, error) {
 	if !trustedRootParent(unitPath) || !trustedRootParent("/etc/rixa/service.env") {
-		return ErrState
+		return nil, ErrState
 	}
 	if e := m.observeAccount(j); e != nil {
-		return e
+		return nil, e
 	}
 	if e := m.checkPayload(j); e != nil {
-		return e
+		return nil, e
 	}
 	info, e := os.Lstat(unitPath)
-	if e != nil || !info.Mode().IsRegular() || info.Mode().Perm() != 0644 || info.Size() != int64(len(m.serviceBytes(j))) || fileUID(info) != 0 {
-		return ErrState
+	if e != nil || !info.Mode().IsRegular() || info.Mode().Perm() != 0644 ||
+		info.Size() < 1 || info.Size() > 16<<10 || fileUID(info) != 0 ||
+		!hashSyntax.MatchString(j.UnitSHA256) {
+		return nil, ErrState
 	}
-	b, e := os.ReadFile(unitPath)
-	if e != nil || digest(b) != j.UnitSHA256 || !bytes.Equal(b, m.serviceBytes(j)) {
-		return ErrState
+	unit, e := os.ReadFile(unitPath)
+	if e != nil || digest(unit) != j.UnitSHA256 {
+		return nil, ErrState
 	}
 	env, e := readPrivate("/etc/rixa/service.env", 0, 16<<10)
 	if e != nil || !bytes.Equal(env, environmentFile(j.Draft)) {
+		return nil, ErrState
+	}
+	return unit, nil
+}
+
+func (m *Manager) checkRecordedService(j *journal) error {
+	_, err := m.recordedServiceUnit(j)
+	return err
+}
+
+// All effect paths continue to require the exact current supported unit
+// template as well as its frozen receipt. No legacy-template fallback exists
+// for actions capable of stopping, replacing or removing the service.
+func (m *Manager) checkOwnedService(j *journal) error {
+	unit, e := m.recordedServiceUnit(j)
+	if e != nil {
+		return e
+	}
+	if !bytes.Equal(unit, m.serviceBytes(j)) {
 		return ErrState
 	}
 	return nil
@@ -57,6 +83,13 @@ func (m *Manager) validateInstalled(ctx context.Context, j *journal) error {
 	if e := m.checkOwnedService(j); e != nil {
 		return e
 	}
+	return m.validateInstalledApplication(ctx, j)
+}
+
+// validateInstalledApplication requires the exact loaded executable, runtime
+// account, retained config and HTTPS origins. The caller must separately
+// establish the correct service-file ownership boundary before entering.
+func (m *Manager) validateInstalledApplication(ctx context.Context, j *journal) error {
 	if e := m.loadedServiceOwned(ctx, j, true); e != nil {
 		return e
 	}
@@ -87,6 +120,27 @@ func (m *Manager) validateInstalled(ctx context.Context, j *journal) error {
 	}
 	return nil
 }
+
+// localNativeEndpoint is shared by the established HTTPS health client and
+// the site-b TLS-only probe so both observe the same owned service listener.
+func localNativeEndpoint(listen string) (string, error) {
+	host, port, err := net.SplitHostPort(listen)
+	if err != nil {
+		return "", ErrInput
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return "", ErrInput
+	}
+	if ip.IsUnspecified() {
+		host = "127.0.0.1"
+		if ip.To4() == nil {
+			host = "::1"
+		}
+	}
+	return net.JoinHostPort(host, port), nil
+}
+
 func (m *Manager) localClient(j *journal) (*http.Client, error) {
 	cert, e := readPrivate(m.tlsSnapshotPath(j, false), m.ownerUID, 1<<20)
 	if e != nil || digest(cert) != j.CertSHA256 {
@@ -96,21 +150,10 @@ func (m *Manager) localClient(j *journal) (*http.Client, error) {
 	if !pool.AppendCertsFromPEM(cert) {
 		return nil, ErrInput
 	}
-	host, port, e := net.SplitHostPort(j.Draft.Listen)
+	endpoint, e := localNativeEndpoint(j.Draft.Listen)
 	if e != nil {
-		return nil, ErrInput
+		return nil, e
 	}
-	ip := net.ParseIP(host)
-	if ip == nil {
-		return nil, ErrInput
-	}
-	if ip.IsUnspecified() {
-		host = "127.0.0.1"
-		if ip.To4() == nil {
-			host = "::1"
-		}
-	}
-	endpoint := net.JoinHostPort(host, port)
 	transport := &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}, DisableKeepAlives: true,
 		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
 			return (&net.Dialer{Timeout: 3 * time.Second}).DialContext(ctx, "tcp", endpoint)

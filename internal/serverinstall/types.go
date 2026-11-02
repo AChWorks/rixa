@@ -87,3 +87,11 @@ type InstallationEffects interface {
 }
 
 var _ InstallationEffects = (*Manager)(nil)
+
+// AddSiteInspectionFacade exposes only a passive after-install admission.
+// There is deliberately no matching Apply/Resume capability in this slice.
+type AddSiteInspectionFacade interface {
+	InspectAddSite(context.Context, AddSiteInspectionDraft) (Result, error)
+}
+
+var _ AddSiteInspectionFacade = (*Manager)(nil)
