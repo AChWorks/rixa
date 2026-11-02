@@ -73,6 +73,9 @@ func (m *Manager) observedAddSiteEvidence(ctx context.Context, d AddSiteDraft) (
 	if err != nil {
 		return observed, ErrState
 	}
+	if _, err := composeAddSiteConfig(config, env, parent, d.AddSiteInspectionDraft, ""); err != nil {
+		return observed, ErrState
+	}
 	observed.ConfigSHA256, observed.EnvironmentSHA256 = digest(config), digest(env)
 	unit, err := m.recordedServiceUnit(current)
 	if err != nil {
