@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/AChWorks/rixa/internal/product"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // addSiteRuntimeTask holds a stage input on a private pipe, not in argv.
@@ -29,6 +30,43 @@ type addSiteRuntimeTask struct {
 	Draft           Draft             `json:"draft"`
 	DatabaseTargets map[string]string `json:"database_targets"`
 	Configuration   []byte            `json:"configuration"`
+}
+
+// Diagnostics are emitted only through the bounded private stage stderr.
+// Never forward arbitrary PostgreSQL Error(), SQL text, DSNs or credentials;
+// only fixed categories and a strictly validated five-character SQLSTATE.
+func addSiteStageErrorCategory(stage string, err error) (category, code string) {
+	var pg *pgconn.PgError
+	if errors.As(err, &pg) && len(pg.Code) == 5 {
+		safe := true
+		for _, c := range pg.Code {
+			if c < '0' || c > '9' {
+				if c < 'A' || c > 'Z' {
+					safe = false
+					break
+				}
+			}
+		}
+		if safe {
+			return "postgresql", pg.Code
+		}
+	}
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		return "timeout", "deadline-exceeded"
+	case errors.Is(err, context.Canceled):
+		return "interrupted", "context-canceled"
+	case errors.Is(err, product.ErrBootstrapOperationStale):
+		return "bootstrap", "stale-binding"
+	case errors.Is(err, product.ErrBootstrapReconciliation):
+		return "bootstrap", "reconciliation-required"
+	case errors.Is(err, product.ErrBootstrapOperationState):
+		return "bootstrap", "unsafe-state"
+	case errors.Is(err, product.ErrBootstrapOperationInput):
+		return "bootstrap", "invalid-input"
+	default:
+		return "stage", stage + "-failed"
+	}
 }
 
 func RuntimeAddSiteStage(parent context.Context, args []string) error {
@@ -98,7 +136,9 @@ func RuntimeAddSiteStage(parent context.Context, args []string) error {
 		}
 	}
 	if err != nil {
-		return fmt.Errorf("%w: add-site %s did not verify", ErrPrerequisite, stage)
+		category, code := addSiteStageErrorCategory(stage, err)
+		return fmt.Errorf("%w: add-site operation=%s stage=%s category=%s code=%s",
+			ErrPrerequisite, task.OperationID, stage, category, code)
 	}
 	return json.NewEncoder(os.Stdout).Encode(receipt)
 }

@@ -128,7 +128,7 @@ func (m *Manager) addSiteConfigState(j *addSiteJournal, parent *journal) (config
 }
 func (m *Manager) addSiteExecutorFenced(ctx context.Context, j *addSiteJournal) bool {
 	if j.ExecutorGeneration < 1 || j.ExecutorGeneration > 16 ||
-		(!j.ExecutorAcknowledged && j.Attempts["executor"] != "verified") {
+		(!j.ExecutorAcknowledged && j.ExecutorVerifiedGeneration != j.ExecutorGeneration) {
 		return false
 	}
 	return m.unitQuiesced(ctx, addSiteExecutorName(j), true)
@@ -205,6 +205,10 @@ func (m *Manager) ApplyAddSite(ctx context.Context, id, token string) (Result, e
 	return m.queueAddSite(ctx, j)
 }
 func (m *Manager) queueAddSite(ctx context.Context, j *addSiteJournal) (Result, error) {
+	if j == nil || j.ExecutorGeneration >= 16 ||
+		(j.ExecutorGeneration != 0 && !validAddSiteJournal(j)) {
+		return Result{}, ErrState
+	}
 	j.ExecutorGeneration++
 	j.ExecutorAcknowledged = false
 	j.State, j.Code, j.Message = "applying", "queued", "The independent site-B executor is queued; inspect status for durable stages."
@@ -228,6 +232,26 @@ func (m *Manager) queueAddSite(ctx context.Context, j *addSiteJournal) (Result, 
 	return addSiteResult(j), nil
 }
 
+// A possibly successful enable --now must not also be required to be
+// disabled: distinguish the three actual service phases during recovery.
+func addSiteRecoveryServiceRequirement(j *addSiteJournal) string {
+	if j.Attempts["start"] != "" {
+		return "owned-running"
+	}
+	if j.Attempts["stop"] != "" {
+		return "quiesced"
+	}
+	return "original-running"
+}
+
+// A successful enable --now is evidence only when the activated bytes,
+// enabled state, owned unit, and actual loaded process all match.
+func addSiteRunningObservationAccepted(config, env, candidate, expectedEnv []byte,
+	unitState string, unitOwned, loadedOwned bool) bool {
+	return bytes.Equal(config, candidate) && bytes.Equal(env, expectedEnv) &&
+		unitState == "enabled" && unitOwned && loadedOwned
+}
+
 func (m *Manager) addSiteResumable(ctx context.Context, j *addSiteJournal) bool {
 	if j.Frozen == "" || j.ExecutorGeneration >= 16 ||
 		(j.State != "applying" && j.State != "reconciliation-required") ||
@@ -238,27 +262,43 @@ func (m *Manager) addSiteResumable(ctx context.Context, j *addSiteJournal) bool 
 	if err != nil || claim != j.Draft.OperationID {
 		return false
 	}
-	if _, _, err = m.addSitePredecessors(j); err != nil {
-		return false
+	parent, current, err := m.addSitePredecessors(j)
+	if err != nil || j.Attempts["postflight"] == "attempted" {
+		return false // Never replay an uncertain login/logout.
 	}
-	if j.Attempts["postflight"] == "attempted" {
-		return false
-	}
-	if j.Attempts["stop"] == "attempted" || j.Attempts["activate"] != "" && j.Attempts["start"] != "verified" {
-		if !m.updateMigrationFenced(ctx) {
+	switch addSiteRecoveryServiceRequirement(j) {
+	case "quiesced":
+		return m.updateMigrationFenced(ctx)
+	case "owned-running":
+		// A lost start acknowledgement requires exact activated bytes and
+		// a positively observed enabled, active, owned executable.
+		config, env, candidate, err := m.addSiteConfigState(j, parent)
+		if err != nil {
 			return false
 		}
+		view := addSiteView(current, j)
+		return addSiteRunningObservationAccepted(config, env, candidate,
+			environmentFile(j.Draft.withInstallation(parent.Draft)),
+			m.updateUnitFileState(ctx),
+			m.checkOwnedService(view) == nil,
+			m.loadedUpdateService(ctx, view, true) == nil)
+	default:
+		return m.updateUnitFileState(ctx) == "enabled" &&
+			m.checkOwnedService(current) == nil &&
+			m.loadedUpdateService(ctx, current, true) == nil
 	}
-	if j.Attempts["start"] == "attempted" {
-		// Only an already running and owned server can reconcile an unknown
-		// start acknowledgement; never issue an unobserved restart.
-		if m.updateUnitFileState(ctx) != "enabled" {
-			return false
-		}
-	}
-	return true
 }
 func (m *Manager) ResumeAddSite(ctx context.Context, id string) (Result, error) {
+	return m.resumeAddSiteWithObservations(ctx, id, currentManagerImage, m.addSiteResumable)
+}
+
+// Separate the protected Resume transition from its expensive host evidence.
+// The public entry always uses real manager-image, service and predecessor
+// proofs. Injection is package-private so the full lock/journal/dispatch path
+// can be regression-tested on a disposable unprivileged filesystem.
+func (m *Manager) resumeAddSiteWithObservations(ctx context.Context, id string,
+	managerImage func() ([]byte, error),
+	resumable func(context.Context, *addSiteJournal) bool) (Result, error) {
 	unlock, err := m.lock(ctx, false)
 	if err != nil {
 		return Result{}, err
@@ -268,7 +308,7 @@ func (m *Manager) ResumeAddSite(ctx context.Context, id string) (Result, error) 
 	if err != nil {
 		return Result{}, err
 	}
-	image, err := currentManagerImage()
+	image, err := managerImage()
 	if err != nil || digest(image) != j.ManagerSHA256 {
 		r := addSiteResult(j)
 		r.Code, r.Message = "manager-changed", "Resume with the exact retained Add Site manager executable."
@@ -287,7 +327,7 @@ func (m *Manager) ResumeAddSite(ctx context.Context, id string) (Result, error) 
 		}
 		return addSiteResult(j), nil
 	}
-	if !m.addSiteResumable(ctx, j) {
+	if !resumable(ctx, j) {
 		return addSiteResult(j), ErrState
 	}
 	return m.queueAddSite(ctx, j)

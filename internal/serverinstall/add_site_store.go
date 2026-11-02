@@ -71,15 +71,19 @@ type addSiteJournal struct {
 	DatabaseTargets       map[string]string `json:"database_targets,omitempty"`
 	SiteBPrincipal        string            `json:"site_b_principal,omitempty"`
 	ExecutorGeneration    int               `json:"executor_generation,omitempty"`
-	ExecutorAcknowledged  bool              `json:"executor_acknowledged,omitempty"`
-	Attempts              map[string]string `json:"attempts"`
-	Updated               string            `json:"updated"`
+	// Ordinary stage receipts belong to the last positively observed
+	// executor, even while a newer generation is only queued.
+	ExecutorVerifiedGeneration int               `json:"executor_verified_generation,omitempty"`
+	ExecutorAcknowledged       bool              `json:"executor_acknowledged,omitempty"`
+	Attempts                   map[string]string `json:"attempts"`
+	Updated                    string            `json:"updated"`
 }
 
 func validAddSiteJournal(j *addSiteJournal) bool {
 	if j == nil || j.Schema != addSiteSchema || !validAddSiteDraft(j.Draft) ||
 		!codeSyntax.MatchString(j.Code) || len(j.Message) > 1024 || controlText(j.Message) ||
-		j.ExecutorGeneration < 0 || j.ExecutorGeneration > 16 || j.Attempts == nil {
+		j.ExecutorGeneration < 0 || j.ExecutorGeneration > 16 ||
+		j.ExecutorVerifiedGeneration < 0 || j.ExecutorVerifiedGeneration > j.ExecutorGeneration || j.Attempts == nil {
 		return false
 	}
 	if _, err := time.Parse(time.RFC3339Nano, j.Updated); err != nil {
@@ -126,7 +130,7 @@ func validAddSiteJournal(j *addSiteJournal) bool {
 		if j.Attempts[stage] == "" {
 			continue
 		}
-		if j.Attempts["executor"] != "verified" {
+		if j.ExecutorVerifiedGeneration == 0 {
 			return false
 		}
 		for _, prev := range addSiteStages[:n] {
@@ -161,7 +165,7 @@ func validAddSiteJournal(j *addSiteJournal) bool {
 	// arbitrary stage name and a review without the complete host bindings,
 	// including the recorded 0644 systemd unit fingerprint.
 	if j.Frozen == "" {
-		if len(j.Attempts) != 0 || j.ExecutorGeneration != 0 || j.ExecutorAcknowledged ||
+		if len(j.Attempts) != 0 || j.ExecutorGeneration != 0 || j.ExecutorVerifiedGeneration != 0 || j.ExecutorAcknowledged ||
 			j.ManagerSHA256 != "" || j.State == "applying" ||
 			j.State == "reconciliation-required" || j.State == "installed" {
 			return false
@@ -193,6 +197,25 @@ func validAddSiteJournal(j *addSiteJournal) bool {
 		len(j.DatabaseTargets) != 3 {
 		return false
 	}
+	// The current generation may be only attempted while an earlier
+	// verified generation owns retained ordinary stage receipts.
+	switch j.Attempts["executor"] {
+	case "attempted":
+		// A queued child may terminate before it establishes its identity.
+		// Multiple *acknowledged and positively quiesced* generations may be
+		// retried without erasing any receipts from the last verified child.
+		// The Resume gate, not this at-rest validator, proves every newer unit
+		// was acknowledged and quiesced before a replacement is dispatched.
+		if j.ExecutorVerifiedGeneration >= j.ExecutorGeneration {
+			return false
+		}
+	case "verified":
+		if j.ExecutorVerifiedGeneration != j.ExecutorGeneration || !j.ExecutorAcknowledged {
+			return false
+		}
+	default:
+		return false
+	}
 	if j.Stage == "executor" {
 		// Before the first ordinary stage, no stage can claim a result.
 		for _, stage := range addSiteStages {
@@ -204,7 +227,7 @@ func validAddSiteJournal(j *addSiteJournal) bool {
 		// Ordinary effects can begin only after the child has verified its
 		// executor identity. The current stage must have a durable receipt,
 		// and no *later* stage may have started (including after a crash).
-		if j.Attempts["executor"] != "verified" || j.Attempts[j.Stage] == "" {
+		if j.ExecutorVerifiedGeneration == 0 || j.Attempts[j.Stage] == "" {
 			return false
 		}
 		current := -1
@@ -225,7 +248,7 @@ func validAddSiteJournal(j *addSiteJournal) bool {
 	}
 	if j.State == "installed" {
 		if j.Stage != "commit" || !j.ExecutorAcknowledged ||
-			j.Attempts["executor"] != "verified" || j.SiteBPrincipal == "" ||
+			j.Attempts["executor"] != "verified" || j.ExecutorVerifiedGeneration != j.ExecutorGeneration || j.SiteBPrincipal == "" ||
 			j.Draft.SiteBPassword != "" {
 			return false
 		}

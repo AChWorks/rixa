@@ -33,15 +33,22 @@ func TestAddSiteJournalAcceptsRealInterruptedExecutorReceipts(t *testing.T) {
 	}{
 		{"queued-unacknowledged", func(*addSiteJournal) {}},
 		{"queued-acknowledged", func(j *addSiteJournal) { j.ExecutorAcknowledged = true }},
-		{"executor-verified-before-stage", func(j *addSiteJournal) { j.Attempts["executor"] = "verified" }},
+		{"executor-verified-before-stage", func(j *addSiteJournal) {
+			j.ExecutorVerifiedGeneration = 1
+			j.ExecutorAcknowledged = true
+			j.Attempts["executor"] = "verified"
+		}},
 		{"first-stage-attempted", func(j *addSiteJournal) {
 			j.ExecutorAcknowledged = true
 			j.Attempts["executor"] = "verified"
+			j.ExecutorVerifiedGeneration = 1
 			j.Stage = "prepare"
 			j.Attempts["prepare"] = "attempted"
 		}},
 		{"second-stage-interrupted", func(j *addSiteJournal) {
 			j.Attempts["executor"] = "verified"
+			j.ExecutorVerifiedGeneration = 1
+			j.ExecutorAcknowledged = true
 			j.Stage = "migrate"
 			j.Attempts["prepare"] = "verified"
 			j.Attempts["migrate"] = "attempted"

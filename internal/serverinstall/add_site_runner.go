@@ -26,10 +26,42 @@ func (m *Manager) inAddSiteExecutor(j *addSiteJournal) bool {
 	return false
 }
 
+// The parent can persist a lost acknowledgement while holding the shared
+// lock. The actual child is still admitted *only* after independent unit,
+// cgroup and frozen-image authentication in RunAddSiteOperation.
+func addSiteExecutorAdmission(j *addSiteJournal) bool {
+	if j == nil || j.Frozen == "" ||
+		j.Attempts["executor"] != "attempted" ||
+		j.ExecutorVerifiedGeneration >= j.ExecutorGeneration {
+		return false
+	}
+	return j.State == "applying" ||
+		(j.State == "reconciliation-required" &&
+			j.Code == "executor-acknowledgement-unknown")
+}
+
+// This mutates only the in-memory journal after the caller has independently
+// proven exact cgroup membership, manager image and original topology owner.
+// Keeping the transition pure allows serialized lost-ack regression testing.
+func acknowledgeAddSiteExecutor(j *addSiteJournal) bool {
+	if !addSiteExecutorAdmission(j) {
+		return false
+	}
+	j.ExecutorAcknowledged = true
+	j.ExecutorVerifiedGeneration = j.ExecutorGeneration
+	j.Attempts["executor"] = "verified"
+	j.State, j.Code, j.Message = "applying", "executor-verified",
+		"The exact frozen executor verified its own generation and retained stages."
+	return true
+}
+
 // RunAddSiteOperation is a fixed systemd executor, not a root shell. The
 // shared lifecycle lock serializes every stage and its durable receipt.
 func (m *Manager) RunAddSiteOperation(ctx context.Context, id string) (Result, error) {
-	wait, cancel := context.WithTimeout(ctx, 10*time.Second)
+	// The parent holds the effect lock around systemd-run (whose bounded
+	// command timeout is 30 seconds). A child spawned before a lost parent
+	// response must outwait that window to self-authenticate its unit.
+	wait, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
 	var unlock func()
 	var err error
@@ -52,7 +84,7 @@ func (m *Manager) RunAddSiteOperation(ctx context.Context, id string) (Result, e
 	if err != nil {
 		return Result{}, err
 	}
-	if j.State != "applying" || j.Frozen == "" || !m.inAddSiteExecutor(j) {
+	if !addSiteExecutorAdmission(j) || !m.inAddSiteExecutor(j) {
 		return addSiteResult(j), ErrAuthority
 	}
 	image, err := currentManagerImage()
@@ -75,8 +107,9 @@ func (m *Manager) RunAddSiteOperation(ctx context.Context, id string) (Result, e
 	// executable identity. This positive observation is stronger than the
 	// parent's potentially lost systemd-run acknowledgement; without it an
 	// otherwise completed child could be rejected as "not acknowledged".
-	j.ExecutorAcknowledged = true
-	j.Attempts["executor"] = "verified"
+	if !acknowledgeAddSiteExecutor(j) {
+		return addSiteResult(j), ErrAuthority
+	}
 	if err = m.saveAddSite(j); err != nil {
 		return Result{}, err
 	}
