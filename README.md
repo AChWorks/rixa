@@ -5,11 +5,15 @@
 The native manager's source-level, initial-install optional two-site path,
 its separate PostgreSQL/TLS prerequisites and its unreleased acceptance status
 are documented in the [native operator guide](docs/server-management.md#optional-second-site-during-a-new-native-installation-development-source).
-Do not infer support in previously published binaries or after-install Add Site. A
-[source-only after-install Add Site admission and private preparation](docs/server-management.md#inspect-adding-a-site-after-installation-read-only-source-capability)
-can inspect prerequisites and retain a separate draft/review receipt for an
-existing healthy single-site native installation; it does not implement Add Site
-Apply/Resume or change its topology.
+Do not infer support from previously published binaries. Current development
+source also includes [after-install Add Site management](docs/server-management.md#inspect-adding-a-site-after-installation-read-only-source-capability):
+read-only prerequisite inspection, durable Draft/Review, and a separately
+fenced, review-token-gated Apply/Resume implementation for an already healthy
+single-site installation. The effect-bearing path remains **unreleased and
+unverified on a real server**; a successful Review does not establish an active
+site-B. Follow the operator guide and [Issue #29](https://github.com/AChWorks/rixa/issues/29)
+for the applicable acceptance and authorization gates. Do not use these
+source-level effect commands as a production installation procedure.
 
 ## What you can do
 
