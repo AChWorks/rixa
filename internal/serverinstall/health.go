@@ -98,6 +98,14 @@ func (m *Manager) validateInstalledApplication(ctx context.Context, j *journal) 
 	if e != nil || !bytes.Equal(config, configBytesWithSiteB(j.Draft, j.ControlPrincipal, j.SitePrincipal, j.SiteBPrincipal)) {
 		return ErrState
 	}
+	return m.validateInstalledHTTPS(ctx, j)
+}
+
+// validateInstalledHTTPS observes the existing site URLs with the pinned TLS
+// client. The original installer uses it after exact config byte comparison;
+// a completed compatible updater may instead bind its preserved config snapshot
+// before calling this method. This never weakens service ownership checks.
+func (m *Manager) validateInstalledHTTPS(ctx context.Context, j *journal) error {
 	client, e := m.localClient(j)
 	if e != nil {
 		return e

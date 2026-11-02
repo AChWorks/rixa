@@ -206,17 +206,28 @@ func (m *Manager) InspectAddSite(ctx context.Context, proposed AddSiteInspection
 		result.Code, result.Problems = "invalid-input", problems
 		return result, ErrInput
 	}
-	// Adding while a managed update is active or pending would invalidate its
-	// frozen topology and recovery snapshots. Refuse even a positive inspection.
+	// A pending update is always an incompatible in-flight topology owner.
+	// A COMPLETED active update may be inspected only with the full immutable
+	// original/update lineage, frozen manager/helper, current config snapshot
+	// and actual loaded service positively verified. No update is resumed here.
 	pending, pe := m.updateMarker("pending-update")
 	active, ae := m.updateMarker("active-update")
-	if pe != nil || ae != nil || pending != "" || active != "" {
+	if pe != nil || ae != nil || pending != "" {
 		result.Code = "update-ownership"
 		return result, ErrState
 	}
-	// Bind to the original frozen manager's installed service receipt rather
-	// than requiring this newer inspector to generate identical systemd bytes.
-	// In contrast, Update/Remove intentionally retain exact-template checks.
+	current := parent
+	if active != "" {
+		current, err = m.completedAddSiteUpdate(ctx, parent, active)
+		if err != nil {
+			result.Code = "update-ownership"
+			return result, ErrState
+		}
+		result.Release, result.ActiveRelease = current.Draft.Release, current.Draft.Release
+	}
+	// Bind to the frozen installed unit receipt rather than requiring this
+	// newer inspector to generate identical systemd bytes. Update/Remove still
+	// require exact supported templates for every effect they authorize.
 	originalManager := filepath.Join(managerRoot, parent.ManagerSHA256)
 	if !trustedExecutable(originalManager) {
 		result.Code = "installation-unhealthy"
@@ -224,9 +235,21 @@ func (m *Manager) InspectAddSite(ctx context.Context, proposed AddSiteInspection
 	}
 	originalHash, managerError := hashFile(originalManager)
 	if managerError != nil || originalHash != parent.ManagerSHA256 ||
-		m.checkRecordedService(parent) != nil ||
-		m.validateInstalledApplication(ctx, parent) != nil ||
+		m.checkRecordedService(current) != nil ||
 		m.updateUnitFileState(ctx) != "enabled" {
+		result.Code = "installation-unhealthy"
+		return result, ErrPrerequisite
+	}
+	if active == "" {
+		if m.validateInstalledApplication(ctx, current) != nil {
+			result.Code = "installation-unhealthy"
+			return result, ErrPrerequisite
+		}
+	} else if m.loadedUpdateService(ctx, current, true) != nil ||
+		m.validateInstalledHTTPS(ctx, current) != nil {
+		// A compatible Update snapshot is already byte-pinned above. It can
+		// retain supported presentation settings, so do not require original
+		// generated config bytes on the updated-only inspection path.
 		result.Code = "installation-unhealthy"
 		return result, ErrPrerequisite
 	}
@@ -244,6 +267,6 @@ func (m *Manager) InspectAddSite(ctx context.Context, proposed AddSiteInspection
 		return result, ErrPrerequisite
 	}
 	result.State, result.Code = "inspected", "prerequisites-verified"
-	result.Message = "A currently healthy one-site installation, separate third PostgreSQL database/role and existing TLS hostname coverage were verified. No site was added. Applying a topology change remains unavailable."
+	result.Message = "A currently healthy one-site installation (including an exactly bound completed update, if present), separate third PostgreSQL database/role and existing TLS hostname coverage were verified. No site was added. Applying a topology change remains unavailable."
 	return result, nil
 }
