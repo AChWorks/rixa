@@ -274,13 +274,17 @@ func addSiteResult(j *addSiteJournal) Result {
 	r := Result{OperationKind: "add-site", OperationID: j.Draft.OperationID,
 		InstallationOperation: j.Draft.InstallationOperation, State: j.State, Stage: j.Stage,
 		Code: j.Code, Message: j.Message}
-	// No public review token is exposed until a separately reviewed,
-	// effect-bearing Apply action exists. A preparation receipt is not consent.
+	// Only a fresh Review result may disclose the one-use effect token.
+	// Status and stage receipts never grant execution consent.
 	switch j.State {
 	case "draft", "blocked":
 		r.Actions = []string{"review", "status"}
 	case "ready":
-		r.Actions = []string{"review", "status"} // Apply is not yet implemented.
+		r.Actions = []string{"review", "apply", "status"}
+	case "applying", "reconciliation-required":
+		r.Actions = []string{"status"}
+	case "installed":
+		r.Actions = []string{"status"}
 	default:
 		r.Actions = []string{"status"}
 	}

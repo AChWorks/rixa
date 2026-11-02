@@ -64,6 +64,9 @@ func (m *Manager) resume(ctx context.Context, id string, installationOnly bool) 
 		return Result{}, e
 	}
 	defer unlock()
+	if err := m.rejectPendingAddSite(); err != nil {
+		return Result{}, err
+	}
 	j, e := m.load(id)
 	if e != nil {
 		return Result{}, e

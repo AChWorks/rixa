@@ -33,6 +33,9 @@ func (m *Manager) SaveUpdateDraft(ctx context.Context, d UpdateDraft) (Result, e
 		return Result{}, e
 	}
 	defer unlock()
+	if err := m.rejectPendingAddSite(); err != nil {
+		return Result{}, err
+	}
 	if _, e = m.load(d.OperationID); e == nil {
 		return Result{}, ErrState
 	} else if !errors.Is(e, os.ErrNotExist) {
@@ -60,6 +63,9 @@ func (m *Manager) LoadUpdateDraft(ctx context.Context, id string) (UpdateDraft, 
 		return UpdateDraft{}, e
 	}
 	defer unlock()
+	if err := m.rejectPendingAddSite(); err != nil {
+		return UpdateDraft{}, err
+	}
 	u, e := m.loadUpdate(id)
 	if e != nil {
 		return UpdateDraft{}, e
@@ -72,6 +78,9 @@ func (m *Manager) ReviewUpdate(ctx context.Context, id string) (Result, error) {
 		return Result{}, e
 	}
 	defer unlock()
+	if err := m.rejectPendingAddSite(); err != nil {
+		return Result{}, err
+	}
 	u, e := m.loadUpdate(id)
 	if e != nil {
 		return Result{}, e
@@ -285,6 +294,9 @@ func (m *Manager) ApplyUpdate(ctx context.Context, id, token string) (Result, er
 		return Result{}, e
 	}
 	defer unlock()
+	if err := m.rejectPendingAddSite(); err != nil {
+		return Result{}, err
+	}
 	u, e := m.loadUpdate(id)
 	if e != nil {
 		return Result{}, e

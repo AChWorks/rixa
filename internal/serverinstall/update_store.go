@@ -348,7 +348,7 @@ func (m *Manager) predecessor(u *updateJournal) (*journal, error) {
 		return nil, e
 	}
 	if u.PriorUpdate == "" {
-		return j, nil
+		return m.topologyView(j, j)
 	}
 	b, e := readPrivate(m.updatePath(u.PriorUpdate), m.ownerUID, maxStateBytes)
 	if e != nil || digest(b) != u.PriorSHA256 {
@@ -358,7 +358,7 @@ func (m *Manager) predecessor(u *updateJournal) (*journal, error) {
 	if e != nil || prior.State != "installed" || prior.Draft.InstallationOperation != u.Draft.InstallationOperation || prior.ParentSHA256 != u.ParentSHA256 {
 		return nil, ErrState
 	}
-	return updateView(j, prior), nil
+	return m.topologyView(j, updateView(j, prior))
 }
 func (m *Manager) activePredecessor(u *updateJournal) (*journal, error) {
 	active, e := m.updateMarker("active-update")

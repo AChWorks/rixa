@@ -116,6 +116,9 @@ func (m *Manager) ResumeUpdate(ctx context.Context, id string) (Result, error) {
 		return Result{}, e
 	}
 	defer unlock()
+	if err := m.rejectPendingAddSite(); err != nil {
+		return Result{}, err
+	}
 	u, e := m.loadUpdate(id)
 	if e != nil {
 		return Result{}, e
@@ -161,6 +164,9 @@ func (m *Manager) RunUpdateOperation(ctx context.Context, id string) (Result, er
 		return Result{}, e
 	}
 	defer unlock()
+	if err := m.rejectPendingAddSite(); err != nil {
+		return Result{}, err
+	}
 	u, e := m.loadUpdate(id)
 	if e != nil {
 		return Result{}, e

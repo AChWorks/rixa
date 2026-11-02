@@ -55,6 +55,22 @@ func runManage(parent context.Context, args []string, input *os.File, output *os
 		}
 		return err
 	}
+	if len(args) > 0 && args[0] == "internal-add-site-stage" {
+		if len(args) != 2 {
+			return errors.New("internal-add-site-stage requires one fixed stage")
+		}
+		return serverinstall.RuntimeAddSiteStage(ctx, args[1:])
+	}
+	if len(args) > 0 && args[0] == "internal-add-site-apply" {
+		if len(args) != 2 {
+			return errors.New("internal-add-site-apply requires one operation ID")
+		}
+		r, err := serverinstall.New().RunAddSiteOperation(ctx, args[1])
+		if encodeErr := json.NewEncoder(output).Encode(r); encodeErr != nil {
+			return encodeErr
+		}
+		return err
+	}
 	if len(args) > 0 && args[0] == "internal-postgres-apply" {
 		if len(args) != 2 {
 			return errors.New("internal-postgres-apply requires one operation ID")
@@ -279,7 +295,7 @@ const manageHelp = "Rixa native operator management\n\n" +
 	"  rixa manage remove --operation <id> --confirm-remove\n" +
 	"  rixa manage update <menu|draft|review|apply|resume|status|remove> [flags]\n" +
 	"  rixa manage update --help\n" +
-	"  rixa manage add-site <inspect|draft|review|status> [--source <private-json>|--operation <id>]\n" +
+	"  rixa manage add-site <inspect|draft|review|apply|resume|status> [--source <private-json>|--operation <id>]\n" +
 	"  rixa manage prerequisites --help\n\n" +
 	"Direct commands emit safe JSON and never prompt. --non-interactive rejects the menu.\n" +
 	"Draft/prefill JSON contains credentials: same-operator private regular files only.\n" +

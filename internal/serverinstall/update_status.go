@@ -91,6 +91,9 @@ func (m *Manager) RemoveUpdatedInstallation(ctx context.Context, id string) (Res
 		return Result{}, e
 	}
 	defer unlock()
+	if err := m.rejectPendingAddSite(); err != nil {
+		return Result{}, err
+	}
 	u, e := m.loadUpdate(id)
 	if e != nil {
 		return Result{}, e
@@ -98,6 +101,9 @@ func (m *Manager) RemoveUpdatedInstallation(ctx context.Context, id string) (Res
 	return m.removeUpdatedInstallation(ctx, u)
 }
 func (m *Manager) removeUpdatedInstallation(ctx context.Context, u *updateJournal) (Result, error) {
+	if err := m.rejectPendingAddSite(); err != nil {
+		return updateResult(u), err
+	}
 	if u.State == "removed" {
 		return updateResult(u), nil
 	}
