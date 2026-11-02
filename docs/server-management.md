@@ -208,7 +208,15 @@ to the original single-site runtime; current Status verifies the independent
 committed Add Site topology and its exact TLS/SNI, owned service and database
 targets instead of rewriting those hashes. A later reviewed three-target Update
 binds the exact committed Add Site journal hash, and unexpected changes to
-either historical receipt block further managed effects.
+either historical receipt block further managed effects. For an
+independently committed Site-B, subsequent native Update Review and its fresh
+Apply preflight must also verify the *currently served* Site-B SNI against the
+exact original pinned certificate leaf. The detached Update executor repeats
+that proof before its first service stop, after the replacement is serving,
+and again at commit/final receipt cleanup. CA-trusted HTTPS alone is not
+sufficient evidence of the committed Site-B identity. A service stopped during
+a documented Update stage is reconciled through stage-specific service/receipt
+proofs rather than requiring live TLS before restart.
 
 If the executor stops, inspect the exact frozen systemd unit
 `rixa-add-site-<new-add-site-operation>-<generation>.service`, its journal,

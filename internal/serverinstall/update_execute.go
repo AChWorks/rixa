@@ -281,6 +281,12 @@ func (m *Manager) executeUpdate(ctx context.Context, u *updateJournal, parent *j
 		if e := m.loadedUpdateService(ctx, parent, true); e != nil || m.updateUnitFileState(ctx) != "enabled" {
 			return ErrState
 		}
+		// Last read-only proof immediately before the first consequential
+		// stop. An attempted stop is reconciled quiescent above and never
+		// replays this live-service observation or a second disable.
+		if e := m.verifyCommittedUpdateSiteBTLS(ctx, u, parent); e != nil {
+			return e
+		}
 		if e := updateEditorialPreflight(ctx, parent); e != nil {
 			return e
 		}
@@ -368,7 +374,13 @@ func (m *Manager) executeUpdate(ctx context.Context, u *updateJournal, parent *j
 		if e := m.loadedUpdateService(ctx, candidate, true); e != nil {
 			return e
 		}
-		return m.updateHTTPPostflight(ctx, candidate)
+		if e := m.updateHTTPPostflight(ctx, candidate); e != nil {
+			return e
+		}
+		// A CA-trusted HTTPS response is insufficient after Add Site:
+		// compare the actual served leaf and SNI against the original
+		// frozen certificate before postflight may become verified.
+		return m.verifyCommittedUpdateSiteBTLS(ctx, u, candidate)
 	case "commit":
 		if m.updateUnitFileState(ctx) != "enabled" {
 			return ErrState
@@ -377,6 +389,11 @@ func (m *Manager) executeUpdate(ctx context.Context, u *updateJournal, parent *j
 			return e
 		}
 		if e := m.loadedUpdateService(ctx, candidate, true); e != nil {
+			return e
+		}
+		// Recheck at the exact commit boundary rather than trusting a
+		// potentially stale postflight result from an earlier executor.
+		if e := m.verifyCommittedUpdateSiteBTLS(ctx, u, candidate); e != nil {
 			return e
 		}
 		active, e := m.updateMarker("active-update")

@@ -204,7 +204,9 @@ func (m *Manager) finishUpdateClaim(ctx context.Context, u *updateJournal) (Resu
 		return updateResult(u), e
 	}
 	current := updateView(parent, u)
-	if m.boundUpdateRuntime(ctx, u, parent) != nil || m.checkOwnedService(current) != nil || m.loadedUpdateService(ctx, current, true) != nil {
+	if m.boundUpdateRuntime(ctx, u, parent) != nil || m.checkOwnedService(current) != nil ||
+		m.loadedUpdateService(ctx, current, true) != nil ||
+		m.verifyCommittedUpdateSiteBTLS(ctx, u, current) != nil {
 		return updateResult(u), ErrState
 	}
 	if e = m.clearUpdateClaim(u.Draft.OperationID); e != nil {

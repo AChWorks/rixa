@@ -179,6 +179,15 @@ func (m *Manager) reviewUpdate(ctx context.Context, u *updateJournal) []Problem 
 		add("service", "service-enablement", "This native update profile requires the owned service to be enabled before review. Reconcile operator-changed enablement before updating.")
 		return problems
 	}
+	// A completed independent Add Site adds a stronger live-site identity
+	// contract than ordinary CA-trusted HTTPS. The same Review is repeated
+	// under the effect lock by ApplyUpdate, so a stale TLS observation
+	// cannot authorize the later systemd executor.
+	if e = m.verifyCommittedUpdateSiteBTLS(ctx, u, parent); e != nil {
+		add("service", "site-b-tls-identity",
+			"The currently served site-B TLS certificate or SNI did not match the committed Add Site's exact original pinned leaf. Reconcile the owned live service before updating.")
+		return problems
+	}
 	u.ConfigSHA256, u.EnvironmentSHA256 = digest(config), digest(environment)
 	u.DatabaseTargets = parent.DatabaseTargets
 	// The projected topology is already verified by activePredecessor.
@@ -450,7 +459,21 @@ func (m *Manager) updateOwnedRuntime(ctx context.Context, u *updateJournal, pare
 		if e := m.checkOwnedService(candidate); e != nil {
 			return e
 		}
-		return m.loadedUpdateService(ctx, candidate, false)
+		if e := m.loadedUpdateService(ctx, candidate, false); e != nil {
+			return e
+		}
+		// A verified start can precede HTTPS readiness. Let the bounded
+		// postflight probe handle normal startup delay; enforce the live
+		// pinned leaf again for later resumed commit/cleanup after postflight
+		// has become verified.
+		if u.Attempts["postflight"] == "verified" {
+			if m.updateUnitFileState(ctx) != "enabled" ||
+				m.loadedUpdateService(ctx, candidate, true) != nil {
+				return ErrState
+			}
+			return m.verifyCommittedUpdateSiteBTLS(ctx, u, candidate)
+		}
+		return nil
 	}
 	if u.Attempts["activate"] == "attempted" {
 		if m.checkOwnedService(parent) != nil && m.checkOwnedService(candidate) != nil {
@@ -467,7 +490,21 @@ func (m *Manager) updateOwnedRuntime(ctx context.Context, u *updateJournal, pare
 	if e := m.checkOwnedService(parent); e != nil {
 		return e
 	}
-	return m.loadedUpdateService(ctx, parent, false)
+	if e := m.loadedUpdateService(ctx, parent, false); e != nil {
+		return e
+	}
+	// The executor may run payload preparation before stop. Verify the
+	// current server's precise Site-B leaf while it is still expected to be
+	// serving. Once a stop was durably attempted, a quiescent service is
+	// normal and its historical served identity cannot be inferred.
+	if u.Attempts["stop"] == "" {
+		if m.updateUnitFileState(ctx) != "enabled" ||
+			m.loadedUpdateService(ctx, parent, true) != nil {
+			return ErrState
+		}
+		return m.verifyCommittedUpdateSiteBTLS(ctx, u, parent)
+	}
+	return nil
 }
 
 func (m *Manager) updateConfigPath(u *updateJournal) string {
