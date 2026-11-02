@@ -38,6 +38,9 @@ func (m *Manager) SaveUpdateDraft(ctx context.Context, d UpdateDraft) (Result, e
 	} else if !errors.Is(e, os.ErrNotExist) {
 		return Result{}, e
 	}
+	if _, ae := m.loadAddSite(d.OperationID); !errors.Is(ae, os.ErrNotExist) {
+		return Result{}, ErrState
+	}
 	if old, e := m.loadUpdate(d.OperationID); e == nil {
 		if old.Frozen != "" || len(old.Attempts) > 0 {
 			return updateResult(old), ErrState

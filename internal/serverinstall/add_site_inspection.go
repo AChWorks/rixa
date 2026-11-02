@@ -186,6 +186,18 @@ func (m *Manager) InspectAddSite(ctx context.Context, proposed AddSiteInspection
 		return result, err
 	}
 	defer unlock()
+	return m.inspectAddSiteLocked(ctx, proposed)
+}
+
+// inspectAddSiteLocked is the single positive admission used by both the
+// passive CLI and future durable Review/Apply boundaries. The caller must
+// hold the native operation lock and must never treat this as Apply consent.
+func (m *Manager) inspectAddSiteLocked(ctx context.Context, proposed AddSiteInspectionDraft) (Result, error) {
+	result := addSiteInspectionResult(proposed.InstallationOperation)
+	if !operationSyntax.MatchString(proposed.InstallationOperation) {
+		result.Code = "invalid-input"
+		return result, ErrInput
+	}
 	owner, err := readPrivate(filepath.Join(m.stateRoot, "installation"), m.ownerUID, 128)
 	if err != nil || string(owner) != proposed.InstallationOperation+"\n" {
 		result.Code = "installation-ownership"

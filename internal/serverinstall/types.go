@@ -95,3 +95,15 @@ type AddSiteInspectionFacade interface {
 }
 
 var _ AddSiteInspectionFacade = (*Manager)(nil)
+
+// AddSitePreparationFacade persists only a private preparatory receipt.
+// It intentionally has no topology-changing Apply/Resume surface yet.
+type AddSitePreparationFacade interface {
+	AddSiteInspectionFacade
+	SaveAddSiteDraft(context.Context, AddSiteDraft) (Result, error)
+	LoadAddSiteDraft(context.Context, string) (AddSiteDraft, error)
+	ReviewAddSite(context.Context, string) (Result, error)
+	AddSiteStatus(context.Context, string) (Result, error)
+}
+
+var _ AddSitePreparationFacade = (*Manager)(nil)

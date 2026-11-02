@@ -187,6 +187,42 @@ active update's own unit receipt is required, not the superseded original
 unit hash. Update and Remove still enforce their existing exact supported
 unit template and do not adopt or modify historical units.
 
+### Prepared after-install Add Site draft (development source only)
+
+Newer source managers also support a **preparation-only** workflow alongside
+passive inspection. This is not a released Add Site activation path. A distinct
+`operation_id` identifies a private Add Site journal without changing the
+original frozen installation receipt or a completed Update journal. Use a
+same-operator private `0600` JSON source with the five fields shown above plus
+`operation_id` (a new unique native operation ID, different from the original
+installation and all existing updates).
+
+```bash
+sudo rixa manage add-site draft --source /root/private/add-site-draft.json
+sudo rixa manage add-site review --operation <new-add-site-operation>
+sudo rixa manage add-site status --operation <new-add-site-operation>
+```
+
+`draft` stores private inputs with strict permissions. `review` rechecks the
+currently owned, running one-site installation, any completed managed-update
+lineage, the exact served certificate, existing owned unit, current config and
+environment, and the third isolated PostgreSQL database. It retains a separate
+private review receipt with the expected predecessor and host digests. Any
+re-review revokes the old review token before probing the host; errors leave
+no usable prior token. `status` rechecks the current live service, TLS hostname,
+physical database role isolation and all recorded file/effect identities. If
+any prerequisite or digest changes, it reports `blocked` without changing the
+private reviewed receipt; the operator must repeat `review` after reconciling
+the underlying host. Consequently `ready` represents current positively observed
+read-only evidence, **not** an authorization to install a site. Neither `review`
+nor `status` reveals tokens, administrator passwords or database URLs.
+
+There is still **no** `rixa manage add-site apply` or `resume`. Neither a
+passing inspection nor a prepared receipt can bootstrap site-b, run migrations,
+change configuration, restart the service or change Update/Remove ownership.
+The supported installed-host effectful lifecycle requires separately reviewed
+implementation, validation, and specific operator authorization.
+
 Do not create or change a site, reuse an old demo, change PostgreSQL role
 grants, or mutate an active installation merely because inspection succeeds.
 A separately reviewed persisted Add Site lifecycle and actual host acceptance
