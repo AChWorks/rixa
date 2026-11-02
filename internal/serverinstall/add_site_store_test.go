@@ -42,6 +42,7 @@ func reviewedAddSiteFixture() *addSiteJournal {
 	j.ConfigSHA256 = strings.Repeat("c", 64)
 	j.EnvironmentSHA256 = strings.Repeat("d", 64)
 	j.UnitSHA256 = strings.Repeat("e", 64)
+	j.ReviewedManagerSHA256 = strings.Repeat("a", 64)
 	j.DatabaseTargets = map[string]string{"control": "1:100", "site-a": "1:101", "site-b": "1:102"}
 	return j
 }
@@ -140,6 +141,9 @@ func TestAddSiteJournalRejectsIncompleteOwnershipAndStageClaims(t *testing.T) {
 		})
 	}
 	ready := reviewedAddSiteFixture()
+	if addSiteResult(ready).ReviewToken != "" {
+		t.Fatal("preparation-only Add Site review revealed a token for unavailable Apply")
+	}
 	if !validAddSiteJournal(ready) {
 		t.Fatal("valid, separate reviewed Add Site receipt rejected")
 	}

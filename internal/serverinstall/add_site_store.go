@@ -52,27 +52,28 @@ var addSiteStages = []string{
 // the active config/environment and physical database IDs are independently
 // pinned. Unknown effects need stage-specific reconciliation, never replay.
 type addSiteJournal struct {
-	Schema               string            `json:"schema"`
-	Draft                AddSiteDraft      `json:"draft"`
-	State                string            `json:"state"`
-	Stage                string            `json:"stage,omitempty"`
-	Code                 string            `json:"code"`
-	Message              string            `json:"message,omitempty"`
-	ReviewToken          string            `json:"review_token,omitempty"`
-	Frozen               string            `json:"frozen,omitempty"`
-	ParentSHA256         string            `json:"parent_sha256,omitempty"`
-	ActiveUpdate         string            `json:"active_update,omitempty"`
-	ActiveUpdateSHA256   string            `json:"active_update_sha256,omitempty"`
-	ConfigSHA256         string            `json:"config_sha256,omitempty"`
-	EnvironmentSHA256    string            `json:"environment_sha256,omitempty"`
-	UnitSHA256           string            `json:"unit_sha256,omitempty"`
-	ManagerSHA256        string            `json:"manager_sha256,omitempty"`
-	DatabaseTargets      map[string]string `json:"database_targets,omitempty"`
-	SiteBPrincipal       string            `json:"site_b_principal,omitempty"`
-	ExecutorGeneration   int               `json:"executor_generation,omitempty"`
-	ExecutorAcknowledged bool              `json:"executor_acknowledged,omitempty"`
-	Attempts             map[string]string `json:"attempts"`
-	Updated              string            `json:"updated"`
+	Schema                string            `json:"schema"`
+	Draft                 AddSiteDraft      `json:"draft"`
+	State                 string            `json:"state"`
+	Stage                 string            `json:"stage,omitempty"`
+	Code                  string            `json:"code"`
+	Message               string            `json:"message,omitempty"`
+	ReviewToken           string            `json:"review_token,omitempty"`
+	Frozen                string            `json:"frozen,omitempty"`
+	ParentSHA256          string            `json:"parent_sha256,omitempty"`
+	ActiveUpdate          string            `json:"active_update,omitempty"`
+	ActiveUpdateSHA256    string            `json:"active_update_sha256,omitempty"`
+	ConfigSHA256          string            `json:"config_sha256,omitempty"`
+	EnvironmentSHA256     string            `json:"environment_sha256,omitempty"`
+	UnitSHA256            string            `json:"unit_sha256,omitempty"`
+	ManagerSHA256         string            `json:"manager_sha256,omitempty"`
+	ReviewedManagerSHA256 string            `json:"reviewed_manager_sha256,omitempty"`
+	DatabaseTargets       map[string]string `json:"database_targets,omitempty"`
+	SiteBPrincipal        string            `json:"site_b_principal,omitempty"`
+	ExecutorGeneration    int               `json:"executor_generation,omitempty"`
+	ExecutorAcknowledged  bool              `json:"executor_acknowledged,omitempty"`
+	Attempts              map[string]string `json:"attempts"`
+	Updated               string            `json:"updated"`
 }
 
 func validAddSiteJournal(j *addSiteJournal) bool {
@@ -90,7 +91,7 @@ func validAddSiteJournal(j *addSiteJournal) bool {
 		return false
 	}
 	for _, hash := range []string{j.ReviewToken, j.Frozen, j.ParentSHA256, j.ActiveUpdateSHA256, j.ConfigSHA256,
-		j.EnvironmentSHA256, j.UnitSHA256, j.ManagerSHA256} {
+		j.EnvironmentSHA256, j.UnitSHA256, j.ManagerSHA256, j.ReviewedManagerSHA256} {
 		if hash != "" && !hashSyntax.MatchString(hash) {
 			return false
 		}
@@ -101,7 +102,9 @@ func validAddSiteJournal(j *addSiteJournal) bool {
 		(j.ReviewToken != "" && j.State != "ready") {
 		return false
 	}
-	if j.State != "installed" && j.Draft.SiteBPassword == "" {
+	// Once the separate site administrator has been durably bootstrapped,
+	// the secret can be erased without changing the frozen draft identity.
+	if j.Draft.SiteBPassword == "" && j.Attempts["bootstrap-site-b"] != "verified" {
 		return false
 	}
 	if j.SiteBPrincipal != "" && !principalSyntax.MatchString(j.SiteBPrincipal) {
@@ -170,7 +173,7 @@ func validAddSiteJournal(j *addSiteJournal) bool {
 			return false
 		}
 		if j.State == "ready" && (j.ReviewToken == "" || j.ParentSHA256 == "" ||
-			len(j.DatabaseTargets) != 3 || j.ConfigSHA256 == "" || j.EnvironmentSHA256 == "") {
+			len(j.DatabaseTargets) != 3 || j.ConfigSHA256 == "" || j.EnvironmentSHA256 == "" || j.ReviewedManagerSHA256 == "") {
 			return false
 		}
 	} else {
@@ -218,9 +221,8 @@ func addSiteResult(j *addSiteJournal) Result {
 	r := Result{OperationKind: "add-site", OperationID: j.Draft.OperationID,
 		InstallationOperation: j.Draft.InstallationOperation, State: j.State, Stage: j.Stage,
 		Code: j.Code, Message: j.Message}
-	if j.State == "ready" {
-		r.ReviewToken = j.ReviewToken
-	}
+	// No public review token is exposed until a separately reviewed,
+	// effect-bearing Apply action exists. A preparation receipt is not consent.
 	switch j.State {
 	case "draft", "blocked":
 		r.Actions = []string{"review", "status"}

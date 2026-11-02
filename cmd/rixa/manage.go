@@ -93,7 +93,7 @@ func manageWithFacade(ctx context.Context, args []string, input *os.File, output
 	if action == "add-site" {
 		inspector, ok := backend.(serverinstall.AddSiteInspectionFacade)
 		if !ok {
-			return errors.New("this manager does not support after-install site admission inspection")
+			return errors.New("this manager does not support after-install Add Site inspection")
 		}
 		return manageAddSiteInspectionWithFacade(ctx, args, output, inspector)
 	}
@@ -279,7 +279,7 @@ const manageHelp = "Rixa native operator management\n\n" +
 	"  rixa manage remove --operation <id> --confirm-remove\n" +
 	"  rixa manage update <menu|draft|review|apply|resume|status|remove> [flags]\n" +
 	"  rixa manage update --help\n" +
-	"  rixa manage add-site inspect --source <private-json>\n" +
+	"  rixa manage add-site <inspect|draft|review|status> [--source <private-json>|--operation <id>]\n" +
 	"  rixa manage prerequisites --help\n\n" +
 	"Direct commands emit safe JSON and never prompt. --non-interactive rejects the menu.\n" +
 	"Draft/prefill JSON contains credentials: same-operator private regular files only.\n" +

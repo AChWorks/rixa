@@ -75,3 +75,95 @@ func TestManageAddSiteInspectionCLIRequiresPrivateSourceAndDoesNotExposeSecrets(
 		t.Fatal("unsafe private draft reached inspector")
 	}
 }
+
+type mockSitePreparer struct {
+	mockSiteInspector
+	saved                    serverinstall.AddSiteDraft
+	saves, reviews, statuses int
+}
+
+func (s *mockSitePreparer) SaveAddSiteDraft(_ context.Context, d serverinstall.AddSiteDraft) (serverinstall.Result, error) {
+	s.saved = d
+	s.saves++
+	return serverinstall.Result{OperationKind: "add-site", OperationID: d.OperationID, State: "draft", Code: "draft-saved"}, nil
+}
+func (s *mockSitePreparer) LoadAddSiteDraft(_ context.Context, _ string) (serverinstall.AddSiteDraft, error) {
+	return s.saved, nil
+}
+func (s *mockSitePreparer) ReviewAddSite(_ context.Context, id string) (serverinstall.Result, error) {
+	s.reviews++
+	return serverinstall.Result{OperationKind: "add-site", OperationID: id, State: "ready", Code: "ready"}, nil
+}
+func (s *mockSitePreparer) AddSiteStatus(_ context.Context, id string) (serverinstall.Result, error) {
+	s.statuses++
+	return serverinstall.Result{OperationKind: "add-site", OperationID: id, State: "ready", Code: "ready"}, nil
+}
+
+func TestManageAddSitePreparatoryCLIRequiresPrivateDraftAndNeverApplies(t *testing.T) {
+	d := serverinstall.AddSiteDraft{
+		OperationID: "new-site-addition",
+		AddSiteInspectionDraft: serverinstall.AddSiteInspectionDraft{
+			InstallationOperation: "original-install",
+			SiteBOrigin:           "https://site-b.example:8443",
+			SiteBDSN:              "postgres://siteb:db-secret@127.0.0.1:5432/siteb?sslmode=disable",
+			SiteBLogin:            "site-b-admin", SiteBPassword: "secret-admin-password",
+		},
+	}
+	raw, err := json.Marshal(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "add-site-draft.json")
+	if err = os.WriteFile(path, raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	backend := &mockSitePreparer{}
+	var out bytes.Buffer
+	if err = manageWithFacade(context.Background(), []string{"add-site", "--help"}, nil, &out, backend); err != nil ||
+		!strings.Contains(out.String(), "no Apply/Resume") || backend.saves != 0 {
+		t.Fatalf("preparation-only help was unavailable or dispatched effects: %v %q", err, out.String())
+	}
+	out.Reset()
+	if err = manageWithFacade(context.Background(), []string{"add-site", "draft", "--source", path}, nil, &out, backend); err != nil {
+		t.Fatalf("Add Site private draft CLI: %v", err)
+	}
+	if backend.saves != 1 || backend.saved != d || !strings.Contains(out.String(), "draft-saved") {
+		t.Fatalf("private Add Site source not routed: %+v %q", backend, out.String())
+	}
+	if strings.Contains(out.String(), d.SiteBPassword) || strings.Contains(out.String(), d.SiteBDSN) {
+		t.Fatal("Add Site draft emitted secrets")
+	}
+	out.Reset()
+	if err = manageWithFacade(context.Background(), []string{"add-site", "review", "--operation", d.OperationID}, nil, &out, backend); err != nil || backend.reviews != 1 || !strings.Contains(out.String(), "ready") || strings.Contains(out.String(), "review_token") {
+		t.Fatalf("review not routed: %v %q", err, out.String())
+	}
+	out.Reset()
+	if err = manageWithFacade(context.Background(), []string{"add-site", "status", "--operation", d.OperationID}, nil, &out, backend); err != nil || backend.statuses != 1 || strings.Contains(out.String(), strings.Repeat("a", 64)) {
+		t.Fatalf("status disclosed token or not routed: %v %q", err, out.String())
+	}
+	for _, args := range [][]string{
+		{"add-site", "apply", "--operation", d.OperationID},
+		{"add-site", "resume", "--operation", d.OperationID},
+		{"add-site", "draft", "--source", path, "extra"},
+		{"add-site", "draft", "--source", path, "--unrecognized"},
+		{"add-site", "status", "--source", path},
+		{"add-site", "review", "--operation", d.OperationID, "--source", path},
+	} {
+		out.Reset()
+		if err = manageWithFacade(context.Background(), args, nil, &out, backend); err == nil {
+			t.Fatalf("unavailable Add Site action accepted: %q", args)
+		}
+	}
+	if backend.saves != 1 || backend.reviews != 1 || backend.statuses != 1 {
+		t.Fatal("invalid Add Site CLI reached effects")
+	}
+	if err = os.Chmod(path, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err = manageWithFacade(context.Background(), []string{"add-site", "draft", "--source", path}, nil, &out, backend); err == nil {
+		t.Fatal("world-readable Add Site draft accepted")
+	}
+	if backend.saves != 1 {
+		t.Fatal("unsafe private source reached backend")
+	}
+}
