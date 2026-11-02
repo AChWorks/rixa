@@ -85,6 +85,9 @@ func completedAddSiteUpdateLineage(parent *journal, parentHash, activeID string,
 	var current *updateJournal
 	// This is deliberately a bounded observation, not a generic recursive
 	// journal walker. Abnormally deep or circular histories need reconciliation.
+	// Every installed ancestor must also have a verified executor receipt:
+	// successful ordinary stages with executor=attempted cannot prove a
+	// completed update, even though the general journal decoder permits it.
 	for depth := 0; depth < 64; depth++ {
 		if seen[id] || !operationSyntax.MatchString(id) {
 			return nil, nil, ErrState
@@ -93,7 +96,8 @@ func completedAddSiteUpdateLineage(parent *journal, parentHash, activeID string,
 		u, raw, err := read(id)
 		if err != nil || u == nil || len(raw) == 0 ||
 			u.Draft.OperationID != id || !validUpdate(u) ||
-			u.State != "installed" || u.Attempts["remove"] != "" ||
+			u.State != "installed" || u.Attempts["executor"] != "verified" ||
+			u.Attempts["remove"] != "" ||
 			u.Draft.InstallationOperation != parent.Draft.OperationID ||
 			u.ParentSHA256 != parentHash ||
 			!reflect.DeepEqual(u.DatabaseTargets, parent.DatabaseTargets) ||

@@ -32,6 +32,9 @@ func completeAddSiteUpdate(parent *journal, parentHash, operation, release, prio
 	for k, v := range parent.DatabaseTargets {
 		u.DatabaseTargets[k] = v
 	}
+	// Completed updates have a positively acknowledged executor, not just
+	// successful stage receipts. A merely attempted executor is not terminal.
+	u.Attempts["executor"] = "verified"
 	for _, stage := range updateStages {
 		u.Attempts[stage] = "verified"
 	}
@@ -144,6 +147,15 @@ func TestCompletedAddSiteUpdateLineageRejectsUnknownRemovedOrAlteredUpdates(t *t
 		{"unverified-stage", func(_ *journal, _ *updateJournal, u *updateJournal, _ map[string][]byte) {
 			u.Attempts["postflight"] = "attempted"
 		}, false},
+		{"active-executor-attempted", func(_ *journal, _ *updateJournal, u *updateJournal, _ map[string][]byte) {
+			u.Attempts["executor"] = "attempted"
+		}, false},
+		{"historical-executor-attempted-with-valid-hash", func(_ *journal, f *updateJournal, u *updateJournal, records map[string][]byte) {
+			f.Attempts["executor"] = "attempted"
+			b, _ := json.Marshal(f)
+			records[f.Draft.OperationID] = b
+			u.PriorSHA256 = digest(b) // The historical receipt chain remains authentic.
+		}, false},
 		{"active-update-interrupted", func(_ *journal, _ *updateJournal, u *updateJournal, _ map[string][]byte) {
 			u.State = "reconciliation-required"
 		}, false},
@@ -183,6 +195,13 @@ func TestCompletedAddSiteUpdateLineageRejectsUnknownRemovedOrAlteredUpdates(t *t
 		t.Run(tc.name, func(t *testing.T) {
 			parent, parentHash, first, active, records := addSiteChainFixtures(t)
 			tc.change(parent, first, active, records)
+			if tc.name == "active-executor-attempted" || tc.name == "historical-executor-attempted-with-valid-hash" {
+				// Confirm these are otherwise structurally valid terminal
+				// journals; the new inspector invariant must reject them.
+				if !validUpdate(first) || !validUpdate(active) {
+					t.Fatal("invalid fixture did not reproduce the executor gap")
+				}
+			}
 			modified, _ := json.Marshal(active)
 			records[active.Draft.OperationID] = modified
 			intact := func(_ *updateJournal) bool { return !tc.intactFail }
