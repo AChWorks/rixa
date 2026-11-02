@@ -115,6 +115,19 @@ func TestCompletedAddSiteUpdateLineageAcceptsCompleteOneAndTwoUpdateHistories(t 
 	}
 }
 
+func TestCompletedAddSiteUpdateLineageRequiresIntactHistoricalManager(t *testing.T) {
+	parent, parentHash, first, second, records := addSiteChainFixtures(t)
+	visited := []string{}
+	_, _, err := completedAddSiteUpdateLineage(parent, parentHash, second.Draft.OperationID,
+		testAddSiteUpdateReader(records), func(u *updateJournal) bool {
+			visited = append(visited, u.Draft.OperationID)
+			return u.Draft.OperationID != first.Draft.OperationID
+		})
+	if !errors.Is(err, ErrState) || !reflect.DeepEqual(visited, []string{second.Draft.OperationID, first.Draft.OperationID}) {
+		t.Fatalf("historical update manager drift admitted or skipped: %v, %+v", err, visited)
+	}
+}
+
 func TestCompletedAddSiteUpdateLineageRejectsUnknownRemovedOrAlteredUpdates(t *testing.T) {
 	type change func(*journal, *updateJournal, *updateJournal, map[string][]byte)
 	for _, tc := range []struct {

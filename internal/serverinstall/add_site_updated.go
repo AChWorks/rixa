@@ -28,6 +28,12 @@ func (m *Manager) completedAddSiteUpdate(ctx context.Context, parent *journal, a
 	if err != nil {
 		return nil, ErrState
 	}
+	// Reuse the update path's authoritative original-parent ownership check:
+	// it also authenticates the original frozen helper, not just its manager
+	// binary or the bytes of the original journal. No receipt-only shortcut.
+	if _, err := m.originalUpdateParent(activeJournal); err != nil {
+		return nil, ErrState
+	}
 	// The current active journal binds the *actual current* runtime config,
 	// environment, frozen private snapshot and all unchanged original physical
 	// PostgreSQL targets. Historical update snapshots are checked by their
