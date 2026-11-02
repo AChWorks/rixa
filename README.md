@@ -6,7 +6,7 @@ The native manager's source-level, initial-install optional two-site path,
 its separate PostgreSQL/TLS prerequisites and its unreleased acceptance status
 are documented in the [native operator guide](docs/server-management.md#optional-second-site-during-a-new-native-installation-development-source).
 Do not infer support from previously published binaries. Current development
-source also includes [after-install Add Site management](docs/server-management.md#inspect-adding-a-site-after-installation-read-only-source-capability):
+source also includes [after-install Add Site management](docs/server-management.md#add-site-after-an-existing-native-installation-development-source-not-released):
 read-only prerequisite inspection, durable Draft/Review, and a separately
 fenced, review-token-gated Apply/Resume implementation for an already healthy
 single-site installation. The effect-bearing path remains **unreleased and
