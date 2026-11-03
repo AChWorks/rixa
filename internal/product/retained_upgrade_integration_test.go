@@ -180,6 +180,7 @@ func TestRetainedReleaseUpgrade(t *testing.T) {
 	beforeRows := snapshotRetainedRows(t, ctx, dsns)
 	beforeFiles := snapshotRetainedFiles(t, raw.Sites[:2])
 	assertRetainedFixturePopulated(t, ctx, dsns)
+	backups := captureRetainedPublishedBackups(t, ctx, dsns, config, configPath, beforeFiles)
 
 	// The authentic v0.8 candidate cannot start on the v0.7 editorial-v2
 	// schema. This must fail closed without changing old data: Native Update
@@ -315,6 +316,8 @@ func TestRetainedReleaseUpgrade(t *testing.T) {
 		t.Fatal("control principal bypassed site authorization after upgrade")
 	}
 	stopNew()
+	proveRetainedPublishedRestore(t, ctx, dsn, backups, dsns, binary, config, configPath,
+		beforeRows, beforeFiles, beforeConfig)
 	t.Log("RIXA_RETAINED_UPGRADE baseline=v0.7.0 candidate_core=v0.5.0 candidate_audit=v0.2.0 sites=2 exact_rows_files_ledgers=true physical_targets_retained=true scoped_restart=true valid_sessions_retained=true revoked_foreign_denied=true control_dispatch=true")
 }
 
