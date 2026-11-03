@@ -70,7 +70,7 @@ func newControlSurface(sites []SiteConfig, service controlSiteManager, languages
 
 func serveControlSurface(service controlSiteManager, sites []SiteConfig, w http.ResponseWriter, r *http.Request, view shell.Request) {
 	if r.Method == http.MethodGet {
-		if r.URL.Path == "/account-create" {
+		if strings.HasPrefix(r.URL.Path, "/account-create/") {
 			serveControlAccountCreate(service, sites, w, r, view)
 			return
 		}
@@ -145,13 +145,15 @@ func serveControlSurface(service controlSiteManager, sites []SiteConfig, w http.
 // Authorization is checked again by CreateSiteAccount on POST; a hidden field
 // is never a grant and does not authorize an alternate site.
 func serveControlAccountCreate(service controlSiteManager, sites []SiteConfig, w http.ResponseWriter, r *http.Request, view shell.Request) {
-	query := r.URL.Query()["site_id"]
-	if len(query) != 1 || query[0] == "" || service == nil {
+	// The pinned AChrix Admin shell intentionally rejects all query strings.
+	// Site selection must live in an explicit, single path segment.
+	siteID := strings.TrimPrefix(r.URL.Path, "/account-create/")
+	if siteID == "" || strings.Contains(siteID, "/") || service == nil {
 		controlSurfaceFail(w, achrix.ErrDenied)
 		return
 	}
 	for _, site := range sites {
-		if site.ID != query[0] {
+		if site.ID != siteID {
 			continue
 		}
 		if site.Disabled || !view.Allowed(CapabilityControlSiteManage, site.ID) {
@@ -200,7 +202,7 @@ var inventoryTemplate = template.Must(template.New("inventory").Parse(`{{define 
 <tbody>{{range .Sites}}<tr>
 <th scope="row" dir="ltr"><bdi>{{.ID}}</bdi></th><td dir="ltr">{{.Origin}}</td>
 <td>{{if .Disabled}}{{$.Locale.Text "rixa" "disabled" nil}}{{else}}{{$.Locale.Text "rixa" "enabled" nil}}{{end}}</td>
-<td>{{if .CanManage}}<a href="/admin/sites/site/{{.ID}}/content/">{{$.Locale.Text "rixa" "manage_content" nil}}</a> · <a href="/admin/sites/account-create?site_id={{urlquery .ID}}">{{$.Locale.Text "rixa" "create_site_account" nil}}</a>{{else}}—{{end}}</td>
+<td>{{if .CanManage}}<a href="/admin/sites/site/{{.ID}}/content/">{{$.Locale.Text "rixa" "manage_content" nil}}</a> · <a href="/admin/sites/account-create/{{.ID}}">{{$.Locale.Text "rixa" "create_site_account" nil}}</a>{{else}}—{{end}}</td>
 </tr>{{end}}</tbody>
 </table>
 {{end}}`))

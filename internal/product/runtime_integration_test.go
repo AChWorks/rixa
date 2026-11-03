@@ -515,17 +515,17 @@ func testTrustedTLSIngress(t *testing.T, parent context.Context, config Config, 
 	}
 	for _, expected := range []string{
 		`/admin/assets/admin.js`,
-		`/admin/sites/account-create?site_id=site-a`,
+		`/admin/sites/account-create/site-a`,
 		`/admin/sites/site/site-a/content/`,
 	} {
 		if !strings.Contains(pageBody.String(), expected) {
 			t.Fatalf("control Sites page missing %q", expected)
 		}
 	}
-	if strings.Contains(pageBody.String(), `action="/admin/sites/account-create"`) || strings.Count(pageBody.String(), "site_id=site-a") != 1 {
+	if strings.Contains(pageBody.String(), `action="/admin/sites/account-create"`) || strings.Count(pageBody.String(), "/account-create/site-a") != 1 {
 		t.Fatal("control inventory still embeds account forms or repeats the site action")
 	}
-	accountPage, requestErr := request("control.rixa.test", http.MethodGet, "/admin/sites/account-create?site_id=site-a", nil, nil, controlSession.cookie)
+	accountPage, requestErr := request("control.rixa.test", http.MethodGet, "/admin/sites/account-create/site-a", nil, nil, controlSession.cookie)
 	if requestErr != nil {
 		t.Fatal(requestErr)
 	}
@@ -544,8 +544,8 @@ func testTrustedTLSIngress(t *testing.T, parent context.Context, config Config, 
 			t.Fatalf("selected account page missing %q", expected)
 		}
 	}
-	for _, selected := range []string{"disabled", "unknown", "", "site-a&site_id=site-b"} {
-		res, reqErr := request("control.rixa.test", http.MethodGet, "/admin/sites/account-create?site_id="+selected, nil, nil, controlSession.cookie)
+	for _, selected := range []string{"disabled", "unknown", "", "site-a/forged"} {
+		res, reqErr := request("control.rixa.test", http.MethodGet, "/admin/sites/account-create/"+selected, nil, nil, controlSession.cookie)
 		if reqErr != nil {
 			t.Fatal(reqErr)
 		}
@@ -554,7 +554,7 @@ func testTrustedTLSIngress(t *testing.T, parent context.Context, config Config, 
 			t.Fatalf("account page for forbidden scope %q: HTTP %d", selected, res.StatusCode)
 		}
 	}
-	noControl, requestErr := request("control.rixa.test", http.MethodGet, "/admin/sites/account-create?site_id=site-a", nil, nil, siteSession.cookie)
+	noControl, requestErr := request("control.rixa.test", http.MethodGet, "/admin/sites/account-create/site-a", nil, nil, siteSession.cookie)
 	if requestErr != nil {
 		t.Fatal(requestErr)
 	}

@@ -97,10 +97,10 @@ func TestControlAccountTemplatesSelectSingleSite(t *testing.T) {
 				t.Fatal(err)
 			}
 			html := inventory.String()
-			if strings.Count(html, "/admin/sites/account-create?site_id=") != 1 ||
-				!strings.Contains(html, "site_id=site-a") ||
-				strings.Contains(html, "site_id=disabled") ||
-				strings.Contains(html, "site_id=site-b") ||
+			if strings.Count(html, "/admin/sites/account-create/") != 1 ||
+				!strings.Contains(html, "/account-create/site-a") ||
+				strings.Contains(html, "/account-create/disabled") ||
+				strings.Contains(html, "/account-create/site-b") ||
 				strings.Contains(html, "action=\"/admin/sites/account-create\"") {
 				t.Fatal("inventory exposed extra account controls")
 			}
