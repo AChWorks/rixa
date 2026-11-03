@@ -506,7 +506,14 @@ func (m *Manager) candidateCommand(parent context.Context, u *updateJournal, j *
 			Core       string            `json:"achrix"`
 			Components map[string]string `json:"achrix_components"`
 		}
-		if decode(out.Bytes(), &receipt) != nil || !validCandidateCheckReceipt(receipt.Status, receipt.Sites, receipt.Core, receipt.Components, u.CandidateComponents) {
+		// The authenticated candidate must prove readiness for every site
+		// in the pinned installation, including an independently committed
+		// Add Site. A one-site success cannot authorize a two-site Update.
+		expectedSites := databaseTargetCount(j.Draft) - 1
+		if len(j.DatabaseTargets) != expectedSites+1 ||
+			decode(out.Bytes(), &receipt) != nil ||
+			!validCandidateCheckReceipt(receipt.Status, receipt.Sites, receipt.MultiSite, expectedSites,
+				receipt.Core, receipt.Components, u.CandidateComponents) {
 			return ErrState
 		}
 	}
