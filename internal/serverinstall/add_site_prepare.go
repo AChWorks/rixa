@@ -20,8 +20,8 @@ func (m *Manager) SaveAddSiteDraft(ctx context.Context, d AddSiteDraft) (Result,
 	if err := m.authorize(); err != nil {
 		return invalid, err
 	}
-	if !validAddSiteDraft(d) || d.SiteBPassword == "" {
-		invalid.Problems = []Problem{{Field: "operation_id", Code: "invalid-draft", Message: "Provide an independent operation ID and all five bounded Add Site fields."}}
+	if problems := ValidateAddSiteDraftInput(d); len(problems) > 0 {
+		invalid.Problems = problems
 		return invalid, ErrInput
 	}
 	unlock, err := m.lock(ctx, false)
@@ -36,10 +36,12 @@ func (m *Manager) SaveAddSiteDraft(ctx context.Context, d AddSiteDraft) (Result,
 	}
 	owner, err := readPrivate(filepath.Join(m.stateRoot, "installation"), m.ownerUID, 128)
 	if err != nil || string(owner) != d.InstallationOperation+"\n" {
+		invalid.Problems = []Problem{{Field: "installation_operation", Code: "original-not-eligible", Message: "Check original installation ID and eligible installed state."}}
 		return invalid, ErrState
 	}
 	parent, err := m.load(d.InstallationOperation)
 	if err != nil || parent.State != "installed" || parent.Frozen == "" || parent.Attempts["remove"] != "" {
+		invalid.Problems = []Problem{{Field: "installation_operation", Code: "original-not-eligible", Message: "Check original installation ID and eligible installed state."}}
 		return invalid, ErrState
 	}
 	if problems := ValidateAddSiteInspection(parent.Draft, d.AddSiteInspectionDraft); len(problems) > 0 {

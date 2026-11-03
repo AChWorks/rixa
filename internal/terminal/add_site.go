@@ -75,8 +75,10 @@ func (a *addSiteAdapter) annotate(r serverinstall.Result) serverinstall.Result {
 	if r.InstallationOperation == "" {
 		r.InstallationOperation = a.installation
 	}
-	// Only unfrozen drafts can be corrected. The backend independently
-	// rejects an attempted rewrite of a committed/frozen operation.
+	// Configure and Inspect are locally offered, separately guarded
+	// non-effectful affordances. Review/Apply/Resume/Status remain restricted
+	// to the native backend's actions and authorization. Frozen operations
+	// never acquire Configure or Inspect here.
 	if r.State == "draft" || r.State == "blocked" || r.State == "ready" ||
 		r.State == "not-installed" {
 		hasConfigure, hasInspect := false, false
@@ -192,7 +194,10 @@ func (a *addSiteAdapter) configure(ctx context.Context, s *session, d *serverins
 		{"site_b_login", "New site-B administrator", "An independent login; do not reuse an existing site administrator.", false, &d.SiteBLogin},
 		{"site_b_password", "New site-B password", "Hidden private bootstrap secret; empty Enter retains saved input.", true, &d.SiteBPassword},
 	}
-	// Authoritative validation is the same backend SaveAddSiteDraft used by
-	// the direct CLI; its typed Problem fields drive correction here.
-	return configureFields(ctx, s, a, d, r, fields, 0, func() []serverinstall.Problem { return nil })
+	// This is the native SaveAddSiteDraft input preflight, not a second
+	// acceptance policy. Host eligibility and full cross-site validation stay
+	// exclusively in the native Save/Review backend.
+	return configureFields(ctx, s, a, d, r, fields, 0, func() []serverinstall.Problem {
+		return serverinstall.ValidateAddSiteDraftInput(a.selected(*d))
+	})
 }

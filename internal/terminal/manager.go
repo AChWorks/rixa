@@ -656,18 +656,37 @@ func configureFields(ctx context.Context, s *session, backend serverinstall.Faca
 						return result, true, nil
 					}
 					current = result
-					notice = publicError(saveErr, *d)
 					index = len(fields) - 1
+					matched := false
 					for _, problem := range result.Problems {
-						for i, f := range fields {
-							if f.key == problem.Field {
+						for i, editable := range fields {
+							if editable.key == problem.Field {
 								index = i
 								notice = publicValue(problem.Message, *d)
+								matched = true
 								break
 							}
 						}
-						if index != len(fields)-1 {
+						if matched {
 							break
+						}
+					}
+					if !matched {
+						// Keep existing installation/update/PostgreSQL error
+						// presentation unchanged. Only the new Add Site journey
+						// needs guidance for its noneditable operation ID.
+						notice = publicError(saveErr, *d)
+						if result.OperationKind == "add-site" {
+							if len(result.Problems) > 0 && result.Problems[0].Field == "operation_id" {
+								notice = "Not saved. Exit and reopen with a new --operation ID. " +
+									publicValue(result.Problems[0].Message, *d)
+							} else {
+								notice = "Not saved. Check operation ID and native Status; Back to edit. (" +
+									publicError(saveErr, *d) + ")"
+								if len(result.Problems) > 0 {
+									notice += " " + publicValue(result.Problems[0].Message, *d)
+								}
+							}
 						}
 					}
 				}

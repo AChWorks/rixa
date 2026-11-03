@@ -210,7 +210,15 @@ saved inputs when the form is reopened. `Apply` is exposed only after this menu 
 obtains its *own* Review token; Status/reopening cannot adopt another
 session's token. `Resume` appears only if native Status offers that action.
 Unsaved edits disable Review/Apply; `--non-interactive` never opens a menu.
-The menu never offers an individual site's Remove or Purge. Existing
+The menu never offers an individual site's Remove or Purge. Separately
+guarded local Configure/Inspect choices are available on editable states;
+Review/Apply/Resume remain strictly backend-authorized. The form shares
+Native Save input validation and keeps focus on missing fields. If Native Save
+rejects a malformed database/login/password or an ineligible original
+installation, the form returns to the matching editable field with
+non-sensitive guidance; operation-level errors remain distinct from password
+errors. The new operation ID is fixed while the menu is open; a conflicting
+ID requires reopening with a different `--operation`. Existing
 `--plain`, `--no-color`, terminal resize, back, help and Ctrl-C behavior
 apply without changing product/web language.
 

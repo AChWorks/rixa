@@ -13,13 +13,15 @@ import (
 )
 
 type addSiteTestFacade struct {
-	draft                                         serverinstall.AddSiteDraft
-	saves, reviews, applies, resumes, inspections int
-	token                                         string
-	ready, recovery, resumable                    bool
-	installed                                     bool
-	notFound                                      bool
-	failSaveOnce                                  bool
+	draft                                                   serverinstall.AddSiteDraft
+	saves, reviews, applies, resumes, inspections, accepted int
+	token                                                   string
+	ready, recovery, resumable                              bool
+	installed                                               bool
+	notFound                                                bool
+	failSaveOnce                                            bool
+	validateNative                                          bool
+	operationError                                          bool
 }
 
 func testAddSiteDraft() serverinstall.AddSiteDraft {
@@ -44,11 +46,52 @@ func (f *addSiteTestFacade) InspectAddSite(context.Context, serverinstall.AddSit
 }
 func (f *addSiteTestFacade) SaveAddSiteDraft(_ context.Context, d serverinstall.AddSiteDraft) (serverinstall.Result, error) {
 	f.saves++
-	f.draft = d
 	if f.failSaveOnce && f.saves == 1 {
 		return f.result("draft", "save-unavailable", "review", "status"),
 			errors.New("private Add Site admission unavailable: " + d.SiteBDSN + " " + d.SiteBPassword)
 	}
+	if f.operationError {
+		return f.result("draft", "operation-unavailable", "configure", "status"),
+			serverinstall.ErrState
+	}
+	if f.validateNative {
+		r := serverinstall.Result{OperationKind: "add-site", OperationID: d.OperationID,
+			InstallationOperation: d.InstallationOperation, State: "draft", Code: "invalid-input",
+			Actions: []string{"configure", "status"}}
+		if problems := serverinstall.ValidateAddSiteDraftInput(d); len(problems) > 0 {
+			r.Problems = problems
+			return r, serverinstall.ErrInput
+		}
+		// Match the Native SaveAddSiteDraft parent-denial contract. A
+		// separate serverinstall test proves that this is the actual
+		// backend error shape, not an invented TUI permission.
+		if d.InstallationOperation != "owner-install" {
+			r.Problems = []serverinstall.Problem{{
+				Field: "installation_operation", Code: "original-not-eligible",
+				Message: "Check original installation ID and eligible installed state.",
+			}}
+			return r, serverinstall.ErrState
+		}
+		// Use the existing native field validator to simulate its
+		// detailed Save admission, without duplicating DSN/password
+		// formats in the PTY test fake.
+		candidate := testDraft()
+		candidate.OperationID = d.InstallationOperation
+		candidate.SiteBOrigin = d.SiteBOrigin
+		candidate.SiteBDSN = d.SiteBDSN
+		candidate.SiteBLogin = d.SiteBLogin
+		candidate.SiteBPassword = d.SiteBPassword
+		for _, problem := range serverinstall.ValidateDraftFields(candidate) {
+			if strings.HasPrefix(problem.Field, "site_b_") {
+				r.Problems = append(r.Problems, problem)
+			}
+		}
+		if len(r.Problems) > 0 {
+			return r, serverinstall.ErrInput
+		}
+	}
+	f.draft = d
+	f.accepted++
 	return f.result("draft", "draft-saved", "review", "status"), nil
 }
 func (f *addSiteTestFacade) LoadAddSiteDraft(context.Context, string) (serverinstall.AddSiteDraft, error) {
@@ -211,5 +254,21 @@ func TestAddSiteFrozenStatusRestoresPublicParentWithoutPrivateDraft(t *testing.T
 	_, _, lines := a.confirmation("resume", "pty-case", r)
 	if !strings.Contains(strings.Join(lines, "\n"), "Original installation: owner-install") {
 		t.Fatal("Resume confirmation did not name exact native predecessor")
+	}
+}
+
+func TestAddSiteBlockedStatusOnlyAffordancesCannotGrantEffects(t *testing.T) {
+	a := &addSiteAdapter{backend: &addSiteTestFacade{draft: testAddSiteDraft()}, installation: "owner-install"}
+	r := a.annotate(serverinstall.Result{OperationID: "pty-case", State: "blocked",
+		Code: "prerequisite-required", Actions: []string{"status"}})
+	got := a.actions(r.Actions)
+	if len(got) != 5 || got[0].id != "configure" || got[1].id != "inspect" ||
+		got[2].id != "status" || got[3].id != "details" || got[4].id != "exit" {
+		t.Fatalf("blocked native status-only operation granted unexpected actions: %#v", got)
+	}
+	for _, item := range got {
+		if item.id == "apply" || item.id == "resume" || item.id == "remove" {
+			t.Fatal("locally offered non-effectful affordance became an effect")
+		}
 	}
 }
