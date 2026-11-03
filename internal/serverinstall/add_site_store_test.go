@@ -55,6 +55,7 @@ func installedAddSiteFixture() *addSiteJournal {
 	j.ManagerSHA256 = strings.Repeat("f", 64)
 	j.ReviewedManagerSHA256 = j.ManagerSHA256
 	j.ExecutorGeneration, j.ExecutorAcknowledged = 1, true
+	j.ExecutorVerifiedGeneration = 1
 	j.Attempts["executor"] = "verified"
 	for _, stage := range addSiteStages {
 		j.Attempts[stage] = "verified"

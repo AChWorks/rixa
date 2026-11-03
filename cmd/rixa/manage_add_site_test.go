@@ -99,7 +99,7 @@ func (s *mockSitePreparer) AddSiteStatus(_ context.Context, id string) (serverin
 	return serverinstall.Result{OperationKind: "add-site", OperationID: id, State: "ready", Code: "ready"}, nil
 }
 
-func TestManageAddSitePreparatoryCLIRequiresPrivateDraftAndNeverApplies(t *testing.T) {
+func TestManageAddSitePreparationOnlyFacadeNeverAcquiresEffects(t *testing.T) {
 	d := serverinstall.AddSiteDraft{
 		OperationID: "new-site-addition",
 		AddSiteInspectionDraft: serverinstall.AddSiteInspectionDraft{
@@ -120,7 +120,7 @@ func TestManageAddSitePreparatoryCLIRequiresPrivateDraftAndNeverApplies(t *testi
 	backend := &mockSitePreparer{}
 	var out bytes.Buffer
 	if err = manageWithFacade(context.Background(), []string{"add-site", "--help"}, nil, &out, backend); err != nil ||
-		!strings.Contains(out.String(), "no Apply/Resume") || backend.saves != 0 {
+		!strings.Contains(out.String(), "managed Apply/Resume") || backend.saves != 0 {
 		t.Fatalf("preparation-only help was unavailable or dispatched effects: %v %q", err, out.String())
 	}
 	out.Reset()

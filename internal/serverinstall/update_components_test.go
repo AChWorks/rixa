@@ -4,6 +4,7 @@ package serverinstall
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -85,18 +86,56 @@ func TestUpdateCandidateGraphMayDifferFromManagerButRetainsExactCompiledIdentity
 func TestCandidateCheckReceiptBindsAuthenticatedCandidateGraph(t *testing.T) {
 	candidate := candidateGraphFixture()
 	core := candidate["github.com/AChWorks/achrix"]
-	if !validCandidateCheckReceipt("ok", 1, core, candidate, candidate) {
-		t.Fatal("candidate's own readiness receipt rejected")
+	for _, tc := range []struct {
+		name          string
+		sites         int
+		multiSite     bool
+		expectedSites int
+		want          bool
+	}{
+		{"one-site-candidate-for-one-site", 1, false, 1, true},
+		{"two-site-candidate-for-committed-add-site", 2, true, 2, true},
+		{"one-site-candidate-for-two-site", 1, false, 2, false},
+		{"two-site-candidate-for-one-site", 2, true, 1, false},
+		{"two-site-with-single-site-flag", 2, false, 2, false},
+		{"one-site-with-multisite-flag", 1, true, 1, false},
+		{"unsupported-zero-target", 1, false, 0, false},
+		{"unsupported-three-site-target", 3, true, 3, false},
+		{"empty-site-count", 0, false, 1, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := validCandidateCheckReceipt("ok", tc.sites, tc.multiSite, tc.expectedSites, core, candidate, candidate)
+			if got != tc.want {
+				t.Fatalf("candidate receipt accepted=%t, expected=%t", got, tc.want)
+			}
+		})
 	}
-	if validCandidateCheckReceipt("ok", 1, product.FoundationVersions()["github.com/AChWorks/achrix"], product.FoundationVersions(), candidate) {
-		t.Fatal("manager graph substituted for candidate readiness receipt")
-	}
-	altered := candidateGraphFixture()
-	delete(altered, "github.com/AChWorks/achrix/admin")
-	if validCandidateCheckReceipt("ok", 1, core, altered, candidate) || validCandidateCheckReceipt("ok", 2, core, candidate, candidate) || validCandidateCheckReceipt("ok", 1, "v99.0.0", candidate, candidate) {
-		t.Fatal("incomplete or retargeted candidate receipt accepted")
+	for _, expected := range []int{1, 2} {
+		t.Run(fmt.Sprintf("signed-graph-bound-site-count-%d", expected), func(t *testing.T) {
+			multi := expected == 2
+			altered := candidateGraphFixture()
+			delete(altered, "github.com/AChWorks/achrix/admin")
+			for _, bad := range []struct {
+				name       string
+				status     string
+				core       string
+				components map[string]string
+			}{
+				{"stale-manager-graph", "ok", product.FoundationVersions()["github.com/AChWorks/achrix"], product.FoundationVersions()},
+				{"missing-component", "ok", core, altered},
+				{"wrong-core", "ok", "v99.0.0", candidate},
+				{"non-success", "failed", core, candidate},
+			} {
+				t.Run(bad.name, func(t *testing.T) {
+					if validCandidateCheckReceipt(bad.status, expected, multi, expected, bad.core, bad.components, candidate) {
+						t.Fatal("unverified candidate receipt accepted")
+					}
+				})
+			}
+		})
 	}
 }
+
 func TestGenuinePublishedUpdatePayloadComponentIdentity(t *testing.T) {
 	archive := os.Getenv("RIXA_NATIVE_UPDATE_SIGNED_ARCHIVE")
 	if archive == "" {

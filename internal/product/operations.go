@@ -47,6 +47,50 @@ func Migrate(parent context.Context, config Config, getenv func(string) (string,
 	return nil
 }
 
+// MigrateAddedSite applies the installed product schema only to the newly
+// admitted site-b database. It never executes migrations against Control or
+// site-a, even though their connection bindings are validated together.
+func MigrateAddedSite(parent context.Context, config Config, getenv func(string) (string, bool)) error {
+	if len(config.Sites) != 2 || config.Sites[0].ID != "site-a" ||
+		config.Sites[1].ID != "site-b" || validateDeclaredMediaRoots(config.Sites) != nil {
+		return ErrConfiguration
+	}
+	targets, err := config.DatabaseTargets(parent, getenv)
+	if err != nil || len(targets) != 3 {
+		return ErrConfiguration
+	}
+	foundSiteB := false
+	for _, target := range targets {
+		if target.ID != "site-b" {
+			continue
+		}
+		if foundSiteB {
+			return ErrConfiguration
+		}
+		foundSiteB = true
+		if target.Kind != DatabaseSite {
+			return ErrConfiguration
+		}
+		ctx, cancel := context.WithTimeout(parent, migrationTimeout)
+		err = audit.Migrate(ctx, target.DSN)
+		if err == nil {
+			err = identity.Migrate(ctx, target.DSN)
+		}
+		if err == nil {
+			err = media.Migrate(ctx, target.DSN)
+		}
+		if err == nil {
+			err = migrateEditorial(ctx, target.DSN, target.ID)
+		}
+		cancel()
+		if err != nil {
+			return fmt.Errorf("migrate site-b: %w", err)
+		}
+		return nil
+	}
+	return ErrConfiguration
+}
+
 type BootstrapResult struct {
 	Account    identity.Account
 	Created    bool

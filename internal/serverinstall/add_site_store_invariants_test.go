@@ -33,15 +33,22 @@ func TestAddSiteJournalAcceptsRealInterruptedExecutorReceipts(t *testing.T) {
 	}{
 		{"queued-unacknowledged", func(*addSiteJournal) {}},
 		{"queued-acknowledged", func(j *addSiteJournal) { j.ExecutorAcknowledged = true }},
-		{"executor-verified-before-stage", func(j *addSiteJournal) { j.Attempts["executor"] = "verified" }},
+		{"executor-verified-before-stage", func(j *addSiteJournal) {
+			j.ExecutorVerifiedGeneration = 1
+			j.ExecutorAcknowledged = true
+			j.Attempts["executor"] = "verified"
+		}},
 		{"first-stage-attempted", func(j *addSiteJournal) {
 			j.ExecutorAcknowledged = true
 			j.Attempts["executor"] = "verified"
+			j.ExecutorVerifiedGeneration = 1
 			j.Stage = "prepare"
 			j.Attempts["prepare"] = "attempted"
 		}},
 		{"second-stage-interrupted", func(j *addSiteJournal) {
 			j.Attempts["executor"] = "verified"
+			j.ExecutorVerifiedGeneration = 1
+			j.ExecutorAcknowledged = true
 			j.Stage = "migrate"
 			j.Attempts["prepare"] = "verified"
 			j.Attempts["migrate"] = "attempted"
@@ -56,6 +63,9 @@ func TestAddSiteJournalAcceptsRealInterruptedExecutorReceipts(t *testing.T) {
 				t.Fatal("legitimate incomplete executor receipt was rejected")
 			}
 			m := testManager(t)
+			m.run = func(context.Context, string, ...string) ([]byte, error) {
+				return []byte("inactive\\n"), nil
+			}
 			if err := m.saveAddSite(j); err != nil {
 				t.Fatalf("interrupted journal could not be retained: %v", err)
 			}
@@ -64,7 +74,8 @@ func TestAddSiteJournalAcceptsRealInterruptedExecutorReceipts(t *testing.T) {
 				t.Fatalf("interrupted journal not recovered: %v", err)
 			}
 			observed, err := m.AddSiteStatus(context.Background(), j.Draft.OperationID)
-			if err != nil || observed.State != j.State || observed.Stage != j.Stage || observed.ReviewToken != "" {
+			if err != nil || observed.Stage != j.Stage || observed.ReviewToken != "" ||
+				(observed.State != j.State && !(j.State == "applying" && observed.State == "reconciliation-required")) {
 				t.Fatalf("status misrepresented incomplete execution: %+v %v", observed, err)
 			}
 		})

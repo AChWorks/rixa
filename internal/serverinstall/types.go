@@ -107,3 +107,13 @@ type AddSitePreparationFacade interface {
 }
 
 var _ AddSitePreparationFacade = (*Manager)(nil)
+
+// AddSiteEffects is an explicit effect-bearing extension of the native
+// preparation facade; existing callers do not acquire it accidentally.
+type AddSiteEffects interface {
+	AddSitePreparationFacade
+	ApplyAddSite(context.Context, string, string) (Result, error)
+	ResumeAddSite(context.Context, string) (Result, error)
+}
+
+var _ AddSiteEffects = (*Manager)(nil)

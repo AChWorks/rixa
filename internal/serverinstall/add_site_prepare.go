@@ -29,6 +29,11 @@ func (m *Manager) SaveAddSiteDraft(ctx context.Context, d AddSiteDraft) (Result,
 		return invalid, err
 	}
 	defer unlock()
+	activeSite, activeError := m.addSiteMarker("active-add-site")
+	pendingSite, pendingError := m.addSiteMarker("pending-add-site")
+	if activeError != nil || pendingError != nil || activeSite != "" || pendingSite != "" {
+		return invalid, ErrBusy
+	}
 	owner, err := readPrivate(filepath.Join(m.stateRoot, "installation"), m.ownerUID, 128)
 	if err != nil || string(owner) != d.InstallationOperation+"\n" {
 		return invalid, ErrState
@@ -104,6 +109,11 @@ func (m *Manager) ReviewAddSite(ctx context.Context, id string) (Result, error) 
 	if j.Frozen != "" {
 		return addSiteResult(j), ErrState
 	}
+	activeSite, activeError := m.addSiteMarker("active-add-site")
+	pendingSite, pendingError := m.addSiteMarker("pending-add-site")
+	if activeError != nil || pendingError != nil || activeSite != "" || pendingSite != "" {
+		return addSiteResult(j), ErrBusy
+	}
 	// Re-review must revoke the previous token *durably* before any host
 	// observation. A crash or uncertain probe must never leave stale consent.
 	j.State, j.Stage, j.Code, j.ReviewToken = "blocked", "review", "review-in-progress", ""
@@ -136,27 +146,54 @@ func (m *Manager) ReviewAddSite(ctx context.Context, id string) (Result, error) 
 	observed.bind(j)
 	j.ReviewToken = hex.EncodeToString(token)
 	j.State, j.Stage, j.Code = "ready", "review", "ready"
-	j.Message = "Durable Add Site prerequisites reviewed; no topology change or execution occurred. Apply/Resume are not yet available in this source slice."
+	j.Message = "Durable Add Site prerequisites reviewed; no topology change has occurred. Apply requires this exact review token."
 	if err = m.saveAddSite(j); err != nil {
 		return Result{}, err
 	}
-	return addSiteResult(j), nil
+	receipt := addSiteResult(j)
+	receipt.ReviewToken = j.ReviewToken
+	receipt.Actions = []string{"review", "apply", "status"}
+	return receipt, nil
 }
 
-// AddSiteStatus never returns its review token and never probes a service by
-// executing a management stage. A stale predecessor is not reported as ready.
+// AddSiteStatus never returns its review token and is observational even
+// while a separate executor holds the effect lock. It executes no mutation.
 func (m *Manager) AddSiteStatus(ctx context.Context, id string) (Result, error) {
-	unlock, err := m.lockDraftRead(ctx, id)
-	if err != nil {
+	// Atomic private journal reads remain safe while an effect executor owns
+	// the exclusive manager lock; status must not block behind that lock.
+	if err := m.authorize(); err != nil {
 		return Result{}, err
 	}
-	defer unlock()
+	if !operationSyntax.MatchString(id) {
+		return Result{}, ErrInput
+	}
+	if err := privateDir(m.stateRoot, m.ownerUID, false); err != nil {
+		return Result{}, err
+	}
 	j, err := m.loadAddSite(id)
 	if err != nil {
 		return Result{}, err
 	}
 	r := addSiteResult(j)
 	r.ReviewToken = ""
+	if j.State == "installed" {
+		return m.installedAddSiteStatus(ctx, j)
+	}
+	if j.State == "applying" || j.State == "reconciliation-required" {
+		out, err := m.run(ctx, "/usr/bin/systemctl", "show", "--property=ActiveState", "--value", addSiteExecutorName(j))
+		if err == nil && (strings.TrimSpace(string(out)) == "active" || strings.TrimSpace(string(out)) == "activating") {
+			r.Message = "The frozen Add Site executor is active; refresh retained stages."
+			return r, nil
+		}
+		if m.addSiteResumable(ctx, j) {
+			r.Actions = []string{"resume", "status"}
+		}
+		if j.State == "applying" {
+			r.State, r.Code, r.Message = "reconciliation-required", "executor-not-active",
+				"The Add Site executor is not active; inspect its exact retained stage and journal."
+		}
+		return r, nil
+	}
 	if j.State != "ready" {
 		return r, nil
 	}
@@ -200,6 +237,6 @@ func (m *Manager) AddSiteStatus(ctx context.Context, id string) (Result, error) 
 		r.Actions = []string{"review", "status"}
 		return r, ErrState
 	}
-	r.Message = strings.TrimSpace(r.Message) + " Read-only host evidence remains current; Apply is unavailable in this source slice."
+	r.Message = strings.TrimSpace(r.Message) + " Read-only host evidence remains current; Apply requires the token from the latest Review."
 	return r, nil
 }

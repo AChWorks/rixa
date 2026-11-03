@@ -162,7 +162,7 @@ func (m *Manager) verifyCurrentSiteBTLS(ctx context.Context, j *journal, origin 
 
 func addSiteInspectionResult(operation string) Result {
 	return Result{OperationKind: "add-site-inspection", InstallationOperation: operation, OperationID: operation,
-		State: "blocked", Code: "not-reviewed", Message: "Inspection only; no Add Site effect, review token, or Apply capability is available.",
+		State: "blocked", Code: "not-reviewed", Message: "Inspection only: no site has been added, and this read-only result grants no Apply consent.",
 		Actions: []string{"inspect"}}
 }
 
@@ -279,6 +279,6 @@ func (m *Manager) inspectAddSiteLocked(ctx context.Context, proposed AddSiteInsp
 		return result, ErrPrerequisite
 	}
 	result.State, result.Code = "inspected", "prerequisites-verified"
-	result.Message = "A currently healthy one-site installation (including an exactly bound completed update, if present), separate third PostgreSQL database/role and existing TLS hostname coverage were verified. No site was added. Applying a topology change remains unavailable."
+	result.Message = "A currently healthy one-site installation (including an exactly bound completed update, if present), separate third PostgreSQL database/role and existing TLS hostname coverage were verified. No site was added. Inspection is not permission to apply a topology change."
 	return result, nil
 }

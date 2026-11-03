@@ -399,6 +399,9 @@ func (m *Manager) remove(ctx context.Context, id string, installationOnly bool) 
 		return Result{}, e
 	}
 	defer unlock()
+	if err := m.rejectPendingAddSite(); err != nil {
+		return Result{}, err
+	}
 	if pending, pe := m.updateMarker("pending-update"); pe != nil {
 		return Result{}, pe
 	} else if pending != "" {
@@ -422,10 +425,14 @@ func (m *Manager) remove(ctx context.Context, id string, installationOnly bool) 
 	if j.State != "installed" || j.Attempts["remove"] != "" {
 		return result(j), ErrState
 	}
-	if e = m.checkOwnedService(j); e != nil {
+	physical, e := m.addSitePreRemoveView(j)
+	if e != nil {
 		return result(j), e
 	}
-	if e = m.loadedServiceOwned(ctx, j, false); e != nil {
+	if e = m.checkOwnedService(physical); e != nil {
+		return result(j), e
+	}
+	if e = m.loadedServiceOwned(ctx, physical, false); e != nil {
 		return result(j), e
 	}
 	j.Stage = "remove"
@@ -440,7 +447,7 @@ func (m *Manager) remove(ctx context.Context, id string, installationOnly bool) 
 	if e != nil || strings.TrimSpace(string(out)) != "inactive" {
 		return m.fail(j, "remove-service-active", "The owned service is not verified inactive; executables were retained.")
 	}
-	if e = m.checkOwnedService(j); e != nil {
+	if e = m.checkOwnedService(physical); e != nil {
 		return m.fail(j, "remove-ownership-drift", "Owned executable/unit changed; no file was removed.")
 	}
 	if e = os.Remove(unitPath); e != nil {

@@ -405,6 +405,15 @@ func (m *Manager) Status(ctx context.Context, id string) (Result, error) {
 		return Result{}, e
 	}
 	if j.State == "installed" {
+		if pendingSite, pe := m.addSiteMarker("pending-add-site"); pe != nil {
+			return Result{}, pe
+		} else if pendingSite != "" {
+			r := result(j)
+			r.State, r.Code, r.Message = "reconciliation-required", "topology-pending",
+				"An Add Site executor owns the native installation; inspect the Add Site operation."
+			r.Actions = []string{"status"}
+			return r, nil
+		}
 		if pending, pe := m.updateMarker("pending-update"); pe != nil {
 			return Result{}, pe
 		} else if pending != "" {
@@ -440,6 +449,20 @@ func (m *Manager) Status(ctx context.Context, id string) (Result, error) {
 		}
 	}
 	if j.State == "installed" {
+		activeSite, ae := m.addSiteMarker("active-add-site")
+		if ae != nil {
+			return r, ae
+		}
+		if activeSite != "" {
+			addition, le := m.loadAddSite(activeSite)
+			if le != nil || addition.Draft.InstallationOperation != id {
+				return r, ErrState
+			}
+			a, se := m.installedAddSiteStatus(ctx, addition)
+			r.Code, r.Message = a.Code, a.Message
+			r.Actions = []string{"status", "remove"}
+			return r, se
+		}
 		if e = m.validateInstalled(ctx, j); e == nil {
 			var observed map[string]string
 			observed, e = databaseIdentities(ctx, j.Draft)
