@@ -515,13 +515,52 @@ func testTrustedTLSIngress(t *testing.T, parent context.Context, config Config, 
 	}
 	for _, expected := range []string{
 		`/admin/assets/admin.js`,
-		`data-admin-form`,
-		`action="/admin/sites/account-create"`,
-		`name="site_id" value="site-a"`,
+		`/admin/sites/account-create?site_id=site-a`,
+		`/admin/sites/site/site-a/content/`,
 	} {
 		if !strings.Contains(pageBody.String(), expected) {
 			t.Fatalf("control Sites page missing %q", expected)
 		}
+	}
+	if strings.Contains(pageBody.String(), `action="/admin/sites/account-create"`) || strings.Count(pageBody.String(), "site_id=site-a") != 1 {
+		t.Fatal("control inventory still embeds account forms or repeats the site action")
+	}
+	accountPage, requestErr := request("control.rixa.test", http.MethodGet, "/admin/sites/account-create?site_id=site-a", nil, nil, controlSession.cookie)
+	if requestErr != nil {
+		t.Fatal(requestErr)
+	}
+	accountBody, _ := io.ReadAll(accountPage.Body)
+	_ = accountPage.Body.Close()
+	if accountPage.StatusCode != http.StatusOK {
+		t.Fatalf("selected site account page status=%d body=%s", accountPage.StatusCode, accountBody)
+	}
+	for _, expected := range []string{
+		`data-control-account-create`,
+		`action="/admin/sites/account-create"`,
+		`name="site_id" value="site-a"`,
+		`autocomplete="new-password"`,
+	} {
+		if !strings.Contains(string(accountBody), expected) {
+			t.Fatalf("selected account page missing %q", expected)
+		}
+	}
+	for _, selected := range []string{"disabled", "unknown", "", "site-a&site_id=site-b"} {
+		res, reqErr := request("control.rixa.test", http.MethodGet, "/admin/sites/account-create?site_id="+selected, nil, nil, controlSession.cookie)
+		if reqErr != nil {
+			t.Fatal(reqErr)
+		}
+		_ = res.Body.Close()
+		if res.StatusCode != http.StatusForbidden {
+			t.Fatalf("account page for forbidden scope %q: HTTP %d", selected, res.StatusCode)
+		}
+	}
+	noControl, requestErr := request("control.rixa.test", http.MethodGet, "/admin/sites/account-create?site_id=site-a", nil, nil, siteSession.cookie)
+	if requestErr != nil {
+		t.Fatal(requestErr)
+	}
+	_ = noControl.Body.Close()
+	if noControl.StatusCode == http.StatusOK {
+		t.Fatal("site session opened Control account form")
 	}
 
 	adminScript, scriptErr := request("control.rixa.test", http.MethodGet, "/admin/assets/admin.js", nil, nil, nil)

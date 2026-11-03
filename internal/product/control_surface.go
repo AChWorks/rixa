@@ -33,6 +33,11 @@ type inventoryView struct {
 	Sites  []inventoryItem
 }
 
+type accountCreateView struct {
+	Locale *localize.Localizer
+	Site   inventoryItem
+}
+
 func newControlSurface(sites []SiteConfig, service controlSiteManager, languages ...localize.Locale) shell.Surface {
 	return shell.Surface{
 		ID:         "sites",
@@ -65,6 +70,10 @@ func newControlSurface(sites []SiteConfig, service controlSiteManager, languages
 
 func serveControlSurface(service controlSiteManager, sites []SiteConfig, w http.ResponseWriter, r *http.Request, view shell.Request) {
 	if r.Method == http.MethodGet {
+		if r.URL.Path == "/account-create" {
+			serveControlAccountCreate(service, sites, w, r, view)
+			return
+		}
 		if r.URL.Path != "/" {
 			w.WriteHeader(http.StatusNotFound)
 			return
@@ -132,6 +141,37 @@ func serveControlSurface(service controlSiteManager, sites []SiteConfig, w http.
 	}{account.ID, account.Login, account.Enabled, account.Revision})
 }
 
+// The account form is deliberately opened for one explicitly selected site.
+// Authorization is checked again by CreateSiteAccount on POST; a hidden field
+// is never a grant and does not authorize an alternate site.
+func serveControlAccountCreate(service controlSiteManager, sites []SiteConfig, w http.ResponseWriter, r *http.Request, view shell.Request) {
+	query := r.URL.Query()["site_id"]
+	if len(query) != 1 || query[0] == "" || service == nil {
+		controlSurfaceFail(w, achrix.ErrDenied)
+		return
+	}
+	for _, site := range sites {
+		if site.ID != query[0] {
+			continue
+		}
+		if site.Disabled || !view.Allowed(CapabilityControlSiteManage, site.ID) {
+			controlSurfaceFail(w, achrix.ErrDenied)
+			return
+		}
+		if err := renderProductPage(view, "create_site_account", shell.Page{
+			Template: accountCreateTemplate,
+			Data: accountCreateView{
+				Locale: view.Localizer,
+				Site:   inventoryItem{ID: site.ID, Origin: site.Origin},
+			},
+		}); err != nil {
+			controlSurfaceFail(w, ErrUnavailable)
+		}
+		return
+	}
+	controlSurfaceFail(w, achrix.ErrDenied)
+}
+
 func controlSurfaceFail(w http.ResponseWriter, err error) {
 	status, code := http.StatusServiceUnavailable, "unavailable"
 	switch {
@@ -156,13 +196,25 @@ func controlSurfaceFail(w http.ResponseWriter, err error) {
 var inventoryTemplate = template.Must(template.New("inventory").Parse(`{{define "content"}}
 <p>{{.Locale.Text "rixa" "sites_notice" nil}}</p>
 <table>
-<thead><tr><th>{{.Locale.Text "rixa" "id" nil}}</th><th>{{.Locale.Text "rixa" "origin" nil}}</th><th>{{.Locale.Text "rixa" "state" nil}}</th></tr></thead>
-<tbody>{{range .Sites}}<tr><td dir="ltr"><bdi>{{.ID}}</bdi>{{if .CanManage}}<br><a href="/admin/sites/site/{{.ID}}/content/">{{$.Locale.Text "rixa" "manage_content" nil}}</a>{{end}}</td><td dir="ltr">{{.Origin}}</td><td>{{if .Disabled}}{{$.Locale.Text "rixa" "disabled" nil}}{{else}}{{$.Locale.Text "rixa" "enabled" nil}}{{end}}</td></tr>
-{{if .CanManage}}<tr><td colspan="3"><form data-admin-form action="/admin/sites/account-create" method="post">
-<input type="hidden" name="site_id" value="{{.ID}}">
-<label>{{$.Locale.Text "rixa" "login" nil}} <input name="login" dir="ltr" maxlength="64" autocomplete="off" required></label>
-<label>{{$.Locale.Text "rixa" "initial_password" nil}} <input name="password" type="password" autocomplete="new-password" required></label>
-<button type="submit">{{$.Locale.Text "rixa" "create_site_account" nil}}</button>
-</form></td></tr>{{end}}{{end}}</tbody>
+<thead><tr><th scope="col">{{.Locale.Text "rixa" "id" nil}}</th><th scope="col">{{.Locale.Text "rixa" "origin" nil}}</th><th scope="col">{{.Locale.Text "rixa" "state" nil}}</th><th scope="col">{{.Locale.Text "rixa" "actions" nil}}</th></tr></thead>
+<tbody>{{range .Sites}}<tr>
+<th scope="row" dir="ltr"><bdi>{{.ID}}</bdi></th><td dir="ltr">{{.Origin}}</td>
+<td>{{if .Disabled}}{{$.Locale.Text "rixa" "disabled" nil}}{{else}}{{$.Locale.Text "rixa" "enabled" nil}}{{end}}</td>
+<td>{{if .CanManage}}<a href="/admin/sites/site/{{.ID}}/content/">{{$.Locale.Text "rixa" "manage_content" nil}}</a> · <a href="/admin/sites/account-create?site_id={{urlquery .ID}}">{{$.Locale.Text "rixa" "create_site_account" nil}}</a>{{else}}—{{end}}</td>
+</tr>{{end}}</tbody>
 </table>
+{{end}}`))
+
+var accountCreateTemplate = template.Must(template.New("account-create").Parse(`{{define "content"}}
+<h2>{{.Locale.Text "rixa" "create_site_account" nil}}</h2>
+<p>{{.Locale.Text "rixa" "site" nil}}: <bdi dir="ltr">{{.Site.ID}}</bdi> · <bdi dir="ltr">{{.Site.Origin}}</bdi></p>
+<p>{{.Locale.Text "rixa" "site_account_scope_notice" nil}}</p>
+<form data-admin-form data-control-account-create action="/admin/sites/account-create" method="post" autocomplete="off">
+<input type="hidden" name="site_id" value="{{.Site.ID}}">
+<label>{{.Locale.Text "rixa" "login" nil}} <input name="login" dir="ltr" maxlength="64" autocapitalize="none" autocomplete="off" spellcheck="false" required></label>
+<label>{{.Locale.Text "rixa" "initial_password" nil}} <input name="password" type="password" autocomplete="new-password" required></label>
+<button type="submit">{{.Locale.Text "rixa" "create_site_account" nil}}</button>
+</form>
+<p>{{.Locale.Text "rixa" "site_account_retry_notice" nil}}</p>
+<p><a href="/admin/sites/">{{.Locale.Text "rixa" "sites" nil}}</a></p>
 {{end}}`))

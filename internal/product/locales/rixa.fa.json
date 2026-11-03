@@ -29,6 +29,15 @@
     "initial_password": {
       "other": "رمز اولیه"
     },
+    "actions": {
+      "other": "عملیات"
+    },
+    "site_account_scope_notice": {
+      "other": "این حساب فقط در سایت انتخاب‌شده ساخته می‌شود و دسترسی مدیریت زیرساخت نمی‌دهد."
+    },
+    "site_account_retry_notice": {
+      "other": "اگر پاسخ دریافت نشد، پیش از ارسال دوباره بررسی کنید که آیا حساب ساخته شده است."
+    },
     "create_site_account": {
       "other": "ایجاد حساب در این سایت"
     },
