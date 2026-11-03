@@ -469,9 +469,35 @@ func (m *Manager) loadedUpdateService(ctx context.Context, j *journal, active bo
 	}
 	return nil
 }
+
+// candidateExpectedSites checks both the reviewed Update topology and the
+// installation's active site scope before launching an effectful candidate.
+// In particular, migrate must never run against a draft/target mismatch.
+func candidateExpectedSites(u *updateJournal, j *journal) (int, error) {
+	if u == nil || j == nil || u.Draft.InstallationOperation != j.Draft.OperationID ||
+		!reflect.DeepEqual(u.DatabaseTargets, j.DatabaseTargets) {
+		return 0, ErrState
+	}
+	count := databaseTargetCount(j.Draft)
+	targets := j.DatabaseTargets
+	if len(targets) != count || !databaseSyntax.MatchString(targets["control"]) ||
+		!databaseSyntax.MatchString(targets["site-a"]) ||
+		targets["control"] == targets["site-a"] {
+		return 0, ErrState
+	}
+	if count == 3 && (!databaseSyntax.MatchString(targets["site-b"]) ||
+		targets["site-b"] == targets["control"] || targets["site-b"] == targets["site-a"]) {
+		return 0, ErrState
+	}
+	return count - 1, nil
+}
 func (m *Manager) candidateCommand(parent context.Context, u *updateJournal, j *journal, stage string) error {
 	if stage != "check" && stage != "migrate" {
 		return ErrInput
+	}
+	expectedSites, topologyErr := candidateExpectedSites(u, j)
+	if topologyErr != nil {
+		return topologyErr
 	}
 	if e := m.checkPayload(j); e != nil {
 		return e
@@ -509,9 +535,7 @@ func (m *Manager) candidateCommand(parent context.Context, u *updateJournal, j *
 		// The authenticated candidate must prove readiness for every site
 		// in the pinned installation, including an independently committed
 		// Add Site. A one-site success cannot authorize a two-site Update.
-		expectedSites := databaseTargetCount(j.Draft) - 1
-		if len(j.DatabaseTargets) != expectedSites+1 ||
-			decode(out.Bytes(), &receipt) != nil ||
+		if decode(out.Bytes(), &receipt) != nil ||
 			!validCandidateCheckReceipt(receipt.Status, receipt.Sites, receipt.MultiSite, expectedSites,
 				receipt.Core, receipt.Components, u.CandidateComponents) {
 			return ErrState

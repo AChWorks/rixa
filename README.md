@@ -6,17 +6,20 @@ The native manager's source-level, initial-install optional two-site path,
 its separate PostgreSQL/TLS prerequisites and its unreleased acceptance status
 are documented in the [native operator guide](docs/server-management.md#optional-second-site-during-a-new-native-installation-development-source).
 Do not infer support from previously published binaries. Current development
-source also includes [after-install Add Site management](docs/server-management.md#add-site-after-an-existing-native-installation-development-source-not-released):
-read-only prerequisite inspection, durable Draft/Review, and a separately
-fenced, review-token-gated Apply/Resume implementation for an already healthy
-single-site installation. An isolated Debian 13/PostgreSQL 18 test passed a
-real Add Site Apply/Commit and retained healthy topology after a cold start on
-the recorded source candidate `8c78f17`. Interrupted Resume, effectful
-post-Add-Site Update, ordinary Remove and full operational acceptance remain
-unverified. This feature is **unreleased and not production-supported**; a
-successful Review alone does not establish an active site-B. Follow the
-operator guide and [Issue #29](https://github.com/AChWorks/rixa/issues/29)
-for exact evidence and authorization gates.
+source includes [after-install Add Site management](docs/server-management.md#add-site-after-an-existing-native-installation-development-source-not-released):
+read-only inspection, durable Draft/Review and fenced Apply/Resume for an
+existing healthy single-site installation. Isolated Debian 13/PostgreSQL 18
+tests have demonstrated effectful Add Site, interrupted generation-2 Resume,
+publisher-authenticated post-Add-Site Update, and retained-data CLI/TUI Remove.
+The source passed independent HIGH_ASSURANCE review and was integrated
+through [PR #66](https://github.com/AChWorks/rixa/pull/66). Source integration
+is not publication: verify that the selected release actually contains these
+capabilities against [Issue #29](https://github.com/AChWorks/rixa/issues/29).
+This is a **development-only, not production-supported** profile.
+Nonempty Media retention and the full interactive operator matrix have not
+been exhaustively verified; destructive Purge remains separate. See the
+[operator guide](docs/server-management.md) and
+[Issue #29](https://github.com/AChWorks/rixa/issues/29) for precise evidence.
 
 ## What you can do
 
