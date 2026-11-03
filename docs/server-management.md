@@ -109,9 +109,11 @@ changes do not affect previously published binaries.
 cannot provision a third database automatically, and does not grant arbitrary
 schema-changing updates. The managed updater remains constrained by its
 existing negative read-only pre-stop editorial guard and authenticated,
-stopped-service candidate check. The v0.7-to-v0.8 managed schema-changing
-migration and candidate-bound AChrix/Editorial compatibility, verified backup
-and restoration remain separate Issue #29 acceptance requirements. Treat
+stopped-service candidate check. General schema-changing managed Update and
+candidate-bound AChrix/Editorial compatibility remain separate Issue #29
+acceptance requirements. The published v0.7-to-v0.8 backup and real
+restoration test is recovery evidence; it does not grant authorization for
+arbitrary native schema migrations. Treat
 source-level capability as unreleased until authenticated artifact, physical
 installation acceptance, independent review and authorized release are recorded.
 
@@ -129,19 +131,27 @@ authenticated native Update may be its predecessor. A second Add Site,
 arbitrary topology edits, automatic certificate replacement, and an
 unreviewed installation are **not** accepted.
 
-The source candidate at `8c78f17` passed unit/vet/race checks and real
-**Inspect → Draft → Review → Apply → Commit** on an isolated Debian 13,
-PostgreSQL 18, KVM test VM. All nine Add Site stages were independently
-observed as verified, with three distinct database identities, Control and
-site-a retained, and trusted HTTPS/SNI endpoints for all three hosts. The
-committed Add Site remained **installed/healthy** after a controlled VM
-stop and cold boot. See the [exact physical acceptance checkpoint](https://github.com/AChWorks/rixa/issues/29#issuecomment-6591463069).
-This establishes a positive development test, **not** full operational
-acceptance: interrupted Apply/Resume, post-addition effectful Update,
-ordinary retained-data Remove and separate schema-changing backup/restore
-remain unverified. The code has not received final independent approval and
-is neither an authorized release nor a production-supported procedure.
-Do not run the candidate on production.
+The current source includes the independently reviewed and merged
+[PR #66](https://github.com/AChWorks/rixa/pull/66). Physical acceptance on
+isolated Debian 13, PostgreSQL 18 and KVM demonstrated actual Add Site
+**Inspect → Draft → Review → Apply → Commit**, an interrupted Add Site with
+fenced generation-2 Resume, and retained healthy three-target topology across
+cold boot. Separate disposable tests verified ordinary retained-data
+[CLI Remove](https://github.com/AChWorks/rixa/issues/29#issuecomment-6593757032),
+[effectful TUI Remove](https://github.com/AChWorks/rixa/issues/29#issuecomment-6594013821),
+and [publisher-authenticated post-Add-Site Native Update](https://github.com/AChWorks/rixa/issues/29#issuecomment-6594675795)
+with three physical PostgreSQL databases and three TLS/SNI origins. The
+[published-schema backup/restore proof](https://github.com/AChWorks/rixa/issues/29#issuecomment-6592534253)
+is a separate recovery test, not general schema-changing Update authorization.
+
+These tests do **not** establish an exhaustive TUI interaction matrix,
+preservation of representative nonempty Media during Remove, production
+support or release delivery. Source integration does not confer an authenticated
+published artifact or server installation; check the exact selected release
+and [Issue #29](https://github.com/AChWorks/rixa/issues/29) for delivery.
+Publication and production use require separate Owner approval. Destructive
+Purge remains unimplemented and separately gated. Do not run this source
+on production.
 
 ### Read-only inspection and protected input
 
