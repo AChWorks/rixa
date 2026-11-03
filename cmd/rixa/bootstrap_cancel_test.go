@@ -78,13 +78,28 @@ func TestBootstrapActualChildCancellationRestoresPTY(t *testing.T) {
 				}
 				cancelled := time.Now()
 				cancel()
+				var childOutcome error
 				select {
-				case <-done:
+				case childOutcome = <-done:
 				case <-time.After(4 * time.Second):
 					t.Fatal("cancelled child was not reaped within the bounded grace/kill window")
 				}
 				if time.Since(cancelled) > 4*time.Second || cmd.ProcessState == nil {
 					t.Fatal("child reap missing")
+				}
+				// An actual unresponsive child must survive SIGTERM and be
+				// reaped by the bounded forced kill. A runtime deadlock or
+				// ordinary process exit must never masquerade as that proof.
+				status, ok := cmd.ProcessState.Sys().(syscall.WaitStatus)
+				if !ok {
+					t.Fatal("child wait status unavailable")
+				}
+				if exit == "forced" {
+					if !status.Signaled() || status.Signal() != syscall.SIGKILL {
+						t.Fatalf("unresponsive child did not require SIGKILL: %v, %v", childOutcome, status)
+					}
+				} else if !cmd.ProcessState.Success() {
+					t.Fatalf("gracefully canceled child did not restore and exit normally: %v, %v", childOutcome, status)
 				}
 				after, e := term.GetState(int(slave.Fd()))
 				if e != nil || !reflect.DeepEqual(before, after) {
@@ -126,7 +141,14 @@ func TestBootstrapActualChildFixture(t *testing.T) {
 		if e = os.WriteFile(os.Getenv("RIXA_BOOTSTRAP_CANCEL_READY"), []byte("ready"), 0600); e != nil {
 			t.Fatal(e)
 		}
-		select {}
+		// A permanently blocked select with no runnable goroutines is not
+		// a reliable unresponsive-process fixture: Go's runtime may exit
+		// with fatal deadlock status 2 before the parent can cancel it.
+		// A long sleep retains a live, SIGTERM-ignoring process that only
+		// the parent's bounded SIGKILL can stop.
+		for {
+			time.Sleep(time.Hour)
+		}
 	}
 	stopped := make(chan os.Signal, 1)
 	signal.Notify(stopped, syscall.SIGTERM)
