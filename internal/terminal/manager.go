@@ -671,21 +671,35 @@ func configureFields(ctx context.Context, s *session, backend serverinstall.Faca
 							break
 						}
 					}
+					if !matched && result.OperationKind == "add-site" {
+						for _, problem := range result.Problems {
+							if problem.Field == "operation_id" {
+								// A fixed operation ID is not an editable field. Do not
+								// leave a collision attributed to the last password input.
+								if err := showDetails(ctx, s, []string{
+									"Add Site draft was not saved.",
+									"Exit and reopen with a new --operation ID.",
+									problem.Message,
+									"Changing a site field in this menu cannot change the operation ID.",
+								}, *d); err != nil {
+									return current, false, err
+								}
+								return current, false, nil
+							}
+						}
+					}
 					if !matched {
 						// Keep existing installation/update/PostgreSQL error
 						// presentation unchanged. Only the new Add Site journey
 						// needs guidance for its noneditable operation ID.
 						notice = publicError(saveErr, *d)
 						if result.OperationKind == "add-site" {
-							if len(result.Problems) > 0 && result.Problems[0].Field == "operation_id" {
-								notice = "Not saved. Exit and reopen with a new --operation ID. " +
-									publicValue(result.Problems[0].Message, *d)
-							} else {
-								notice = "Not saved. Check operation ID and native Status; Back to edit. (" +
-									publicError(saveErr, *d) + ")"
-								if len(result.Problems) > 0 {
-									notice += " " + publicValue(result.Problems[0].Message, *d)
-								}
+							// Noneditable operation_id Problems were presented
+							// separately above, without blaming a password field.
+							notice = "Not saved. Check operation ID and native Status; Back to edit. (" +
+								publicError(saveErr, *d) + ")"
+							if len(result.Problems) > 0 {
+								notice += " " + publicValue(result.Problems[0].Message, *d)
 							}
 						}
 					}

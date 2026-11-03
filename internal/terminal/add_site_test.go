@@ -22,6 +22,7 @@ type addSiteTestFacade struct {
 	failSaveOnce                                            bool
 	validateNative                                          bool
 	operationError                                          bool
+	journalCollision                                        bool
 }
 
 func testAddSiteDraft() serverinstall.AddSiteDraft {
@@ -53,6 +54,14 @@ func (f *addSiteTestFacade) SaveAddSiteDraft(_ context.Context, d serverinstall.
 	if f.operationError {
 		return f.result("draft", "operation-unavailable", "configure", "status"),
 			serverinstall.ErrState
+	}
+	if f.journalCollision {
+		// Exact typed shape exercised against real Native Save's journal
+		// admission in serverinstall's collision tests, not syntactic ID equality.
+		r := f.result("draft", "invalid-input", "configure", "status")
+		r.Problems = []serverinstall.Problem{{Field: "operation_id", Code: "operation-id-unavailable",
+			Message: "This Add Site operation ID cannot be reused. Exit and reopen with a different --operation ID."}}
+		return r, serverinstall.ErrState
 	}
 	if f.validateNative {
 		r := serverinstall.Result{OperationKind: "add-site", OperationID: d.OperationID,

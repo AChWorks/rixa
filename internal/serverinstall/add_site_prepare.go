@@ -52,23 +52,29 @@ func (m *Manager) SaveAddSiteDraft(ctx context.Context, d AddSiteDraft) (Result,
 	if err != nil || pending != "" {
 		return invalid, ErrState
 	}
-	// Refuse colliding independent operation IDs, including invalid existing
-	// records (a missing path is never inferred from a malformed file).
-	if _, err := m.load(d.OperationID); !errors.Is(err, os.ErrNotExist) {
+	// Every genuine operation-ID collision has one nonenumerating response,
+	// whether a valid, foreign, corrupted or symlinked journal occupies it.
+	// The ID is fixed for this TUI session: other fields cannot correct it.
+	operationUnavailable := func() (Result, error) {
+		invalid.Problems = []Problem{{Field: "operation_id", Code: "operation-id-unavailable",
+			Message: "This Add Site operation ID cannot be reused. Exit and reopen with a different --operation ID."}}
 		return invalid, ErrState
 	}
+	if _, err := m.load(d.OperationID); !errors.Is(err, os.ErrNotExist) {
+		return operationUnavailable()
+	}
 	if _, err := m.loadUpdate(d.OperationID); !errors.Is(err, os.ErrNotExist) {
-		return invalid, ErrState
+		return operationUnavailable()
 	}
 	old, err := m.loadAddSite(d.OperationID)
 	if err == nil {
 		if old.Frozen != "" || len(old.Attempts) != 0 ||
 			(old.State != "draft" && old.State != "blocked" && old.State != "ready") ||
 			old.Draft.InstallationOperation != d.InstallationOperation {
-			return addSiteResult(old), ErrState
+			return operationUnavailable()
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
-		return invalid, ErrState
+		return operationUnavailable()
 	}
 	j := &addSiteJournal{Schema: addSiteSchema, Draft: d, State: "draft", Code: "draft-saved",
 		Message:  "Private Add Site draft saved; Review rechecks the installed service without changing topology.",

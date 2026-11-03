@@ -26,6 +26,7 @@ func runAddSitePTYChild(t *testing.T, mode string) {
 	f.failSaveOnce = mode == "add-site-save-error"
 	f.validateNative = strings.HasPrefix(mode, "add-site-input-")
 	f.operationError = mode == "add-site-input-operation-error"
+	f.journalCollision = mode == "add-site-input-real-journal-collision"
 	options := AddSiteOptions{
 		Options: Options{
 			Input: os.Stdin, Output: os.Stdout, OperationID: "pty-case",
@@ -55,6 +56,8 @@ func runAddSitePTYChild(t *testing.T, mode string) {
 			prefill.InstallationOperation = "unrelated-install"
 		case "add-site-input-operation-collision":
 			prefill.OperationID = prefill.InstallationOperation
+		case "add-site-input-fresh-after-collision":
+			prefill.OperationID = "fresh-operation-after-collision"
 		}
 		options.Options.OperationID = ""
 		options.AddSitePrefill = &prefill
@@ -397,5 +400,58 @@ func TestAddSitePTYNoneditableOperationIDReportsRestartGuidance(t *testing.T) {
 	if r["saves"] != float64(1) || r["accepted"] != float64(0) ||
 		r["applies"] != float64(0) {
 		t.Fatalf("noneditable operation ID bypassed Native Save: %#v", r)
+	}
+}
+
+// The PTY must handle the typed result actually emitted by Native
+// SaveAddSiteDraft's real existing-journal collision branches (proven by
+// serverinstall's filesystem tests), not only the local syntax-equality gate.
+func TestAddSitePTYRealJournalCollisionGuidesRestartAndFreshID(t *testing.T) {
+	p := startPTY(t, "add-site-input-real-journal-collision")
+	pos := p.await(t, 0, "1. Configure new site")
+	p.send(t, "\r")
+	pos = p.await(t, pos, "Original installation operation")
+	p.send(t, strings.Repeat("\r", 5))
+	pos = p.await(t, pos, "Exit and reopen with a new --operation ID")
+	screen := lastScreen(p.text())
+	if !strings.Contains(screen, "Operation details") || strings.Contains(screen, "New site-B password") ||
+		!strings.Contains(screen, "Changing a site field in this menu cannot change the operation ID") {
+		t.Fatal("actual journal collision did not move focus to a dedicated restart notice")
+	}
+	p.send(t, "\r")
+	pos = p.await(t, pos, "Add Site management")
+	if strings.Contains(lastScreen(p.text()), "Apply reviewed Add Site") ||
+		strings.Contains(lastScreen(p.text()), "Resume retained Add Site") {
+		t.Fatal("failed Save exposed a Native effect")
+	}
+	p.send(t, "\x03")
+	r := p.finish(t)
+	if r["saves"] != float64(1) || r["accepted"] != float64(0) ||
+		r["reviews"] != float64(0) || r["applies"] != float64(0) || r["resumes"] != float64(0) {
+		t.Fatalf("existing journal collision mutated Native state: %#v", r)
+	}
+	for _, secret := range []string{"PASSWORD-SECRET-CANARY", "DB-SECRET-CANARY", "foreign-install", "/var/lib/rixa-manager"} {
+		if strings.Contains(p.text(), secret) {
+			t.Fatal("protected operation detail escaped to PTY")
+		}
+	}
+
+	fresh := startPTY(t, "add-site-input-fresh-after-collision")
+	pos = fresh.await(t, 0, "1. Configure new site")
+	fresh.send(t, "\r")
+	pos = fresh.await(t, pos, "Original installation operation")
+	fresh.send(t, strings.Repeat("\r", 5))
+	fresh.await(t, pos, "Draft saved privately.")
+	fresh.send(t, "\x03")
+	saved := fresh.finish(t)
+	if saved["saves"] != float64(1) || saved["accepted"] != float64(1) ||
+		saved["operation"] != "fresh-operation-after-collision" ||
+		saved["reviews"] != float64(0) || saved["applies"] != float64(0) {
+		t.Fatalf("new unique operation could not be saved safely: %#v", saved)
+	}
+	for _, secret := range []string{"PASSWORD-SECRET-CANARY", "DB-SECRET-CANARY"} {
+		if strings.Contains(fresh.text(), secret) {
+			t.Fatal("new operation's secret escaped to terminal")
+		}
 	}
 }

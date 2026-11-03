@@ -217,9 +217,13 @@ Native Save input validation and keeps focus on missing fields. If Native Save
 rejects a malformed database/login/password or an ineligible original
 installation, the form returns to the matching editable field with
 non-sensitive guidance; operation-level errors remain distinct from password
-errors. The new operation ID is fixed while the menu is open; a conflicting
-ID requires reopening with a different `--operation`. Existing
-`--plain`, `--no-color`, terminal resize, back, help and Ctrl-C behavior
+errors. The new operation ID is fixed while the menu is open. When a syntactically
+valid ID collides with a retained Install, Update or Add Site journal (including
+an unusable/corrupted record), Native Save refuses it with generic, secret-free
+`operation_id` guidance. The TUI presents a separate restart notice rather
+than asking the operator to change the Site-B password. Exit and reopen with
+a different `--operation`; no journal is adopted, overwritten or repaired.
+Existing `--plain`, `--no-color`, terminal resize, back, help and Ctrl-C behavior
 apply without changing product/web language.
 
 With an independently reviewed and permitted candidate, the direct,
