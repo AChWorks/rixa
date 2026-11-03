@@ -118,7 +118,7 @@ func staticManageHelp(args []string) (string, bool) {
 	switch args[0] {
 	case "add-site":
 		switch action {
-		case "", "inspect", "draft", "review", "apply", "resume", "status":
+		case "", "menu", "inspect", "draft", "review", "apply", "resume", "status":
 			return manageAddSiteHelp, true
 		}
 	case "update":
@@ -156,6 +156,14 @@ func manageWithFacade(ctx context.Context, args []string, input *os.File, output
 		inspector, ok := backend.(serverinstall.AddSiteInspectionFacade)
 		if !ok {
 			return errors.New("this manager does not support after-install Add Site inspection")
+		}
+		if len(args) == 0 || args[0] == "menu" || (len(args[0]) > 0 && args[0][0] == '-' &&
+			args[0] != "--help" && args[0] != "-h") {
+			effects, ok := backend.(serverinstall.AddSiteEffects)
+			if !ok {
+				return errors.New("this manager supports only Add Site inspection/preparation, not the interactive effects menu")
+			}
+			return manageAddSiteMenuWithFacade(ctx, args, input, output, effects)
 		}
 		return manageAddSiteInspectionWithFacade(ctx, args, output, inspector)
 	}
@@ -341,7 +349,7 @@ const manageHelp = "Rixa native operator management\n\n" +
 	"  rixa manage remove --operation <id> --confirm-remove\n" +
 	"  rixa manage update <menu|draft|review|apply|resume|status|remove> [flags]\n" +
 	"  rixa manage update --help\n" +
-	"  rixa manage add-site <inspect|draft|review|apply|resume|status> [--source <private-json>|--operation <id>]\n" +
+	"  rixa manage add-site <menu|inspect|draft|review|apply|resume|status> [flags]\n" +
 	"  rixa manage prerequisites --help\n\n" +
 	"Direct commands emit safe JSON and never prompt. --non-interactive rejects the menu.\n" +
 	"Draft/prefill JSON contains credentials: same-operator private regular files only.\n" +

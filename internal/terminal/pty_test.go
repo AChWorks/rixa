@@ -288,6 +288,10 @@ func TestTerminalPTYChild(t *testing.T) {
 		postgresPTYChild(t, mode)
 		return
 	}
+	if strings.HasPrefix(mode, "add-site-") {
+		runAddSitePTYChild(t, mode)
+		return
+	}
 	if strings.HasPrefix(mode, "update-") {
 		runUpdatePTYChild(t, mode)
 		return

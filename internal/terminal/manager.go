@@ -260,6 +260,39 @@ func runManagement(ctx context.Context, backend serverinstall.Facade, options Op
 				dirty = true
 				notice = "Editing paused; entries are retained in this menu only. Nothing was applied."
 			}
+		case "inspect":
+			// Inspect is a passive observation, never a renewal of local
+			// Review consent. A later Apply requires a fresh Review.
+			reviewedToken = ""
+			inspector, ok := profile.(inspectionProfile)
+			if !ok {
+				return errors.New("read-only inspection is unavailable in this menu")
+			}
+			observation, inspectErr := inspector.inspect(ctx, draft)
+			lines := []string{
+				"Read-only site prerequisites inspection",
+				"Installation: " + SafeText(observation.InstallationOperation),
+				"Result: " + SafeText(observation.State) + " / " + SafeText(observation.Code),
+				"No private draft, original journal or Apply consent was changed.",
+				"Inspect does not replace the exact native Review before Apply.",
+			}
+			if observation.Message != "" {
+				lines = append(lines, "Status: "+publicValue(observation.Message, draft))
+			}
+			for _, problem := range observation.Problems {
+				lines = append(lines, "["+SafeText(problem.Code)+"] "+SafeText(problem.Field)+": "+publicValue(problem.Message, draft))
+			}
+			if inspectErr != nil {
+				lines = append(lines, "Diagnostic: "+publicError(inspectErr, draft))
+			}
+			if err = showDetails(ctx, s, lines, draft); err != nil {
+				return err
+			}
+			if inspectErr == nil {
+				notice = "Read-only inspection completed; select Review for a fresh explicit Apply token."
+			} else {
+				notice = "Inspection could not verify prerequisites; inspect diagnostics and correct the Add Site draft."
+			}
 		case "review":
 			current, err = backend.Review(ctx, id)
 			reviewedToken = ""
@@ -383,6 +416,13 @@ func overview(version string, r serverinstall.Result, notice string) []string {
 	lines := []string{"Manager: " + SafeText(version) + "  |  Operation: " + SafeText(r.OperationID), "Recorded release: " + SafeText(r.Release), "State: " + SafeText(state) + "  |  Stage: " + SafeText(r.Stage)}
 	if r.OperationKind == "update" {
 		lines = []string{"Executing manager: " + SafeText(version) + "  |  Update operation: " + SafeText(r.OperationID), "Installation operation: " + SafeText(r.InstallationOperation), "Active release: " + SafeText(r.ActiveRelease), "Candidate release: " + SafeText(r.Release), "State: " + SafeText(state) + "  |  Stage: " + SafeText(r.Stage)}
+	}
+	if r.OperationKind == "add-site" {
+		lines = []string{
+			"Manager: " + SafeText(version) + "  |  Add Site operation: " + SafeText(r.OperationID),
+			"Original installation: " + SafeText(r.InstallationOperation),
+			"State: " + SafeText(state) + "  |  Stage: " + SafeText(r.Stage),
+		}
 	}
 	if r.OperationKind == "postgres" {
 		lines = []string{"Manager: " + SafeText(version) + "  |  PostgreSQL operation: " + SafeText(r.OperationID), "Scope: clean dedicated PostgreSQL prerequisites", "State: " + SafeText(state) + "  |  Stage: " + SafeText(r.Stage)}
@@ -741,6 +781,13 @@ func menuLines(s *session, version string, r serverinstall.Result, notice string
 		header = []string{"Recorded release: " + SafeText(r.Release) + " · Manager: " + SafeText(version), "State: " + SafeText(r.State) + " · Stage: " + SafeText(r.Stage)}
 		if r.OperationKind == "update" {
 			header = []string{"Active: " + SafeText(r.ActiveRelease) + " · Candidate: " + SafeText(r.Release), "Installation: " + SafeText(r.InstallationOperation) + " · Manager: " + SafeText(version), "State: " + SafeText(r.State) + " · Stage: " + SafeText(r.Stage)}
+		}
+		if r.OperationKind == "add-site" {
+			header = []string{
+				"Add Site: " + SafeText(r.OperationID) + " · Manager: " + SafeText(version),
+				"Installation: " + SafeText(r.InstallationOperation),
+				"State: " + SafeText(r.State) + " · Stage: " + SafeText(r.Stage),
+			}
 		}
 		if r.OperationKind == "postgres" || r.OperationKind == "bootstrap" {
 			header = []string{"Manager: " + SafeText(version) + " · Operation: " + SafeText(r.OperationID), "State: " + SafeText(r.State) + " · Stage: " + SafeText(r.Stage)}

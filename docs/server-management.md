@@ -144,10 +144,14 @@ with three physical PostgreSQL databases and three TLS/SNI origins. The
 [published-schema backup/restore proof](https://github.com/AChWorks/rixa/issues/29#issuecomment-6592534253)
 is a separate recovery test, not general schema-changing Update authorization.
 
-These tests do **not** establish an exhaustive TUI interaction matrix,
-preservation of representative nonempty Media during Remove, production
-support or release delivery. Source integration does not confer an authenticated
-published artifact or server installation; check the exact selected release
+These earlier tests did **not** establish an exhaustive TUI interaction matrix,
+or representative nonempty Media retention during Remove. A subsequent
+[physical nonempty-Media Remove proof](https://github.com/AChWorks/rixa/issues/29#issuecomment-6601260556)
+on integrated source verified both site-A and site-B Media retained, plus
+all three PostgreSQL data/schema receipts and private configuration unchanged.
+This does not establish a browser-upload workflow or exhaustive TUI behavior,
+production support or release delivery. Source integration does not confer an
+authenticated published artifact or server installation; check the exact selected release
 and [Issue #29](https://github.com/AChWorks/rixa/issues/29) for delivery.
 Publication and production use require separate Owner approval. Destructive
 Purge remains unimplemented and separately gated. Do not run this source
@@ -187,8 +191,31 @@ certificate trusted by the same root.
 
 ### Durable Draft, Review, Apply and Resume (candidate only)
 
-With an independently reviewed and permitted candidate, the explicit
-effect-bearing interface is:
+A source-built manager containing the Add Site TUI implementation offers the
+same typed native lifecycle through an interactive, root-authorized terminal
+menu. This is not a capability of older published packages:
+
+```bash
+sudo rixa manage add-site menu --installation <original-install-operation>
+sudo rixa manage add-site menu --operation <retained-add-site-operation>
+sudo rixa manage add-site menu --prefill /root/private/add-site-draft.json --plain --no-color
+```
+
+The menu accepts only the new site-B origin, database URL, login/password and
+the exact original installation ID, rather than rebuilding the existing
+installation/TLS/administrator configuration. It uses the same private
+Add Site Draft, read-only Inspect, Review, Apply, Resume and Status backend
+as direct CLI. The shared terminal input/confirmation code retains previously
+saved inputs when the form is reopened. `Apply` is exposed only after this menu successfully
+obtains its *own* Review token; Status/reopening cannot adopt another
+session's token. `Resume` appears only if native Status offers that action.
+Unsaved edits disable Review/Apply; `--non-interactive` never opens a menu.
+The menu never offers an individual site's Remove or Purge. Existing
+`--plain`, `--no-color`, terminal resize, back, help and Ctrl-C behavior
+apply without changing product/web language.
+
+With an independently reviewed and permitted candidate, the direct,
+non-prompting effect-bearing interface remains:
 
 ```bash
 sudo rixa manage add-site draft --source /root/private/add-site-draft.json
