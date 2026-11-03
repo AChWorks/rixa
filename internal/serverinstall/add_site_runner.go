@@ -121,14 +121,14 @@ func (m *Manager) RunAddSiteOperation(ctx context.Context, id string) (Result, e
 		if err = ctx.Err(); err != nil {
 			return m.addSiteFailure(j, "interrupted", "The Add Site executor stopped; retained effects need inspection.", err)
 		}
-		// Read-only readiness is not a session attempt. If the service is
-		// still starting, retain the verified start receipt and permit a
-		// fenced Resume instead of permanently declaring login unknown.
-		if stage == "postflight" && j.Attempts[stage] == "" {
-			if err = m.addSitePostflightReadiness(ctx, j, parent, current); err != nil {
-				return m.addSiteFailure(j, "postflight-readiness-required",
-					"Site-B HTTPS/TLS readiness is not established; inspect diagnostics and use a fenced Resume after recovery.", err)
+		// Session-producing postflight has a separate durable transition.
+		// Every fallible read-only observation (including HTTP client setup)
+		// must finish BEFORE the non-replayable session intent is written.
+		if stage == "postflight" {
+			if r, err := m.runAddSitePostflight(ctx, j, parent, current, m.prepareAddSitePostflight); err != nil {
+				return r, err
 			}
+			continue
 		}
 		j.Stage = stage
 		attempted := j.Attempts[stage] == "attempted"
@@ -187,6 +187,107 @@ func (m *Manager) addSitePostflightReadiness(ctx context.Context, j *addSiteJour
 		return fmt.Errorf("%w: site-b-pinned-tls-sni-not-ready", ErrPrerequisite)
 	}
 	return nil
+}
+
+// A prepared attempt contains only the session effect. All host observations,
+// certificate/client construction and local validations complete before the
+// non-replayable session-dispatch receipt can be written.
+type addSiteSessionAttempt func(context.Context) error
+type addSitePostflightPreparation func(context.Context, *addSiteJournal, *journal, *journal) (addSiteSessionAttempt, func(), error)
+
+// prepareAddSitePostflight is observational and called under the executor's
+// ownership/lifecycle lock. A transient failure here preserves the preceding
+// verified start stage for a separately fenced Resume.
+func (m *Manager) prepareAddSitePostflight(ctx context.Context, j *addSiteJournal, parent, current *journal) (addSiteSessionAttempt, func(), error) {
+	if j == nil || parent == nil || current == nil {
+		return nil, nil, ErrState
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
+	observed, err := databaseIdentities(ctx, j.Draft.withInstallation(parent.Draft))
+	if err != nil || !reflect.DeepEqual(observed, j.DatabaseTargets) {
+		return nil, nil, ErrState
+	}
+	original, err := m.addSiteOriginal(j)
+	if err != nil {
+		return nil, nil, err
+	}
+	config, env, candidate, err := m.addSiteConfigState(j, parent)
+	if err != nil || len(original) == 0 ||
+		!bytes.Equal(config, candidate) ||
+		!bytes.Equal(env, environmentFile(j.Draft.withInstallation(parent.Draft))) {
+		return nil, nil, ErrState
+	}
+	if err := m.addSitePostflightReadiness(ctx, j, parent, current); err != nil {
+		return nil, nil, err
+	}
+	if !principalSyntax.MatchString(j.SiteBPrincipal) || j.Draft.SiteBPassword == "" {
+		return nil, nil, ErrState
+	}
+	client, err := m.localClient(parent)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		client.CloseIdleConnections()
+		return nil, nil, err
+	}
+	return func(ctx context.Context) error {
+		return verifyLogin(ctx, client, j.Draft.SiteBOrigin, j.Draft.SiteBLogin,
+			j.Draft.SiteBPassword, j.SiteBPrincipal, "/admin/content/")
+	}, client.CloseIdleConnections, nil
+}
+
+// runAddSitePostflight owns the actual persistent pre-session/session boundary.
+// The preparation callback exists only for package-local regression injection;
+// production always supplies prepareAddSitePostflight. No read-only host or
+// client observations occur after intent and before the actual session attempt.
+func (m *Manager) runAddSitePostflight(ctx context.Context, j *addSiteJournal, parent, current *journal, prepare addSitePostflightPreparation) (Result, error) {
+	if j == nil || parent == nil || current == nil || prepare == nil ||
+		j.State != "applying" || j.Stage != "start" || j.Attempts["start"] != "verified" ||
+		j.Attempts["postflight"] != "" || j.Attempts["commit"] != "" ||
+		j.Attempts["executor"] != "verified" ||
+		j.ExecutorVerifiedGeneration != j.ExecutorGeneration {
+		if j == nil {
+			return Result{}, ErrState
+		}
+		return addSiteResult(j), ErrState
+	}
+	attempt, cleanup, err := prepare(ctx, j, parent, current)
+	if cleanup != nil {
+		defer cleanup()
+	}
+	if err != nil || attempt == nil {
+		if err == nil {
+			err = ErrState
+		}
+		return m.addSiteFailure(j, "postflight-readiness-required",
+			"Site-B pre-session evidence is not established; inspect diagnostics and use a fenced Resume after recovery.", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return m.addSiteFailure(j, "postflight-readiness-required",
+			"Site-B pre-session evidence is not established; inspect diagnostics and use a fenced Resume after recovery.", err)
+	}
+
+	// This is the last durable transition before an administrator session may
+	// actually be requested. Unknown execution from here MUST NOT be replayed.
+	j.Stage = "postflight"
+	j.Attempts["postflight"] = "attempted"
+	j.Code, j.Message = "stage-attempted", "Executing postflight."
+	if err := m.saveAddSite(j); err != nil {
+		return Result{}, err
+	}
+	if err := attempt(ctx); err != nil {
+		return m.addSiteFailure(j, "stage-outcome-unknown",
+			"The postflight session outcome is uncertain; never replay login/logout without independent reconciliation.", err)
+	}
+	j.Attempts["postflight"] = "verified"
+	j.Code, j.Message = "stage-verified", "postflight verified."
+	if err := m.saveAddSite(j); err != nil {
+		return Result{}, err
+	}
+	return addSiteResult(j), nil
 }
 
 func (m *Manager) executeAddSiteStage(ctx context.Context, j *addSiteJournal, parent, current *journal, stage string, attempted bool) (string, error) {
@@ -298,26 +399,6 @@ func (m *Manager) executeAddSiteStage(ctx context.Context, j *addSiteJournal, pa
 			}
 		}
 		return "", ErrPrerequisite
-	case "postflight":
-		if attempted {
-			return "", ErrState
-		} // login/logout acknowledgement is not replayed
-		// Verify live readiness again immediately before issuing a session.
-		// The preceding no-effect admission ensures a transient start-up
-		// refusal never becomes an unreplayable login attempt.
-		if err = m.addSitePostflightReadiness(ctx, j, parent, current); err != nil {
-			return "", err
-		}
-		if !principalSyntax.MatchString(j.SiteBPrincipal) || j.Draft.SiteBPassword == "" {
-			return "", ErrState
-		}
-		client, err := m.localClient(parent)
-		if err != nil {
-			return "", err
-		}
-		defer client.CloseIdleConnections()
-		return "", verifyLogin(ctx, client, j.Draft.SiteBOrigin, j.Draft.SiteBLogin,
-			j.Draft.SiteBPassword, j.SiteBPrincipal, "/admin/content/")
 	case "commit":
 		if attempted {
 			marker, err := m.addSiteMarker("active-add-site")

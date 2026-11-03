@@ -9,11 +9,14 @@ Do not infer support from previously published binaries. Current development
 source also includes [after-install Add Site management](docs/server-management.md#add-site-after-an-existing-native-installation-development-source-not-released):
 read-only prerequisite inspection, durable Draft/Review, and a separately
 fenced, review-token-gated Apply/Resume implementation for an already healthy
-single-site installation. The effect-bearing path remains **unreleased and
-unverified on a real server**; a successful Review does not establish an active
-site-B. Follow the operator guide and [Issue #29](https://github.com/AChWorks/rixa/issues/29)
-for the applicable acceptance and authorization gates. Do not use these
-source-level effect commands as a production installation procedure.
+single-site installation. An isolated Debian 13/PostgreSQL 18 test passed a
+real Add Site Apply/Commit and retained healthy topology after a cold start on
+the recorded source candidate `8c78f17`. Interrupted Resume, effectful
+post-Add-Site Update, ordinary Remove and full operational acceptance remain
+unverified. This feature is **unreleased and not production-supported**; a
+successful Review alone does not establish an active site-B. Follow the
+operator guide and [Issue #29](https://github.com/AChWorks/rixa/issues/29)
+for exact evidence and authorization gates.
 
 ## What you can do
 
