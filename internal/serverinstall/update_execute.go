@@ -470,24 +470,26 @@ func (m *Manager) loadedUpdateService(ctx context.Context, j *journal, active bo
 	return nil
 }
 
+var errCandidateTopology = fmt.Errorf("%w: candidate topology does not match reviewed installation", ErrState)
+
 // candidateExpectedSites checks both the reviewed Update topology and the
 // installation's active site scope before launching an effectful candidate.
 // In particular, migrate must never run against a draft/target mismatch.
 func candidateExpectedSites(u *updateJournal, j *journal) (int, error) {
 	if u == nil || j == nil || u.Draft.InstallationOperation != j.Draft.OperationID ||
 		!reflect.DeepEqual(u.DatabaseTargets, j.DatabaseTargets) {
-		return 0, ErrState
+		return 0, errCandidateTopology
 	}
 	count := databaseTargetCount(j.Draft)
 	targets := j.DatabaseTargets
 	if len(targets) != count || !databaseSyntax.MatchString(targets["control"]) ||
 		!databaseSyntax.MatchString(targets["site-a"]) ||
 		targets["control"] == targets["site-a"] {
-		return 0, ErrState
+		return 0, errCandidateTopology
 	}
 	if count == 3 && (!databaseSyntax.MatchString(targets["site-b"]) ||
 		targets["site-b"] == targets["control"] || targets["site-b"] == targets["site-a"]) {
-		return 0, ErrState
+		return 0, errCandidateTopology
 	}
 	return count - 1, nil
 }

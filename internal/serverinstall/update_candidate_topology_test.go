@@ -5,11 +5,13 @@ import (
 	"context"
 	"errors"
 	"maps"
+	"reflect"
 	"testing"
 )
 
-// The candidate is an effectful executable, including at the migrate stage.
-// Refuse inconsistent native topology before checking or invoking that binary.
+// The candidate is an effectful executable, including at migrate.
+// A topology failure must be distinguishable from checkPayload rejecting an
+// absent binary, or removal of the execution-boundary guard would go undetected.
 func TestCandidateCommandTopologyPreflight(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
@@ -52,12 +54,18 @@ func TestCandidateCommandTopologyPreflight(t *testing.T) {
 		}, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			draft := validDraft()
+			if tc.twoSites {
+				draft = validTwoSiteDraft()
+			}
+			if p := ValidateDraft(draft); len(p) != 0 {
+				t.Fatalf("invalid source installation fixture: %+v", p)
+			}
 			j := &journal{
-				Draft:           validDraft(),
+				Draft:           draft,
 				DatabaseTargets: map[string]string{"control": "1:100", "site-a": "1:101"},
 			}
 			if tc.twoSites {
-				j.Draft.SiteBOrigin = "https://b.rixa.test:8443"
 				j.DatabaseTargets["site-b"] = "1:102"
 			}
 			u := &updateJournal{Draft: validUpdateDraft(), DatabaseTargets: maps.Clone(j.DatabaseTargets)}
@@ -65,20 +73,64 @@ func TestCandidateCommandTopologyPreflight(t *testing.T) {
 				tc.alter(u, j)
 			}
 			sites, err := candidateExpectedSites(u, j)
+			m := testManager(t)
 			if tc.want != 0 {
 				if err != nil || sites != tc.want {
 					t.Fatalf("legitimate candidate topology rejected: sites=%d err=%v", sites, err)
 				}
+				// No payload is staged; plain ErrState from checkPayload proves
+				// this valid topology passed the earlier candidate guard.
+				for _, stage := range []string{"migrate", "check"} {
+					if e := m.candidateCommand(context.Background(), u, j, stage); e != ErrState {
+						t.Fatalf("valid %s topology failed before payload admission: %v", stage, e)
+					}
+				}
 				return
 			}
-			if sites != 0 || !errors.Is(err, ErrState) {
+			if sites != 0 || !errors.Is(err, ErrState) || !errors.Is(err, errCandidateTopology) {
 				t.Fatalf("inconsistent candidate topology admitted: sites=%d err=%v", sites, err)
 			}
 			for _, stage := range []string{"migrate", "check"} {
-				if err := testManager(t).candidateCommand(context.Background(), u, j, stage); !errors.Is(err, ErrState) {
-					t.Fatalf("%s did not fail closed before candidate execution: %v", stage, err)
+				err := m.candidateCommand(context.Background(), u, j, stage)
+				if !errors.Is(err, ErrState) || !errors.Is(err, errCandidateTopology) {
+					t.Fatalf("%s did not reject topology before payload admission/execution: %v", stage, err)
 				}
 			}
 		})
+	}
+}
+
+// Exercise the actual independently committed Add Site projection rather than
+// an origin-only synthetic Draft. The committed bootstrap password is erased,
+// while the site-B DSN, principal and physical database identities persist.
+func TestCandidateCommandCommittedAddSiteTopologyPreflight(t *testing.T) {
+	h := makeAddedSiteUpdateHistory(t)
+	current := h.beforeU2Parent(t)
+	if current.Draft.SiteBOrigin == "" || current.Draft.SiteBDSN == "" ||
+		current.SiteBPrincipal == "" || current.Draft.SiteBPassword != "" ||
+		!reflect.DeepEqual(current.DatabaseTargets, h.addition.DatabaseTargets) {
+		t.Fatal("committed Add Site fixture is not a complete projected two-site topology")
+	}
+	sites, err := candidateExpectedSites(h.second, current)
+	if err != nil || sites != 2 {
+		t.Fatalf("committed Add Site topology rejected: sites=%d err=%v", sites, err)
+	}
+	// No executable payload is staged for this journal copy; even a
+	// legitimate topology cannot launch a candidate in this test.
+	noPayload := *current
+	noPayload.ArchiveSHA256, noPayload.BinarySHA256 = "", ""
+	for _, stage := range []string{"migrate", "check"} {
+		if err := h.m.candidateCommand(context.Background(), h.second, &noPayload, stage); err != ErrState {
+			t.Fatalf("valid committed Add Site %s failed before payload check: %v", stage, err)
+		}
+	}
+	drift := noPayload
+	drift.DatabaseTargets = maps.Clone(noPayload.DatabaseTargets)
+	drift.DatabaseTargets["site-b"] = "9:999"
+	for _, stage := range []string{"migrate", "check"} {
+		err := h.m.candidateCommand(context.Background(), h.second, &drift, stage)
+		if !errors.Is(err, ErrState) || !errors.Is(err, errCandidateTopology) {
+			t.Fatalf("committed Add Site target drift escaped %s preflight: %v", stage, err)
+		}
 	}
 }
