@@ -29,6 +29,15 @@
     "initial_password": {
       "other": "Initial password"
     },
+    "actions": {
+      "other": "Actions"
+    },
+    "site_account_scope_notice": {
+      "other": "Only the selected site's account will be created. This does not grant Control access."
+    },
+    "site_account_retry_notice": {
+      "other": "If the response is lost, check whether the account was created before submitting again."
+    },
     "create_site_account": {
       "other": "Create site account"
     },

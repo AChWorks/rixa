@@ -22,6 +22,7 @@ func TestProductSurfaceTemplatesUseCatalogsAndEscapeData(t *testing.T) {
 				data any
 			}{
 				{inventoryTemplate, inventoryView{Locale: locale, Sites: []inventoryItem{{ID: unsafe, Origin: unsafe, CanManage: true}, {ID: "disabled", Disabled: true}}}},
+				{accountCreateTemplate, accountCreateView{Locale: locale, Site: inventoryItem{ID: unsafe, Origin: unsafe}}},
 				{contentIndexTemplate, contentIndexView{Locale: locale, Count: 2, Items: []ContentSummary{{Title: unsafe, Kind: ContentPost}, {Title: unsafe, Kind: ContentPage}}}},
 				{contentEditTemplate, contentEditView{Locale: locale, Revision: ContentRevision{Title: unsafe, Kind: ContentPost}, Publication: PublicationState{Enabled: true}, History: []RevisionSummary{{Title: unsafe}}}},
 				{contentPreviewTemplate, contentPreviewView{Locale: locale, Revision: ContentRevision{Title: unsafe}, Appearance: Appearance{SiteTitle: unsafe, SiteLanguage: "fa", HeaderShowTitle: true, HeaderTagline: unsafe, FooterText: unsafe}, ContentDirection: "rtl"}},
@@ -74,5 +75,48 @@ func TestProductCatalogFallbackPluralAndNamedMessages(t *testing.T) {
 	}
 	if _, err = fa.Text("rixa", "outcome_unknown", nil); err == nil {
 		t.Fatal("missing required operation parameter was silently hidden")
+	}
+}
+
+// The inventory is not an account-editor grid. Only a deliberately selected
+// authorized site gets an account form, using the existing Control endpoint.
+func TestControlAccountTemplatesSelectSingleSite(t *testing.T) {
+	for _, language := range []string{"en", "fa"} {
+		t.Run(language, func(t *testing.T) {
+			locale := testProductLocalizer(t, language)
+			var inventory bytes.Buffer
+			err := inventoryTemplate.ExecuteTemplate(&inventory, "content", inventoryView{
+				Locale: locale,
+				Sites: []inventoryItem{
+					{ID: "site-a", CanManage: true},
+					{ID: "disabled", Disabled: true},
+					{ID: "site-b", CanManage: false},
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			html := inventory.String()
+			if strings.Count(html, "/admin/sites/account-create/") != 1 ||
+				!strings.Contains(html, "/account-create/site-a") ||
+				strings.Contains(html, "/account-create/disabled") ||
+				strings.Contains(html, "/account-create/site-b") ||
+				strings.Contains(html, "action=\"/admin/sites/account-create\"") {
+				t.Fatal("inventory exposed extra account controls")
+			}
+			var form bytes.Buffer
+			if err := accountCreateTemplate.ExecuteTemplate(&form, "content", accountCreateView{
+				Locale: locale, Site: inventoryItem{ID: "site-a"},
+			}); err != nil {
+				t.Fatal(err)
+			}
+			body := form.String()
+			if strings.Count(body, "name=\"site_id\"") != 1 ||
+				!strings.Contains(body, "value=\"site-a\"") ||
+				!strings.Contains(body, "autocomplete=\"new-password\"") ||
+				strings.Contains(body, "autofocus") {
+				t.Fatal("selected-site form has unsafe scope or credential behavior")
+			}
+		})
 	}
 }
