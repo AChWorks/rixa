@@ -20,19 +20,42 @@ type AddSiteDraft struct {
 	AddSiteInspectionDraft
 }
 
-func validAddSiteDraft(d AddSiteDraft) bool {
-	if !operationSyntax.MatchString(d.OperationID) ||
-		!operationSyntax.MatchString(d.InstallationOperation) ||
-		d.OperationID == d.InstallationOperation ||
-		d.SiteBOrigin == "" || d.SiteBDSN == "" || d.SiteBLogin == "" {
-		return false
+// addSiteDraftInputProblems is the native Add Site journal/input syntax
+// policy. The only difference between new Draft admission and an installed
+// journal is that an installed journal may erase its bootstrapped password.
+// Problems are field-specific and contain no submitted values.
+func addSiteDraftInputProblems(d AddSiteDraft, requirePassword bool) []Problem {
+	var problems []Problem
+	if !operationSyntax.MatchString(d.OperationID) || d.OperationID == d.InstallationOperation {
+		problems = append(problems, Problem{"operation_id", "operation-id", "Use a distinct new Add Site operation ID of 1-48 lowercase letters, numbers or hyphens."})
 	}
-	for _, v := range []string{d.SiteBOrigin, d.SiteBDSN, d.SiteBLogin, d.SiteBPassword} {
-		if len(v) > 4096 || strings.ContainsAny(v, "\x00\r\n") {
-			return false
+	if !operationSyntax.MatchString(d.InstallationOperation) {
+		problems = append(problems, Problem{"installation_operation", "installation-id", "Enter the exact original native installation operation ID (1-48 lowercase letters, numbers or hyphens)."})
+	}
+	for _, f := range []struct{ field, value string }{
+		{"site_b_origin", d.SiteBOrigin},
+		{"site_b_dsn", d.SiteBDSN},
+		{"site_b_login", d.SiteBLogin},
+		{"site_b_password", d.SiteBPassword},
+	} {
+		if f.value == "" && (requirePassword || f.field != "site_b_password") {
+			problems = append(problems, Problem{f.field, "required", "This new Site-B field is required; enter a value before saving."})
+		} else if len(f.value) > 4096 || strings.ContainsAny(f.value, "\x00\r\n") {
+			problems = append(problems, Problem{f.field, "format", "Use at most 4096 bytes without NUL or line breaks."})
 		}
 	}
-	return true
+	return problems
+}
+
+// ValidateAddSiteDraftInput exposes the *same* bounded native input admission
+// used by SaveAddSiteDraft to the operator form. It cannot prove a parent,
+// TLS, database or service; Save and Review retain exclusive host authority.
+func ValidateAddSiteDraftInput(d AddSiteDraft) []Problem {
+	return addSiteDraftInputProblems(d, true)
+}
+
+func validAddSiteDraft(d AddSiteDraft) bool {
+	return len(addSiteDraftInputProblems(d, false)) == 0
 }
 
 func addSiteDraftDigest(d AddSiteDraft) string {

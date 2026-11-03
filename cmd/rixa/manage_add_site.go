@@ -7,11 +7,15 @@ import (
 	"errors"
 	"flag"
 	"io"
+	"os"
 
+	"github.com/AChWorks/rixa/internal/product"
 	"github.com/AChWorks/rixa/internal/serverinstall"
+	"github.com/AChWorks/rixa/internal/terminal"
 )
 
 const manageAddSiteHelp = "Rixa after-install Add Site (development source; managed Apply/Resume)\n\n" +
+	"  rixa manage add-site [menu] [--operation <new-id>] [--installation <original-id>] [--prefill <private-json>] [--plain] [--no-color]\n" +
 	"  rixa manage add-site inspect --source <private-json>\n" +
 	"  rixa manage add-site draft --source <private-json>\n" +
 	"  rixa manage add-site review --operation <new-operation-id>\n" +
@@ -21,8 +25,57 @@ const manageAddSiteHelp = "Rixa after-install Add Site (development source; mana
 	"Inspection needs installation_operation, site_b_origin, site_b_dsn,\n" +
 	"site_b_login and site_b_password. A saved Draft additionally requires\n" +
 	"a separate operation_id. Both sources must be same-operator 0600 JSON.\n" +
+	"The interactive menu uses the same private Draft/Review/Apply/Resume backend.\n" +
+	"Direct actions emit JSON and never prompt; --non-interactive explicitly rejects the menu.\n" +
 	"Review returns a one-use explicit token; Status never discloses it.\n" +
 	"Apply performs independent bounded effect stages; Resume requires the frozen manager.\n"
+
+// manageAddSiteMenuWithFacade uses the same typed effects and retained status
+// as direct commands. It does not expose arbitrary host execution or modify
+// the original installation's frozen journal.
+func manageAddSiteMenuWithFacade(ctx context.Context, args []string, input *os.File, output io.Writer, backend serverinstall.AddSiteEffects) error {
+	if len(args) > 0 && args[0] == "menu" {
+		args = args[1:]
+	}
+	fs := flag.NewFlagSet("manage add-site menu", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	id := fs.String("operation", "", "new Add Site operation ID")
+	installation := fs.String("installation", "", "existing original installation ID")
+	prefill := fs.String("prefill", "", "private Add Site JSON prefill")
+	plain := fs.Bool("plain", false, "simple terminal rendering")
+	noColor := fs.Bool("no-color", false, "disable semantic colors")
+	noninteractive := fs.Bool("non-interactive", false, "never open a prompt")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			_, err = io.WriteString(output, manageAddSiteHelp)
+			return err
+		}
+		return errors.New("invalid Add Site menu flags; use rixa manage add-site --help")
+	}
+	if fs.NArg() != 0 {
+		return errors.New("unexpected Add Site menu positional arguments")
+	}
+	if *noninteractive {
+		return errors.New("noninteractive Add Site requires direct inspect/draft/review/apply/resume/status; no prompts were opened")
+	}
+	var initial *serverinstall.AddSiteDraft
+	if *prefill != "" {
+		var d serverinstall.AddSiteDraft
+		if err := readManagePrivateJSON(*prefill, &d); err != nil {
+			return err
+		}
+		initial = &d
+	}
+	err := terminal.RunAddSite(ctx, backend, terminal.AddSiteOptions{
+		Options: terminal.Options{Input: input, Output: output, Version: product.Version,
+			OperationID: *id, Plain: *plain, NoColor: *noColor},
+		InstallationOperation: *installation, AddSitePrefill: initial,
+	})
+	if errors.Is(err, context.Canceled) || errors.Is(err, io.EOF) {
+		return nil
+	}
+	return err
+}
 
 func manageAddSiteInspectionWithFacade(ctx context.Context, args []string, output io.Writer, backend serverinstall.AddSiteInspectionFacade) error {
 	if len(args) == 1 && (args[0] == "--help" || args[0] == "-h") {

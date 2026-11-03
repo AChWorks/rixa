@@ -4,8 +4,15 @@ package terminal
 
 import (
 	"context"
+
 	"github.com/AChWorks/rixa/internal/serverinstall"
 )
+
+// inspectionProfile is optional and read-only; inspection never replaces the
+// retained operation state, obtains Review consent or changes the lifecycle.
+type inspectionProfile interface {
+	inspect(context.Context, serverinstall.Draft) (serverinstall.Result, error)
+}
 
 // Profiles change task presentation while sharing one session, input decoder,
 // local review fencing, editable form and confirmation implementation.

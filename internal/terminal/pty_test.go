@@ -31,6 +31,7 @@ type ptyCapture struct {
 	before        *term.State
 	receipt       string
 	done          chan error
+	readerDone    chan struct{}
 }
 
 func startPTY(t *testing.T, mode string) *ptyCapture {
@@ -83,9 +84,10 @@ func startPTY(t *testing.T, mode string) *ptyCapture {
 	if e = cmd.Start(); e != nil {
 		t.Fatal(e)
 	}
-	p := &ptyCapture{master: master, slave: slave, command: cmd, before: before, receipt: receipt, done: make(chan error, 1)}
+	p := &ptyCapture{master: master, slave: slave, command: cmd, before: before, receipt: receipt, done: make(chan error, 1), readerDone: make(chan struct{})}
 	go func() { p.done <- cmd.Wait() }()
 	go func() {
+		defer close(p.readerDone)
 		b := make([]byte, 4096)
 		for {
 			n, e := master.Read(b)
@@ -149,6 +151,18 @@ func (p *ptyCapture) finish(t *testing.T) map[string]any {
 	}
 	if !reflect.DeepEqual(p.before, after) {
 		t.Fatal("terminal state was not restored")
+	}
+	// cmd.Wait() proves the child exited but not that the independent PTY
+	// reader consumed its final alternate-screen/termios escape bytes. The
+	// parent still owns the slave until now; close it and wait for EOF before
+	// asserting on p.text() in the caller.
+	if e := p.slave.Close(); e != nil {
+		t.Fatal(e)
+	}
+	select {
+	case <-p.readerDone:
+	case <-time.After(3 * time.Second):
+		t.Fatal("PTY output reader did not drain after child exit")
 	}
 	b, e := os.ReadFile(p.receipt)
 	if e != nil {
@@ -286,6 +300,10 @@ func TestTerminalPTYChild(t *testing.T) {
 	}
 	if strings.HasPrefix(mode, "postgres-") {
 		postgresPTYChild(t, mode)
+		return
+	}
+	if strings.HasPrefix(mode, "add-site-") {
+		runAddSitePTYChild(t, mode)
 		return
 	}
 	if strings.HasPrefix(mode, "update-") {

@@ -8,7 +8,9 @@ are documented in the [native operator guide](docs/server-management.md#optional
 Do not infer support from previously published binaries. Current development
 source includes [after-install Add Site management](docs/server-management.md#add-site-after-an-existing-native-installation-development-source-not-released):
 read-only inspection, durable Draft/Review and fenced Apply/Resume for an
-existing healthy single-site installation. Isolated Debian 13/PostgreSQL 18
+existing healthy single-site installation. Current source also includes an
+interactive terminal Add Site menu using those same native operations; older
+published packages do not inherit it. Isolated Debian 13/PostgreSQL 18
 tests have demonstrated effectful Add Site, interrupted generation-2 Resume,
 publisher-authenticated post-Add-Site Update, and retained-data CLI/TUI Remove.
 The source passed independent HIGH_ASSURANCE review and was integrated
@@ -16,8 +18,10 @@ through [PR #66](https://github.com/AChWorks/rixa/pull/66). Source integration
 is not publication: verify that the selected release actually contains these
 capabilities against [Issue #29](https://github.com/AChWorks/rixa/issues/29).
 This is a **development-only, not production-supported** profile.
-Nonempty Media retention and the full interactive operator matrix have not
-been exhaustively verified; destructive Purge remains separate. See the
+A [physical nonempty-Media Remove test](https://github.com/AChWorks/rixa/issues/29#issuecomment-6601260556)
+verified site-A/site-B Media and all three PostgreSQL data/schema digests
+unchanged after ordinary retained-data Remove. This does not prove exhaustive
+interactive operator behavior; destructive Purge remains separate. See the
 [operator guide](docs/server-management.md) and
 [Issue #29](https://github.com/AChWorks/rixa/issues/29) for precise evidence.
 

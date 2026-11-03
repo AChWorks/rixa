@@ -20,8 +20,8 @@ func (m *Manager) SaveAddSiteDraft(ctx context.Context, d AddSiteDraft) (Result,
 	if err := m.authorize(); err != nil {
 		return invalid, err
 	}
-	if !validAddSiteDraft(d) || d.SiteBPassword == "" {
-		invalid.Problems = []Problem{{Field: "operation_id", Code: "invalid-draft", Message: "Provide an independent operation ID and all five bounded Add Site fields."}}
+	if problems := ValidateAddSiteDraftInput(d); len(problems) > 0 {
+		invalid.Problems = problems
 		return invalid, ErrInput
 	}
 	unlock, err := m.lock(ctx, false)
@@ -36,10 +36,12 @@ func (m *Manager) SaveAddSiteDraft(ctx context.Context, d AddSiteDraft) (Result,
 	}
 	owner, err := readPrivate(filepath.Join(m.stateRoot, "installation"), m.ownerUID, 128)
 	if err != nil || string(owner) != d.InstallationOperation+"\n" {
+		invalid.Problems = []Problem{{Field: "installation_operation", Code: "original-not-eligible", Message: "Check original installation ID and eligible installed state."}}
 		return invalid, ErrState
 	}
 	parent, err := m.load(d.InstallationOperation)
 	if err != nil || parent.State != "installed" || parent.Frozen == "" || parent.Attempts["remove"] != "" {
+		invalid.Problems = []Problem{{Field: "installation_operation", Code: "original-not-eligible", Message: "Check original installation ID and eligible installed state."}}
 		return invalid, ErrState
 	}
 	if problems := ValidateAddSiteInspection(parent.Draft, d.AddSiteInspectionDraft); len(problems) > 0 {
@@ -50,23 +52,29 @@ func (m *Manager) SaveAddSiteDraft(ctx context.Context, d AddSiteDraft) (Result,
 	if err != nil || pending != "" {
 		return invalid, ErrState
 	}
-	// Refuse colliding independent operation IDs, including invalid existing
-	// records (a missing path is never inferred from a malformed file).
-	if _, err := m.load(d.OperationID); !errors.Is(err, os.ErrNotExist) {
+	// Every genuine operation-ID collision has one nonenumerating response,
+	// whether a valid, foreign, corrupted or symlinked journal occupies it.
+	// The ID is fixed for this TUI session: other fields cannot correct it.
+	operationUnavailable := func() (Result, error) {
+		invalid.Problems = []Problem{{Field: "operation_id", Code: "operation-id-unavailable",
+			Message: "This Add Site operation ID cannot be reused. Exit and reopen with a different --operation ID."}}
 		return invalid, ErrState
 	}
+	if _, err := m.load(d.OperationID); !errors.Is(err, os.ErrNotExist) {
+		return operationUnavailable()
+	}
 	if _, err := m.loadUpdate(d.OperationID); !errors.Is(err, os.ErrNotExist) {
-		return invalid, ErrState
+		return operationUnavailable()
 	}
 	old, err := m.loadAddSite(d.OperationID)
 	if err == nil {
 		if old.Frozen != "" || len(old.Attempts) != 0 ||
 			(old.State != "draft" && old.State != "blocked" && old.State != "ready") ||
 			old.Draft.InstallationOperation != d.InstallationOperation {
-			return addSiteResult(old), ErrState
+			return operationUnavailable()
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
-		return invalid, ErrState
+		return operationUnavailable()
 	}
 	j := &addSiteJournal{Schema: addSiteSchema, Draft: d, State: "draft", Code: "draft-saved",
 		Message:  "Private Add Site draft saved; Review rechecks the installed service without changing topology.",
