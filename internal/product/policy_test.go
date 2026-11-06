@@ -23,6 +23,22 @@ func TestSitePolicyKeepsAdministratorsScopedToTheirApplication(t *testing.T) {
 	if err := policyA.Authorize(context.Background(), a, media.List, media.LibraryTarget); err != nil {
 		t.Fatalf("site A admin denied its own library: %v", err)
 	}
+	assetID := "AAAAAAAAAAAAAAAAAAAAAAAAAA"
+	for _, actor := range []achrix.Principal{a, operatorA} {
+		if err := policyA.Authorize(context.Background(), actor, media.Select, assetID); err != nil {
+			t.Fatalf("site A privileged actor denied exact selection: %v", err)
+		}
+	}
+	for _, target := range []string{media.LibraryTarget, "", "bad-id"} {
+		if err := policyA.Authorize(context.Background(), a, media.Select, target); !errors.Is(err, achrix.ErrDenied) {
+			t.Fatalf("non-asset selection %q was permitted: %v", target, err)
+		}
+	}
+	for _, actor := range []achrix.Principal{b, operatorB, identity.PublicPrincipal, "AAAAAAAAAAAAAAAAAAAAAAAAAA"} {
+		if err := policyA.Authorize(context.Background(), actor, media.Select, assetID); !errors.Is(err, achrix.ErrDenied) {
+			t.Fatalf("non-site administrator %q gained selection: %v", actor, err)
+		}
+	}
 	if err := policyB.Authorize(context.Background(), a, media.List, media.LibraryTarget); !errors.Is(err, achrix.ErrDenied) {
 		t.Fatalf("site A admin reached site B: %v", err)
 	}

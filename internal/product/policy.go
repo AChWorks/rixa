@@ -70,6 +70,12 @@ func sitePolicy(siteAdmin, controlOperator achrix.Principal, access *SiteAccess)
 			}
 		case media.Read, media.PreparePublicImage:
 			return nil
+		case media.Select:
+			// Exact ready-asset selection belongs to the current site's
+			// administrator/operator, never to an unscoped library grant.
+			if validEditorialID(resource) {
+				return nil
+			}
 		case CapabilityContentList:
 			if resource == ContentCollectionTarget {
 				return nil
