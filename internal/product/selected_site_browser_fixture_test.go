@@ -194,7 +194,12 @@ func runSelectedSiteBrowserFixture(t *testing.T, publication, picker bool) {
 			t.Fatal("draft browser journey changed Media originals or static publication files")
 		}
 		for table, before := range beforeRows {
-			// Only session/audit and source-editorial effects are accepted here.
+			// Picker-only Browser uses independent site logins. Control database
+			// must remain fully untouched, including sessions and Audit.
+			if picker && strings.HasPrefix(table, "control/") && afterRows[table] != before {
+				t.Fatalf("Picker unexpectedly changed Control database: %s", table)
+			}
+			// Only site sessions/audit and source-editorial effects are accepted here.
 			if selectedSiteMutableTable(table) {
 				continue
 			}
@@ -251,7 +256,9 @@ func assertMediaPickerBrowserIsolation(t *testing.T, ctx context.Context, dsns m
 			convertErr != nil || revision <= 56 {
 			t.Fatalf("incomplete Media Picker save evidence for %s", site.ID)
 		}
-		for dbName, dsn := range dsns {
+		// Control is a separate application database without site editorial
+		// tables. Inspect both actual site databases for leaked operations.
+		for dbName, dsn := range map[string]string{"a": dsns["a"], "b": dsns["b"]} {
 			conn, err := pgx.Connect(ctx, dsn)
 			if err != nil {
 				t.Fatal(err)
