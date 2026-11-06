@@ -5,7 +5,9 @@ package product
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -100,6 +102,7 @@ func TestControlAccountBrowserFixture(t *testing.T) {
 	writeBrowserConfig(t, configPath, raw, catalogRoot)
 	retainedCommand(t, ctx, binary, env, "check", "--config", configPath)
 	baseline := snapshotRetainedRows(t, ctx, dsns)
+	identityBefore := snapshotControlIdentity(t, ctx, dsns)
 	files := snapshotRetainedFiles(t, raw.Sites[:2])
 	configBytes, err := os.ReadFile(configPath)
 	if err != nil {
@@ -127,13 +130,21 @@ func TestControlAccountBrowserFixture(t *testing.T) {
 		t.Fatal("browser result absent or oversized")
 	}
 	var result struct {
-		Schema       string   `json:"schema"`
-		BinarySHA256 string   `json:"binary_sha256"`
-		Checks       []string `json:"checks"`
+		Schema           string            `json:"schema"`
+		BinarySHA256     string            `json:"binary_sha256"`
+		Checks           []string          `json:"checks"`
+		AccountIDs       map[string]string `json:"account_ids"`
+		MutationAttempts map[string]int    `json:"mutation_attempts"`
+		InjectedCommits  int               `json:"injected_commits"`
 	}
 	if json.Unmarshal(resultBytes, &result) != nil ||
-		result.Schema != receipt["schema"] || result.BinarySHA256 != digest || len(result.Checks) < 8 {
-		t.Fatal("browser result missing actual acceptance checks")
+		result.Schema != receipt["schema"] || result.BinarySHA256 != digest ||
+		!exactControlAccountChecks(result.Checks) ||
+		len(result.AccountIDs) != 2 || !accountIDSyntax.MatchString(result.AccountIDs["site-a"]) ||
+		!accountIDSyntax.MatchString(result.AccountIDs["site-b"]) ||
+		len(result.MutationAttempts) != 2 || result.MutationAttempts["browser-account-a"] != 2 ||
+		result.MutationAttempts["browser-account-b"] != 1 || result.InjectedCommits != 1 {
+		t.Fatal("browser result missing exact checks or persisted identity references")
 	}
 	stop()
 	if browserExecutableDigest(t, binary) != digest {
@@ -145,7 +156,11 @@ func TestControlAccountBrowserFixture(t *testing.T) {
 	if !equalSelectedSiteFiles(files, snapshotRetainedFiles(t, raw.Sites[:2])) {
 		t.Fatal("account-browser changed Media originals or publication files")
 	}
-	verifyControlBrowserAccounts(t, ctx, dsns)
+	verifyControlBrowserAccounts(t, ctx, dsns, identityBefore, result.AccountIDs, map[string]string{
+		"control": raw.Control.AdminPrincipal,
+		"a":       raw.Sites[0].AdminPrincipal,
+		"b":       raw.Sites[1].AdminPrincipal,
+	})
 	afterRows := snapshotRetainedRows(t, ctx, dsns)
 	if len(afterRows) != len(baseline) {
 		t.Fatal("browser changed the database table inventory")
@@ -158,9 +173,11 @@ func TestControlAccountBrowserFixture(t *testing.T) {
 		// Only independent account/credential creation, login sessions and
 		// their own atomic Audit records are allowed to change.
 		allow := strings.Contains(table, "\"identity\".\"sessions\"") || strings.Contains(table, "\"audit\".\"records\"")
-		if scope == "a" || scope == "b" {
-			allow = allow || strings.Contains(table, "\"identity\".\"accounts\"") ||
-				strings.Contains(table, "\"identity\".\"credentials\"")
+		// The whole-table hashes include the expected new rows; their precise
+		// deltas (including unchanged administrator credentials) are verified
+		// by verifyControlBrowserAccounts.
+		if scope != "control" && (table == "\"identity\".\"accounts\"" || table == "\"identity\".\"credentials\"") {
+			continue
 		}
 		if !allow && afterRows[key] != before {
 			t.Fatalf("browser modified out-of-scope DB table %s", key)
@@ -169,26 +186,146 @@ func TestControlAccountBrowserFixture(t *testing.T) {
 	t.Log("RIXA_CONTROL_ACCOUNT_BROWSER real_https_postgres=true scope_isolated=true result_success_conflict_unknown=true unchanged_media_public_config=true")
 }
 
-func verifyControlBrowserAccounts(t *testing.T, ctx context.Context, dsns map[string]string) {
+// Check all unique required labels, in the expected order.
+func exactControlAccountChecks(actual []string) bool {
+	expected := []string{
+		"control-login-cookie-scope",
+		"site-list-explicit-selection",
+		"en-ltr-keyboard-responsive",
+		"site-a-create-acknowledged",
+		"duplicate-conflict-no-unknown-replay",
+		"fa-rtl-selected-site",
+		"site-b-committed-lost-ack-no-replay",
+		"identity-reconciliation-and-cross-site-denial",
+		"disabled-unknown-forged-site-denials",
+		"no-browser-errors-no-webstorage",
+	}
+	if len(actual) != len(expected) {
+		return false
+	}
+	for i := range expected {
+		if actual[i] != expected[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// Captures each entire row, keyed by its immutable account ID. Only a digest
+// of the credential row is retained; passwords/hashes never enter CI logs or
+// browser receipts.
+type controlIdentityRows struct {
+	accounts    map[string][32]byte
+	credentials map[string][32]byte
+}
+
+func snapshotControlIdentity(t *testing.T, ctx context.Context, dsns map[string]string) map[string]controlIdentityRows {
 	t.Helper()
+	result := make(map[string]controlIdentityRows, len(dsns))
 	for _, scope := range []string{"control", "a", "b"} {
+		conn, err := pgx.Connect(ctx, dsns[scope])
+		if err != nil {
+			t.Fatalf("Identity snapshot connection unavailable: %s: %v", scope, err)
+		}
+		read := func(table, idColumn string) map[string][32]byte {
+			t.Helper()
+			rows, err := conn.Query(ctx, fmt.Sprintf("SELECT %s,row_to_json(t)::text FROM identity.%s t", idColumn, table))
+			if err != nil {
+				t.Fatalf("Identity snapshot query %s/%s: %v", scope, table, err)
+			}
+			defer rows.Close()
+			values := make(map[string][32]byte)
+			for rows.Next() {
+				var id, serialized string
+				if err = rows.Scan(&id, &serialized); err != nil || id == "" {
+					t.Fatalf("Identity snapshot scan %s/%s: %v", scope, table, err)
+				}
+				if _, exists := values[id]; exists {
+					t.Fatalf("duplicate Identity row key in %s/%s", scope, table)
+				}
+				values[id] = sha256.Sum256([]byte(serialized))
+			}
+			if err = rows.Err(); err != nil {
+				t.Fatalf("Identity snapshot iteration %s/%s: %v", scope, table, err)
+			}
+			return values
+		}
+		result[scope] = controlIdentityRows{
+			accounts:    read("accounts", "id"),
+			credentials: read("credentials", "account_id"),
+		}
+		_ = conn.Close(ctx)
+	}
+	return result
+}
+
+func verifyControlBrowserAccounts(t *testing.T, ctx context.Context, dsns map[string]string, before map[string]controlIdentityRows, expectedIDs, adminIDs map[string]string) {
+	t.Helper()
+	after := snapshotControlIdentity(t, ctx, dsns)
+	for _, scope := range []string{"control", "a", "b"} {
+		original, current := before[scope], after[scope]
+		adminID := adminIDs[scope]
+		if len(original.accounts) != 1 || len(original.credentials) != 1 ||
+			!accountIDSyntax.MatchString(adminID) ||
+			len(original.accounts) != len(original.credentials) ||
+			original.accounts[adminID] == ([32]byte{}) || original.credentials[adminID] == ([32]byte{}) {
+			t.Fatalf("Identity fixture expected one complete bootstrap administrator in %s", scope)
+		}
+		insertedID := ""
+		newLogin := ""
+		if scope == "a" {
+			insertedID, newLogin = expectedIDs["site-a"], "browser-account-a"
+		}
+		if scope == "b" {
+			insertedID, newLogin = expectedIDs["site-b"], "browser-account-b"
+		}
+		added := 0
+		if insertedID != "" {
+			added = 1
+		}
+		if len(current.accounts) != len(original.accounts)+added ||
+			len(current.credentials) != len(original.credentials)+added {
+			t.Fatalf("unexpected Identity account/credential row count in %s", scope)
+		}
+		for id, digest := range original.accounts {
+			if current.accounts[id] != digest {
+				t.Fatalf("existing Identity account row changed in %s", scope)
+			}
+		}
+		for id, digest := range original.credentials {
+			if current.credentials[id] != digest {
+				t.Fatalf("existing Identity credential row changed in %s", scope)
+			}
+		}
+		for id := range current.accounts {
+			if _, exists := original.accounts[id]; !exists && id != insertedID {
+				t.Fatalf("unexpected new Identity account in %s", scope)
+			}
+		}
+		for id := range current.credentials {
+			if _, exists := original.credentials[id]; !exists && id != insertedID {
+				t.Fatalf("unexpected new Identity credential in %s", scope)
+			}
+		}
+		if insertedID == "" {
+			continue
+		}
+		if insertedID == adminID || current.accounts[insertedID] == ([32]byte{}) ||
+			current.credentials[insertedID] == ([32]byte{}) {
+			t.Fatalf("browser acknowledgment/commit ID not present as exactly one account+credential in %s", scope)
+		}
 		conn, err := pgx.Connect(ctx, dsns[scope])
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, test := range []struct {
-			login string
-			count int
-		}{
-			{"browser-account-a", map[string]int{"control": 0, "a": 1, "b": 0}[scope]},
-			{"browser-account-b", map[string]int{"control": 0, "a": 0, "b": 1}[scope]},
-		} {
-			var count int
-			err = conn.QueryRow(ctx, "SELECT count(*) FROM identity.accounts WHERE login=$1", test.login).Scan(&count)
-			if err != nil || count != test.count {
-				t.Errorf("account-browser cross-site/duplicate login %s/%s: count=%d err=%v", scope, test.login, count, err)
-			}
-		}
+		var gotLogin string
+		var enabled bool
+		var revision int64
+		err = conn.QueryRow(ctx, "SELECT login,enabled,revision FROM identity.accounts WHERE id=$1", insertedID).
+			Scan(&gotLogin, &enabled, &revision)
 		_ = conn.Close(ctx)
+		if err != nil || gotLogin != newLogin || !enabled || revision != 1 {
+			t.Fatalf("acknowledged Identity ID was not the expected enabled new account in %s: %v", scope, err)
+		}
 	}
 }

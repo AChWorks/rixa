@@ -34,6 +34,37 @@ async function main() {
     const page = await context.newPage();
     page.setDefaultTimeout(12000);
     page.on("pageerror", error => errors.push(error.message));
+    // Independent BrowserContext observation remains active after fault
+    // injection. Even a delayed HTTP 409 replay counts as an attempt.
+    const accountMutations = [], observationErrors = [];
+    context.on("request", request => {
+      try {
+        if (request.method() !== "POST") return;
+        const target = new URL(request.url());
+        if (target.origin !== fixture.control || target.pathname !== "/admin/sites/account-create") return;
+        const submitted = JSON.parse(request.postData());
+        check(["browser-account-a","browser-account-b"].includes(submitted.login) &&
+          ["site-a","site-b"].includes(submitted.site_id), "unexpected account mutation in Browser transport");
+        accountMutations.push({login:submitted.login, site:submitted.site_id});
+      } catch (error) { observationErrors.push(error.message); }
+    });
+    const assertMutations = () => {
+      check(observationErrors.length === 0, "account transport observation failed: " + observationErrors.join("; "));
+      const actual = accountMutations.map(m => m.site + "/" + m.login);
+      check(JSON.stringify(actual) === JSON.stringify([
+        "site-a/browser-account-a",
+        "site-a/browser-account-a",
+        "site-b/browser-account-b"
+      ]), "browser account mutation replay or missing/foreign attempt: " + actual.join(", "));
+    };
+    const notice = async (key, role) => {
+      const expected = await page.evaluate(key => window.AChrixI18n.text("admin", key), key);
+      const current = await page.locator("#status").textContent();
+      check(typeof expected === "string" && expected.trim().length > 3 &&
+        current.trim() === expected.trim() &&
+        await page.locator("#status").getAttribute("role") === role,
+        "visible localized status did not match " + key + "/" + role);
+    };
     const record = label => checks.push(label);
     const login = async () => {
       const response = await page.goto(fixture.control + "/admin/login");
@@ -45,6 +76,11 @@ async function main() {
         page.locator("form[data-login] button[type=submit]").click()
       ]);
       await page.locator("#logout").waitFor();
+      const controlCookie = (await context.cookies(fixture.control))
+        .find(cookie => cookie.name === "__Host-AChrix-Session");
+      check(controlCookie && controlCookie.secure && controlCookie.httpOnly &&
+        controlCookie.sameSite === "Strict" && controlCookie.path === "/",
+        "Control session cookie lacks Secure/HttpOnly/SameSite/Host scope");
       check((await context.cookies(fixture.site_a)).length === 0 &&
         (await context.cookies(fixture.site_b)).length === 0, "Control login became a site login");
     };
@@ -110,13 +146,13 @@ async function main() {
     const success = await submit(form, "browser-account-a", "Browser-A-Password-2026!");
     check(success.type === "success" && typeof success.id === "string" && success.id.length > 0,
       "site-A account creation did not acknowledge its account");
-    check(await page.locator("#status").getAttribute("role") === "status", "success status not announced");
+    await notice("completed", "status");
     record("site-a-create-acknowledged");
 
     const duplicate = await submit(form, "browser-account-a", "Browser-Duplicate-2026!");
     check(duplicate.type === "failure" && duplicate.status === 409 && duplicate.unknown === false &&
       duplicate.code === "conflict", "duplicate login was not deterministically rejected");
-    check(await page.locator("#status").getAttribute("role") === "alert", "conflict not announced");
+    await notice("record_conflict", "alert");
     record("duplicate-conflict-no-unknown-replay");
 
     const languagePage = await page.goto(fixture.control + "/admin/language/");
@@ -135,8 +171,10 @@ async function main() {
 
     // Suppress ONE response only after the real site-B identity write commits.
     // Never automatically repeat the write: later check original user credentials.
-    let intercepted = 0;
+    let intercepted = 0, committedSiteBID = "";
+    const routeErrors = [];
     await context.route("**/admin/sites/account-create", async route => {
+      try {
       const req = route.request();
       const address = new URL(req.url());
       check(req.method() === "POST" && address.origin === fixture.control &&
@@ -172,15 +210,24 @@ async function main() {
         call.on("error", reject);
         call.end(body);
       });
-      check(committed.status === 200 && typeof JSON.parse(committed.body).id === "string",
+      const committedResult = committed.status === 200 ? JSON.parse(committed.body) : {};
+      check(committed.status === 200 && /^[A-Z2-7]{26}$/.test(committedResult.id),
         "real site-B write failed before acknowledgement suppression");
+      committedSiteBID = committedResult.id;
       await route.abort("failed");
+      } catch (error) {
+        routeErrors.push(error.message);
+        await route.abort("failed").catch(() => {});
+      }
     });
     const uncertain = await submit(form, "browser-account-b", "Browser-B-Password-2026!");
-    await context.unroute("**/admin/sites/account-create");
-    check(intercepted === 1 && uncertain.type === "failure" && uncertain.unknown === true,
-      "committed lost-ack response did not remain uncertain");
-    check(await page.locator("#status").getAttribute("role") === "alert", "unknown outcome not announced");
+    // Keep fault route armed: a delayed replay cannot hide behind HTTP 409.
+    await page.waitForTimeout(650);
+    assertMutations();
+    check(routeErrors.length === 0 && intercepted === 1 &&
+      uncertain.type === "failure" && uncertain.unknown === true,
+      "committed lost-ack response did not remain uncertain or was replayed");
+    await notice("outcome_unknown", "alert");
     record("site-b-committed-lost-ack-no-replay");
 
     // Use the normal Identity endpoint via a fresh same-origin browser context,
@@ -196,35 +243,47 @@ async function main() {
             headers:{"Content-Type":"application/json","X-Identity-Request":"1"},
             body:JSON.stringify({login,password})
           });
-          return response.status;
+          let code = "";
+          try { code = (await response.json()).code || ""; } catch (_) {}
+          return {status:response.status,code};
         }, {login,password});
         await p.close();
         return result;
       };
-      check(await verify(fixture.site_a,"browser-account-a","Browser-A-Password-2026!") === 200,
+      check((await verify(fixture.site_a,"browser-account-a","Browser-A-Password-2026!")).status === 200,
         "actual site-A Identity cannot authenticate its new account");
-      check(await verify(fixture.site_b,"browser-account-b","Browser-B-Password-2026!") === 200,
+      check((await verify(fixture.site_b,"browser-account-b","Browser-B-Password-2026!")).status === 200,
         "actual site-B Identity cannot reconcile committed account");
-      check(await verify(fixture.site_a,"browser-account-b","Browser-B-Password-2026!") !== 200,
-        "site-B credentials authenticated against site-A");
-      check(await verify(fixture.site_b,"browser-account-a","Browser-A-Password-2026!") !== 200,
-        "site-A credentials authenticated against site-B");
+      const wrongSiteA = await verify(fixture.site_a,"browser-account-b","Browser-B-Password-2026!");
+      const wrongSiteB = await verify(fixture.site_b,"browser-account-a","Browser-A-Password-2026!");
+      check(wrongSiteA.status === 401 && wrongSiteA.code === "authentication_failed" &&
+        wrongSiteB.status === 401 && wrongSiteB.code === "authentication_failed",
+        "cross-site Identity denial was not HTTP 401 authentication_failed");
     } finally { await remote.close(); }
     record("identity-reconciliation-and-cross-site-denial");
 
     for (const selector of ["disabled","unknown","site-a/forged"]) {
       const response = await page.goto(fixture.control + "/admin/sites/account-create/" + selector);
-      check(response && response.status() !== 200 &&
+      check(response?.status() === 403 &&
         await page.locator("form[data-control-account-create]").count() === 0,
-        "unauthorized selector exposed an account form");
+        "unauthorized selector did not return HTTP 403 without form");
     }
     record("disabled-unknown-forged-site-denials");
 
+    // Bounded observation persists through subsequent navigation.
+    await page.waitForTimeout(650);
+    assertMutations();
+    check(routeErrors.length === 0 && intercepted === 1 && committedSiteBID.length === 26,
+      "fault injection intercepted multiple attempts or missing real commit");
     check(errors.length === 0, "unhandled browser errors: " + errors.join("; "));
     check(await page.evaluate(() => localStorage.length === 0 && sessionStorage.length === 0),
       "account workflow put secrets in browser storage");
     record("no-browser-errors-no-webstorage");
-    const result = {schema:fixture.schema,binary_sha256:fixture.binary_sha256,checks};
+    const result = {schema:fixture.schema,binary_sha256:fixture.binary_sha256,checks,
+      account_ids:{"site-a":success.id, "site-b":committedSiteBID},
+      mutation_attempts:Object.fromEntries(["browser-account-a","browser-account-b"].map(login =>
+        [login,accountMutations.filter(m => m.login === login).length])),
+      injected_commits:intercepted};
     const file = await fs.open(path.join(root, "result.json"), "wx", 0o600);
     try {
       await file.writeFile(JSON.stringify(result)+"\n");
