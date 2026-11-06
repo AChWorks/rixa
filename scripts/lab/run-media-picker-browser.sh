@@ -10,8 +10,8 @@ for item in "$root" "$binary" "$log"; do
   [[ ! -e "$item" ]] || { echo "Refusing existing fixture path $item" >&2; exit 2; }
 done
 go build -trimpath -o "$binary" ./cmd/rixa
-RIXA_SELECTED_SITE_BINARY="$binary" RIXA_SELECTED_SITE_ROOT="$root" RIXA_SELECTED_SITE_OBSERVATION=1 \
-  go test ./internal/product -run '^TestSelectedSiteBrowserFixture$' -count=1 -timeout=25m -v >"$log" 2>&1 &
+RIXA_SELECTED_SITE_BINARY="$binary" RIXA_SELECTED_SITE_ROOT="$root" RIXA_MEDIA_PICKER_OBSERVATION=1 \
+  go test ./internal/product -run '^TestMediaPickerBrowserFixture$' -count=1 -timeout=25m -v >"$log" 2>&1 &
 fixture_pid=$!
 cleanup() {
   if kill -0 "$fixture_pid" 2>/dev/null; then kill "$fixture_pid" 2>/dev/null || true; wait "$fixture_pid" 2>/dev/null || true; fi
@@ -41,4 +41,4 @@ if ! wait "$fixture_pid"; then
 fi
 trap - EXIT
 echo RIXA_MEDIA_PICKER_BROWSER_COMPLETE
-grep -E 'RIXA_SELECTED_SITE_BROWSER|PASS|FAIL' "$log" | tail -n 12
+grep -E 'RIXA_MEDIA_PICKER_BROWSER|PASS|FAIL' "$log" | tail -n 12

@@ -28,7 +28,17 @@ func TestSelectedSiteBrowserFixture(t *testing.T) {
 	if os.Getenv("RIXA_SELECTED_SITE_OBSERVATION") != "1" {
 		t.Skip("set RIXA_SELECTED_SITE_OBSERVATION=1 for the real selected-site browser fixture")
 	}
-	runSelectedSiteBrowserFixture(t, false)
+	runSelectedSiteBrowserFixture(t, false, false)
+}
+
+// TestMediaPickerBrowserFixture reuses the exact two-site disposable database,
+// TLS and seeded Media fixture, but has independent Picker-specific acceptance.
+// Do not weaken or replay historical selected-site/Control browser obligations.
+func TestMediaPickerBrowserFixture(t *testing.T) {
+	if os.Getenv("RIXA_MEDIA_PICKER_OBSERVATION") != "1" {
+		t.Skip("set RIXA_MEDIA_PICKER_OBSERVATION=1 for real Media Picker browser acceptance")
+	}
+	runSelectedSiteBrowserFixture(t, false, true)
 }
 
 // The publication variant keeps the same real login, PostgreSQL and TLS
@@ -38,10 +48,10 @@ func TestSelectedSitePublicationBrowserFixture(t *testing.T) {
 	if os.Getenv("RIXA_SELECTED_SITE_PUBLICATION_OBSERVATION") != "1" {
 		t.Skip("set RIXA_SELECTED_SITE_PUBLICATION_OBSERVATION=1 for the real publication browser proof")
 	}
-	runSelectedSiteBrowserFixture(t, true)
+	runSelectedSiteBrowserFixture(t, true, false)
 }
 
-func runSelectedSiteBrowserFixture(t *testing.T, publication bool) {
+func runSelectedSiteBrowserFixture(t *testing.T, publication, picker bool) {
 	t.Helper()
 	binary, root, dsn := os.Getenv("RIXA_SELECTED_SITE_BINARY"), os.Getenv("RIXA_SELECTED_SITE_ROOT"), os.Getenv("RIXA_TEST_POSTGRES_DSN")
 	if !filepath.IsAbs(binary) || !filepath.IsAbs(root) || root == "/" || dsn == "" {
@@ -132,6 +142,8 @@ func runSelectedSiteBrowserFixture(t *testing.T, publication bool) {
 	}
 	if publication {
 		receipt.Schema = "rixa.selected-site-publication-browser.v1"
+	} else if picker {
+		receipt.Schema = "rixa.media-picker-browser-fixture.v1"
 	}
 	for i, host := range []string{"a.localhost", "b.localhost"} {
 		session := h.login(host, []string{"site-a-admin", "site-b-admin"}[i], []string{testSiteAPassword, testSiteBPassword}[i])
@@ -197,9 +209,75 @@ func runSelectedSiteBrowserFixture(t *testing.T, publication bool) {
 	}
 	if publication {
 		t.Log("RIXA_SELECTED_PUBLICATION_BROWSER unchanged_binary_config=true site_b_public_private_and_data_unchanged=true site_a_media_unchanged=true site_a_public_generation_changed=true")
+	} else if picker {
+		assertMediaPickerBrowserIsolation(t, ctx, dsns, root, receipt)
+		t.Log("RIXA_MEDIA_PICKER_BROWSER actual_two_site_media_selection=true exact_draft_operations_scoped=true unchanged_private_originals_and_config=true")
 	} else {
 		assertSelectedSiteAttemptIsolation(t, ctx, dsns, filepath.Join(root, "selected-site-attempts.jsonl"))
 		t.Log("RIXA_SELECTED_SITE_BROWSER unchanged_binary=true private_originals_static_config_ledgers_accounts=true attempted_operations_scoped_deduplicated=true")
+	}
+}
+
+func assertMediaPickerBrowserIsolation(t *testing.T, ctx context.Context, dsns map[string]string, root string, fixture selectedSiteFixtureReceipt) {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(root, "media-picker-result.json"))
+	if err != nil || len(data) == 0 || len(data) > 4096 {
+		t.Fatal("missing or oversized real Media Picker browser receipt")
+	}
+	var result struct {
+		Schema       string   `json:"schema"`
+		BinarySHA256 string   `json:"binary_sha256"`
+		Checks       []string `json:"checks"`
+		Sites        map[string]struct {
+			OperationID string `json:"operation_id"`
+			ContentID   string `json:"content_id"`
+			AssetID     string `json:"asset_id"`
+			Revision    string `json:"revision"`
+		} `json:"sites"`
+	}
+	if json.Unmarshal(data, &result) != nil ||
+		result.Schema != "rixa.media-picker-browser.v1" ||
+		result.BinarySHA256 != fixture.BinarySHA256 || len(result.Sites) != 2 ||
+		len(result.Checks) != 2 ||
+		result.Checks[0] != "site-a-picker-ready-site-isolation-fa-en-explicit-save-private-preview" ||
+		result.Checks[1] != "site-b-picker-ready-site-isolation-fa-en-explicit-save-private-preview" {
+		t.Fatal("Media Picker receipt does not prove both real site-browser journeys")
+	}
+	for _, site := range fixture.Sites {
+		proof, ok := result.Sites[site.ID]
+		revision, convertErr := strconv.ParseInt(proof.Revision, 10, 64)
+		if !ok || !validOperationID(proof.OperationID) ||
+			proof.ContentID != site.ContentID || proof.AssetID != site.AssetID ||
+			convertErr != nil || revision <= 56 {
+			t.Fatalf("incomplete Media Picker save evidence for %s", site.ID)
+		}
+		for dbName, dsn := range dsns {
+			conn, err := pgx.Connect(ctx, dsn)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var count int
+			err = conn.QueryRow(ctx, "SELECT count(*) FROM rixa.operations WHERE operation_id=$1 AND kind='content.save' AND resource_id=$2 AND result_revision=$3", proof.OperationID, site.ContentID, revision).Scan(&count)
+			if err == nil {
+				want := 0
+				if dbName == "a" && site.ID == "site-a" || dbName == "b" && site.ID == "site-b" {
+					want = 1
+				}
+				if count != want {
+					err = fmt.Errorf("site %s operation appeared %d times in %s (want %d)", site.ID, count, dbName, want)
+				}
+			}
+			if err == nil && count == 1 {
+				err = conn.QueryRow(ctx, "SELECT count(*) FROM rixa.content_media_refs WHERE item_id=$1 AND revision=$2 AND asset_id=$3", site.ContentID, revision, site.AssetID).Scan(&count)
+				if err == nil && count != 1 {
+					err = fmt.Errorf("site %s stored %d exact selected Media references", site.ID, count)
+				}
+			}
+			_ = conn.Close(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
 	}
 }
 

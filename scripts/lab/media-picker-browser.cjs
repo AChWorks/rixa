@@ -2,7 +2,7 @@
 "use strict";
 
 // Real Chromium accepts the site-origin AChrix Media Picker with two real
-// PostgreSQL-backed sites, and reuses the selected-site source/CAS journey.
+// PostgreSQL-backed sites, verifying exact operations and private-file integrity.
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const {chromium} = require("playwright");
@@ -16,7 +16,7 @@ async function main() {
   check(info.isDirectory() && !info.isSymbolicLink() && (info.mode & 0o077) === 0 &&
     await fs.realpath(root) === root, "refusing nonprivate or aliased fixture root");
   const fixture = JSON.parse(await fs.readFile(path.join(root, "ready.json"), "utf8"));
-  check(fixture.schema === "rixa.selected-site-browser.v1" &&
+  check(fixture.schema === "rixa.media-picker-browser-fixture.v1" &&
     /^[a-f0-9]{64}$/.test(fixture.binary_sha256) &&
     fixture.sites.length === 2, "unexpected browser fixture");
   for (const [i, host] of ["a.localhost", "b.localhost"].entries()) {
@@ -27,27 +27,11 @@ async function main() {
       /^[A-Z2-7]{26}$/.test(site.content_id), "foreign site/asset in fixture");
   }
 
-  const driverPath = path.join(__dirname, "selected-site-browser.js");
-  // CommonJS Function compilation preserves Node dynamic imports without
-  // --experimental-vm-modules or modifying the established acceptance driver.
-  const selected = {};
-  new Function("exports", (await fs.readFile(driverPath, "utf8")) +
-    "\nexports.run = rixaSelectedSiteBrowser;")(selected);
-  check(typeof selected.run === "function",
-    "cannot load existing selected-site acceptance driver");
   const checks = [];
+  const sites = {};
   const errors = [];
   const browser = await chromium.launch({headless:true});
   try {
-    const control = await browser.newContext({ignoreHTTPSErrors:true,viewport:{width:1366,height:900}});
-    try {
-      const page = await control.newPage();
-      await selected.run({
-        browser, context:control, page, fixture, privateRoot:root
-      });
-      checks.push("existing-control-two-site-drafts-and-recovery");
-    } finally {await control.close();}
-
     for (const [index, site] of fixture.sites.entries()) {
       const context = await browser.newContext({
         ignoreHTTPSErrors:true, viewport:{width:index ? 1366 : 390,height:900}
@@ -142,6 +126,8 @@ async function main() {
           "selected asset did not insert as a proposed figure");
 
         const previous = await page.locator("[data-current-revision]").textContent();
+        const operationID = await page.locator("[data-content-save] input[name=operation_id]").inputValue();
+        check(/^[A-Z2-7]{26}$/.test(operationID), "missing bounded real Save operation identity");
         await page.locator("[data-content-save] button[type=submit]").click();
         await page.waitForFunction(before => {
           const value = document.querySelector("[data-current-revision]")?.textContent;
@@ -155,15 +141,18 @@ async function main() {
           check(answer.status() === 200 && await preview.locator("img").count() === 0,
             "private original inlined in draft preview");
         } finally {await preview.close();}
+        sites[site.id] = {operation_id:operationID,content_id:site.content_id,
+          asset_id:site.asset_id,revision:newHead};
         checks.push(site.id + "-picker-ready-site-isolation-fa-en-explicit-save-private-preview");
       } finally {await context.close();}
     }
     check(errors.length === 0, "Chromium page errors: " + errors.join("; "));
-    const result = {schema:"rixa.media-picker-browser.v1",binary_sha256:fixture.binary_sha256,checks};
+    check(checks.length === 2 && Object.keys(sites).length === 2,
+      "browser did not finish both scoped checks");
+    const result = {schema:"rixa.media-picker-browser.v1",binary_sha256:fixture.binary_sha256,checks,sites};
     await fs.writeFile(path.join(root, "media-picker-result.json"), JSON.stringify(result) + "\n", {
       encoding:"utf8",flag:"wx",mode:0o600
     });
-    check(checks.length === 3, "browser did not finish all scoped checks");
     console.log("RIXA_MEDIA_PICKER_BROWSER_PASS " + checks.join(","));
   } finally {await browser.close();}
 }
