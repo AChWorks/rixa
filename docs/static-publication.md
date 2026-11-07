@@ -2,6 +2,8 @@
 
 Rixa publishes public pages as product-owned immutable artifact generations. This boundary is separate from editorial publication intent: intent selects an immutable content revision, while an explicit publication apply operation materializes and activates a coherent public generation.
 
+The later accepted [Code-first Site Themes](site-themes.md) extension must reuse these generation, freshness, SEO, asset and recovery guarantees. Its arbitrary *public browser* JavaScript cannot be enabled without first separating the authenticated management Origin and isolated Preview Origin, and delivering an exact justified public CSP; current v0.8.2 has no executable custom Theme. Implementation and transport proof belong to [#74](https://github.com/AChWorks/rixa/issues/74), with user-authorized remote API/MCP under [#49](https://github.com/AChWorks/rixa/issues/49). These future conditions do not change this document's currently implemented public security defaults.
+
 ## Storage and trust boundary
 
 Each enabled site has two disjoint private roots:

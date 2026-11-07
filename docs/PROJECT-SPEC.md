@@ -20,6 +20,16 @@ Users are the infrastructure administrator managing declared sites, independent 
 
 A versioned development prerelease may package exactly the already-proven development profile without creating a production-support promise. Production installation/distribution, hosting support and production release readiness require executable evidence and a separately authorized delivery profile.
 
+## Code-first site themes (Owner-accepted enhancement; implementation pending)
+
+Rixa must allow a trusted site operator to create a fully custom public appearance using authored **HTML, CSS and browser JavaScript**, without a page, header, footer or visual theme builder. Keep a minimal site-scoped Head, Header, shared Body layout, Footer, CSS and JavaScript source model, with typed public data bindings from the actual site/content/appearance state. Preserve normal safe editorial content editing as a distinct, less-trusted responsibility. The first code theme and built-in default use the same coherent static publication flow, with deliberate draft, isolated Preview, explicit Publish and republishable prior revisions.
+
+Executable theme code is an elevated product operation, not a general `content.edit` right. Separate authenticated management and public/preview Origins before executing custom visitor JavaScript. Preserve site isolation, sessions, CSRF, CSP, source/asset provenance, honest semantic/SEO output, existing publication recovery and transfer. Ordinary public reads must remain static, with no runtime SQL or server-side arbitrary code evaluation.
+
+Human UI, authenticated HTTP and supported MCP must invoke one site-scoped, revision-aware, permission-checked Theme Application service; connected AI may act only under the verified actual product user's current grants/channel, never a shared privileged actor. **Do not claim operational API/MCP or host-client support until each actual path is implemented and proved**, including the separately owned [user-authorized Bridge work](https://github.com/AChWorks/rixa/issues/49). A portable six-file source format supports simple handoff/AI code authoring without a runtime plugin loader. These are accepted product requirements, **not claims about any published release**.
+
+Detailed normative design: [Code-first site themes](site-themes.md); prospective human/AI usage and verification contract: [Theme usage](site-themes-usage.md); executable delivery acceptance: [#74](https://github.com/AChWorks/rixa/issues/74). Do not prematurely build a Template/Theme AChrix Module, marketplace, generic site builder or general-purpose scripting engine.
+
 ## Product usability and engineering direction
 
 CMS capabilities and operational management develop together: content, Media, appearance, publication and selected-site administration must remain simple to understand and complete. Use a modern minimal interface, consistent vocabulary, clear scope/actions and recoverable errors. Preserve Persian/English, RTL/LTR and accessible keyboard behavior in delivered flows; accessibility and usability are verified outcomes rather than visual-style claims.
