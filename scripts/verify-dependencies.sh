@@ -34,6 +34,17 @@ expected="$(awk '
   active && /^[^ ]|^      [^ ]/ { active=0 }
   END { if (!found) exit 1 }
 ' achworks.yaml | LC_ALL=C sort)"
+# The descriptor separately records Foundation modules present only through
+# tagged dependency manifests. They are NOT compiled Rixa capabilities.
+transitive="$(awk '
+  /^      transitiveModules:$/ { if (found++) exit 1; active=1; next }
+  active && /^        [^ ]/ {
+    if (NF != 2 || $1 !~ /:$/) exit 1
+    sub(/:$/, "", $1); print $1 "\t" $2; next
+  }
+  active && /^[^ ]|^      [^ ]/ { active=0 }
+  END { if (!found) exit 1 }
+' achworks.yaml | LC_ALL=C sort)"
 expected_paths="$(printf '%s\n' "$expected" | cut -f1)"
 required_paths="$(printf '%s\n' \
   github.com/AChWorks/achrix \
@@ -52,7 +63,7 @@ while IFS=$'\t' read -r module version; do
     echo "invalid released component identity: $module" >&2
     exit 1
   }
-done <<<"$expected"
+done <<<"$(printf '%s\n%s\n' "$expected" "$transitive")"
 
 replaced="$(go list -m -f '{{if .Replace}}{{.Path}}{{end}}' all)"
 [[ -z "$replaced" ]] || {
@@ -60,8 +71,9 @@ replaced="$(go list -m -f '{{if .Replace}}{{.Path}}{{end}}' all)"
   exit 1
 }
 actual="$(go list -m -f '{{.Path}} {{.Version}}' all | awk '$1 ~ /^github\.com\/AChWorks\/achrix($|\/)/ {print $1 "\t" $2}' | LC_ALL=C sort)"
-[[ "$actual" == "$expected" ]] || {
-  echo "resolved AChrix component set differs from achworks.yaml" >&2
+expected_graph="$(printf '%s\n%s\n' "$expected" "$transitive" | LC_ALL=C sort)"
+[[ "$actual" == "$expected_graph" ]] || {
+  echo "resolved AChrix graph differs from declared selected and transitive module versions" >&2
   exit 1
 }
 core="$(awk '$1 == "github.com/AChWorks/achrix" { print $2 }' <<<"$actual")"
@@ -73,7 +85,7 @@ source_version="$(awk '/^      sourceVersion:/ {print $2}' achworks.yaml)"
 go mod verify >/dev/null
 
 if [[ "$mode" == "--json" ]]; then
-  awk 'BEGIN { printf "{" } { printf "%s\"%s\":\"%s\"", (NR == 1 ? "" : ","), $1, $2 } END { print "}" }' <<<"$actual"
+  awk 'BEGIN { printf "{" } { printf "%s\"%s\":\"%s\"", (NR == 1 ? "" : ","), $1, $2 } END { print "}" }' <<<"$expected"
 else
-  printf '%s\n' "$actual"
+  printf '%s\n' "$expected"
 fi

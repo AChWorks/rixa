@@ -71,13 +71,16 @@ func TestRetainedReleaseUpgrade(t *testing.T) {
 		t.Fatal("retained upgrade requires RIXA_UPGRADE_BASELINE_BINARY and RIXA_TEST_POSTGRES_DSN")
 	}
 	verifyRetainedBaseline(t, binary)
+	// Pin the approved target profile independently of FoundationVersions() so
+	// this published-release upgrade must exercise the actual Media v0.5.0
+	// transition, not quietly accept an accidental future module bump.
 	for module, expected := range map[string]string{
 		"github.com/AChWorks/achrix":              "v0.5.0",
 		"github.com/AChWorks/achrix/admin":        "v0.3.0",
 		"github.com/AChWorks/achrix/audit":        "v0.2.0",
 		"github.com/AChWorks/achrix/identity":     "v0.3.0",
 		"github.com/AChWorks/achrix/installation": "v0.2.0",
-		"github.com/AChWorks/achrix/media":        "v0.3.0",
+		"github.com/AChWorks/achrix/media":        "v0.5.0",
 		"github.com/AChWorks/achrix/multisite":    "v0.1.1",
 	} {
 		if achrix.DependencyVersion(module) != expected {
@@ -281,8 +284,44 @@ func TestRetainedReleaseUpgrade(t *testing.T) {
 		if !bytes.Equal(original, site.original) {
 			t.Fatalf("site %d original Media changed", i)
 		}
+		// An asset created with the published Media version must still be
+		// selectable through v0.5.0, without exposing private original bytes.
+		var ready struct {
+			Assets []struct {
+				ID       string `json:"id"`
+				MIME     string `json:"mime"`
+				State    string `json:"state"`
+				Revision string `json:"revision"`
+			} `json:"assets"`
+		}
+		if err := json.Unmarshal(httpFixture.get(site.host, "/admin/media/picker/page", &site.session, http.StatusOK), &ready); err != nil ||
+			len(ready.Assets) != 1 || ready.Assets[0].ID != site.assetID ||
+			ready.Assets[0].State != "ready" || ready.Assets[0].MIME != "image/png" ||
+			ready.Assets[0].Revision == "" {
+			t.Fatalf("site %d retained picker page mismatched eligible asset: %v", i, err)
+		}
+		var choice struct {
+			Asset struct {
+				ID       string `json:"id"`
+				Revision string `json:"revision"`
+			} `json:"asset"`
+			Message string `json:"message"`
+		}
+		if err := json.Unmarshal(httpFixture.get(site.host, "/admin/media/picker/asset/"+site.assetID, &site.session, http.StatusOK), &choice); err != nil ||
+			choice.Asset.ID != site.assetID || choice.Asset.Revision != ready.Assets[0].Revision ||
+			choice.Message == "" {
+			t.Fatalf("site %d retained picker exact selection mismatch: %v", i, err)
+		}
 		httpFixture.get(site.host, site.assetPath, nil, http.StatusOK)
 		other := sites[1-i]
+		// Neither a valid unknown identity nor another site's retained asset
+		// may be selected by an administrator on this site origin.
+		absentID := "AAAAAAAAAAAAAAAAAAAAAAAAAA"
+		if absentID == site.assetID || absentID == other.assetID {
+			absentID = "BBBBBBBBBBBBBBBBBBBBBBBBBB"
+		}
+		httpFixture.get(site.host, "/admin/media/picker/asset/"+absentID, &site.session, http.StatusNotFound)
+		httpFixture.get(site.host, "/admin/media/picker/asset/"+other.assetID, &site.session, http.StatusNotFound)
 		httpFixture.get(site.host, "/admin/content/edit/"+other.contentID, &site.session, http.StatusNotFound)
 		httpFixture.post(site.host, "/admin/media/status", site.session, map[string]string{"id": other.assetID}, http.StatusNotFound)
 		httpFixture.post(site.host, "/admin/content/create", other.session, map[string]string{}, http.StatusUnauthorized)
@@ -306,6 +345,8 @@ func TestRetainedReleaseUpgrade(t *testing.T) {
 		fresh := httpFixture.login(site.host, logins[i+1], passwords[i+1])
 		httpFixture.get(site.host, "/admin/content/", &fresh, http.StatusOK)
 		member := httpFixture.login(site.host, "retained-member", "Retained-Member-Password-2026!")
+		// The Picker does not grant whole-library visibility to site members.
+		httpFixture.get(site.host, "/admin/media/picker/page", &member, http.StatusForbidden)
 		httpFixture.post(site.host, "/admin/content/create", member, map[string]string{
 			"operation_id": newOperationID(), "kind": "post", "title": "denied", "body_html": "<p>denied</p>",
 		}, http.StatusForbidden)

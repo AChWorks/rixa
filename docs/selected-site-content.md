@@ -8,6 +8,12 @@ The content list and revision history have bounded pages. Follow **More content*
 
 Private preview requires administration authority. Root-relative content links point to the selected site's declared public origin. Private originals remain private attachments/placeholders; preview does not authorize their publication.
 
+## Private Media selection (site administration)
+
+The site's own **Content** editor offers the official AChrix Media Picker to the authenticated site administrator. It lists only that site's ready Media metadata, and an exact asset selection fills the ID and decimal-string revision in the editor's proposed reference controls. Choosing does **not** save a draft, read a private original, or publish content. Inserting a figure and saving still require current site and asset authorization, supported image MIME, and saved-revision/operation checks; publication is separate. Uploaded originals stay private.
+
+The Control-origin **Manage content** editor still uses its known-ID input, **not** a Picker: Media v0.5.0 hardcodes a same-origin `/admin/media/picker` endpoint and cannot safely address the selected site there. Editors without whole-library `media.List` cannot browse merely because they can edit content; no new Media.Read or collection grants are implied. The manual-ID field never bypasses reference authorization. A future explicitly site-bound Control adapter or narrower discovery contract needs separate acceptance under [Rixa #70](https://github.com/AChWorks/rixa/issues/70) and [AChrix #140](https://github.com/AChWorks/achrix/issues/140).
+
 ## Publishing or withdrawing from one selected site
 
 After saving, inspect the exact content head, intended public revision, the active public generation and the proposed public route. **Set publication intent** selects a saved revision without publishing it. **Clear publication intent** prepares withdrawal without immediately changing the public site. Preview the intended saved revision before applying. A cleared intent has revision zero; save and intent editing do not publish automatically.

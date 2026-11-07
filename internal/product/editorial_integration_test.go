@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/AChWorks/achrix"
+	"github.com/AChWorks/achrix/media"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -38,6 +39,17 @@ func testEditorialRuntime(t *testing.T, ctx context.Context, runtime *Runtime, a
 	}
 	if appearanceB.SiteTitle != "site-b" || appearanceB.Revision != 1 {
 		t.Fatalf("site B default appearance = %#v", appearanceB)
+	}
+
+	selection, err := runtime.Sites["site-a"].Media.Select(ctx, aAdmin, assetID)
+	if err != nil || selection.ID != assetID || selection.Revision != assetRevision || selection.State != "ready" || selection.MIME != "image/png" {
+		t.Fatalf("site A admin Media selection = %#v, err=%v", selection, err)
+	}
+	if _, err = runtime.Sites["site-b"].Media.Select(ctx, bAdmin, assetID); !errors.Is(err, media.ErrNotFound) {
+		t.Fatalf("site B selected site A asset: %v", err)
+	}
+	if _, err = runtime.Sites["site-a"].Media.Select(ctx, bAdmin, assetID); !errors.Is(err, achrix.ErrDenied) {
+		t.Fatalf("foreign principal selected site A asset: %v", err)
 	}
 
 	createOp := newOperationID()

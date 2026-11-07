@@ -397,14 +397,16 @@ func (s *EditorialService) authorize(ctx context.Context, actor achrix.Principal
 func (s *EditorialService) mediaRefs(ctx context.Context, actor achrix.Principal, ids []string) ([]ContentMediaRef, error) {
 	refs := make([]ContentMediaRef, 0, len(ids))
 	for _, id := range ids {
-		asset, err := s.media.Status(ctx, actor, id)
+		asset, err := s.media.Select(ctx, actor, id)
 		if err != nil {
 			if errors.Is(err, media.ErrInput) || errors.Is(err, media.ErrNotFound) || errors.Is(err, media.ErrConflict) {
 				return nil, ErrEditorialInvalid
 			}
 			return nil, err
 		}
-		if asset.State != "ready" || asset.Revision < 1 {
+		// Selecting metadata does not grant original-byte Read or publication.
+		// Only image references supported by Rixa's public policy may be saved.
+		if asset.State != "ready" || asset.Revision < 1 || asset.MIME != "image/png" && asset.MIME != "image/jpeg" {
 			return nil, ErrEditorialInvalid
 		}
 		refs = append(refs, ContentMediaRef{AssetID: asset.ID, AssetRevision: asset.Revision})

@@ -20,7 +20,8 @@ func TestContentEditorPersianMixedDirectionSurface(t *testing.T) {
 		t.Fatal(err)
 	}
 	data := contentEditView{
-		Locale: testProductLocalizer(t, "fa"),
+		Locale:        testProductLocalizer(t, "fa"),
+		PickerEnabled: true,
 		Revision: ContentRevision{
 			ID:                        "AAAAAAAAAAAAAAAAAAAAAAAAAA",
 			Kind:                      ContentPost,
@@ -46,6 +47,7 @@ func TestContentEditorPersianMixedDirectionSurface(t *testing.T) {
 	page := output.String()
 	for _, expected := range []string{
 		`contenteditable="true"`, `aria-multiline="true"`, `dir="auto"`,
+		`/admin/media/picker.js`, `<achrix-media-picker accept="image/png,image/jpeg">`, `data-media-revision`,
 		`قالب‌بندی`, `پیش‌نمایش خصوصی همین نسخه`, `بررسی نتیجهٔ عملیات`,
 		`name="expected_publication_version" value="3"`,
 		`action="/admin/content/publish"`,
@@ -60,6 +62,27 @@ func TestContentEditorPersianMixedDirectionSurface(t *testing.T) {
 	}
 	if strings.Contains(page, "StorageRoot") || strings.Contains(page, "/var/lib/") {
 		t.Fatal("editor exposed a private storage path")
+	}
+}
+
+func TestContentEditOmitsPickerForControlAndRestrictedUsers(t *testing.T) {
+	data := contentEditView{
+		Locale:      testProductLocalizer(t, "fa"),
+		Revision:    ContentRevision{ID: "AAAAAAAAAAAAAAAAAAAAAAAAAA", Kind: ContentPost, Revision: 1},
+		OperationID: "BBBBBBBBBBBBBBBBBBBBBBBBBB",
+	}
+	var output bytes.Buffer
+	if err := contentEditTemplate.ExecuteTemplate(&output, "content", data); err != nil {
+		t.Fatal(err)
+	}
+	page := output.String()
+	for _, forbidden := range []string{`<achrix-media-picker`, `/admin/media/picker.js`, `data-media-revision`} {
+		if strings.Contains(page, forbidden) {
+			t.Fatalf("unprivileged/Control editor exposed Picker %q", forbidden)
+		}
+	}
+	if !strings.Contains(page, `data-media-id`) {
+		t.Fatal("legacy known-ID input disappeared from Control editor")
 	}
 }
 
@@ -94,6 +117,11 @@ func TestEditorialClientAssetsKeepMutationRecoveryAndPasteBoundary(t *testing.T)
 	for _, expected := range []string{`addEventListener("paste"`, `getData("text/plain")`, `addEventListener("drop"`, `function safeLink`, `\u202a-\u202e`, `data-publication-generation-output`} {
 		if !strings.Contains(contentEditorJS, expected) && !strings.Contains(contentIndexTemplate.Tree.Root.String(), expected) {
 			t.Fatalf("editor client missing %q", expected)
+		}
+	}
+	for _, expected := range []string{`achrix:media-selected`, `mediaRevision.textContent = asset.revision`, `mediaID.value = asset.id`} {
+		if !strings.Contains(contentEditorJS, expected) {
+			t.Fatalf("Media Picker selection integration missing %q", expected)
 		}
 	}
 	if !strings.Contains(appearanceJS, `publicationForm.querySelector("[data-operation-field]")`) {

@@ -8,8 +8,8 @@ github.com/AChWorks/achrix/identity v0.3.0 h1:Xq7Xe0D6xl0KDUyDPd5e2jg5I24WtDn7oS
 github.com/AChWorks/achrix/identity v0.3.0/go.mod h1:i/2k5H3cQTvAfhFjs72zv8SyZfigzmX+ACsi8KV0310=
 github.com/AChWorks/achrix/installation v0.2.0 h1:04CXY4BUZz4zrkKCXCeZCokMi9iFNGMIQse25U2aT0c=
 github.com/AChWorks/achrix/installation v0.2.0/go.mod h1:KvDbSPsuFnfcazVHt9O2D6VsC194hOo65bfeKeLJ6xA=
-github.com/AChWorks/achrix/media v0.3.0 h1:eKLcXtxm6lHHuluOta1u+XoyE/V18C98NQQ2dIefJWQ=
-github.com/AChWorks/achrix/media v0.3.0/go.mod h1:xS4KLdO1z6rh5/3H3zEQ8LImwwExCg5Yoy3SFv/fVYk=
+github.com/AChWorks/achrix/media v0.5.0 h1:2E6SbkGil88auRYSSPOhQt4614HU9d0BgttrDpBpjj4=
+github.com/AChWorks/achrix/media v0.5.0/go.mod h1:PsZeju3f58L4P71dSWyLIRPpEhNiZ/6sObzFJz5MRbs=
 github.com/AChWorks/achrix/multisite v0.1.1 h1:kSNZQFJzYka0Qv/ySGrs6j+WRaIfWZLNb6iLBFmQwso=
 github.com/AChWorks/achrix/multisite v0.1.1/go.mod h1:wk7KEpfpOaRzceulEIz1CwFGoiviab+UhPSP1WfEbXU=
 github.com/alexedwards/argon2id v1.0.0 h1:wJzDx66hqWX7siL/SRUmgz3F8YMrd/nfX/xHHcQQP0w=
