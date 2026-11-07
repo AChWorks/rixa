@@ -144,10 +144,8 @@ func (h *themeSurface) bundle(w http.ResponseWriter, r *http.Request, view shell
 	}
 	var source ThemeRevision
 	if revision == 0 {
-		source, err = h.service.Head(r.Context(), view.Principal)
-		if err == nil && source.Revision != 0 {
-			err = ErrEditorialConflict
-		}
+		err = h.service.authorize(r.Context(), view.Principal, CapabilityThemeRead)
+		source = ThemeRevision{Revision: 0, Bundle: defaultThemeBundle()}
 	} else {
 		source, err = h.service.Revision(r.Context(), view.Principal, revision)
 	}
@@ -269,10 +267,8 @@ func (h *themeSurface) export(w http.ResponseWriter, r *http.Request, view shell
 	}
 	var source ThemeRevision
 	if revision == 0 {
-		source, err = h.service.Head(r.Context(), view.Principal)
-		if source.Revision != 0 {
-			err = ErrEditorialConflict
-		}
+		err = h.service.authorize(r.Context(), view.Principal, CapabilityThemeRead)
+		source = ThemeRevision{Revision: 0, Bundle: defaultThemeBundle()}
 	} else {
 		source, err = h.service.Revision(r.Context(), view.Principal, revision)
 	}
@@ -408,6 +404,12 @@ var themeEditorTemplate = template.Must(template.New("theme-editor").Parse(`{{de
 </fieldset>
 <button type="submit" disabled data-theme-save-button>Save Theme draft</button>
 </form>
+<section><h3>Review source changes</h3>
+<p>Compare the current text fields (including unsaved edits) against a saved revision or the built-in revision 0. This comparison does not mutate anything.</p>
+<label>Compare against revision <input type="text" data-theme-compare-revision inputmode="numeric" pattern="[0-9]+" value="{{.Current.Revision}}"></label>
+<button type="button" data-theme-compare-trigger>Show bounded source diff</button>
+<pre data-theme-diff-output hidden dir="ltr"></pre>
+</section>
 <section><h3>Preview</h3><p>A preview is read-only, time-limited and runs on an isolated origin. Saved draft changes do not change public output.</p>
 <form data-admin-form data-read-only data-theme-preview action="/admin/site-theme/preview" method="post">
 <label>Revision <input name="theme_revision" data-theme-revision value="{{.Current.Revision}}" pattern="[0-9]+" required></label>

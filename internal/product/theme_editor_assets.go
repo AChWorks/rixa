@@ -41,14 +41,19 @@ const themeEditorJS = `
     const exportCurrent=root.querySelector("[data-theme-current-export]");
     if (exportCurrent) exportCurrent.href="/admin/site-theme/export/"+revision;
   }
-  async function loadRevision(revision){
-    saveButton.disabled=true;
-    output("Loading immutable source revision "+revision+"...");
+  async function fetchBundle(revision){
     const response=await fetch("/admin/site-theme/bundle/"+revision,{
       credentials:"same-origin",mode:"same-origin",redirect:"error",cache:"no-store"
     });
-    if (!response.ok) throw new Error("Cannot load authorized Theme revision");
-    const b=await response.json();
+    if (!response.ok) throw new Error("Cannot load authorized Theme revision "+revision);
+    return response.json();
+  }
+  let currentAssetInventory={};
+  async function loadRevision(revision){
+    saveButton.disabled=true;
+    output("Loading immutable source revision "+revision+"...");
+    const b=await fetchBundle(revision);
+    currentAssetInventory=b.assets||{};
     for (const [name,field] of sourceNames) {
       const control=save.elements.namedItem(name);
       if (control) control.value=b[field] || "";
@@ -59,6 +64,61 @@ const themeEditorJS = `
   }
   const initial=root.querySelector("[data-theme-expected]").value;
   loadRevision(initial).catch(error=>output(error.message+"; save disabled to protect existing source."));
+
+  // Bounded, text-only comparison. Source never enters innerHTML or executes
+  // on the authenticated control origin; common-prefix/suffix avoids costly
+  // quadratic diff engines and caps output for large source slots.
+  const diffTrigger=root.querySelector("[data-theme-compare-trigger]");
+  const diffResult=root.querySelector("[data-theme-diff-output]");
+  diffTrigger?.addEventListener("click",async()=>{
+    const revision=root.querySelector("[data-theme-compare-revision]").value.trim();
+    if (!/^[0-9]+$/.test(revision) || revision.length>18){
+      output("Enter a valid nonnegative Theme revision.");
+      return;
+    }
+    diffTrigger.disabled=true;
+    try{
+      const older=await fetchBundle(revision);
+      const selections=sourceNames.concat([["settings_json","settings"]]);
+      const pieces=[];
+      for (const [name,field] of selections){
+        const control=save.elements.namedItem(name);
+        const left=field==="settings"?JSON.stringify(older.settings||{},null,2):String(older[field]||"");
+        const right=String(control?.value||"");
+        if (left===right) continue;
+        const previous=left.split(/\r\n|\n|\r/);
+        const current=right.split(/\r\n|\n|\r/);
+        let start=0;
+        while(start<previous.length&&start<current.length&&previous[start]===current[start])start++;
+        let oldEnd=previous.length,newEnd=current.length;
+        while(oldEnd>start&&newEnd>start&&previous[oldEnd-1]===current[newEnd-1]){
+          oldEnd--;newEnd--;
+        }
+        const removed=previous.slice(start,Math.min(start+40,oldEnd)).map(line=>"- "+line);
+        const added=current.slice(start,Math.min(start+40,newEnd)).map(line=>"+ "+line);
+        if(oldEnd-start>40) removed.push("- ... truncated");
+        if(newEnd-start>40) added.push("+ ... truncated");
+        pieces.push("=== "+name+" ===\n@@ starting line "+(start+1)+" @@\n"+
+          removed.concat(added).join("\n").slice(0,15000));
+      }
+      const compareAssets=older.assets||{};
+      const changedAssets=Array.from(new Set([
+        ...Object.keys(compareAssets),...Object.keys(currentAssetInventory)
+      ])).sort().filter(name=>{
+        const before=compareAssets[name],now=currentAssetInventory[name];
+        return !before||!now||before.mime!==now.mime||before.data!==now.data;
+      });
+      if(changedAssets.length){
+        pieces.push("=== public asset inventory ===\n"+changedAssets.map(name=>"~ "+name).join("\n"));
+      }
+      diffResult.textContent=pieces.length?pieces.join("\n\n"):"No differences in the six source slots, public settings or included assets.";
+      diffResult.hidden=false;
+      output("Source comparison is read-only. Review changes before Save or Publish.");
+    }catch(error){
+      diffResult.textContent="Comparison unavailable: "+String(error.message||error);
+      diffResult.hidden=false;
+    }finally{diffTrigger.disabled=false}
+  });
 
   // An import is prepared from a user-selected local file with no extra
   // privileged URL and no persistent browser storage. The shared Admin shell

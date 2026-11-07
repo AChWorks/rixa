@@ -75,6 +75,17 @@ async function main(){
     });
     check(bundle.status===200&&bundle.json.header_html.includes("Theme v1 فارسی")&&
       bundle.json.body_html===body,"saved immutable Theme not loadable");
+    await page.locator("[data-theme-compare-revision]").fill("0");
+    await page.locator("[data-theme-compare-trigger]").click();
+    await page.locator("[data-theme-diff-output]:not([hidden])").waitFor();
+    check((await page.locator("[data-theme-diff-output]").textContent()).includes("Theme v1"),
+      "Theme source diff against built-in revision 0 unavailable");
+    const zeroBundle=await page.evaluate(async()=>{
+      const response=await fetch("/admin/site-theme/bundle/0",{credentials:"same-origin"});
+      return {status:response.status,source:await response.json()};
+    });
+    check(zeroBundle.status===200&&zeroBundle.source.header_html.includes("Site.Title")&&
+      !zeroBundle.source.header_html.includes("Theme v1"),"built-in revision 0 became inaccessible");
     const before=await newPublic(f.public_a);
     check(await before.p.locator("body").getAttribute("data-demo")===null,"Theme draft changed public output");
     await before.p.close();
