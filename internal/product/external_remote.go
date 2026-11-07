@@ -10,6 +10,7 @@ import (
 	"html/template"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -129,13 +130,19 @@ func newSiteRemote(site ResolvedSite, accounts *identity.Service, editor *Editor
 			// rotating the cookie ends an unfinished consent, not issued grants.
 			return oauth.Session{Subject: string(principal), Binding: sha256.Sum256([]byte(cookie.Value))}, nil
 		},
-		Permit:        permit,
-		RenderConsent: renderRixaOAuthConsent,
-		Diagnostic: func(ctx context.Context, phase, outcome string, cause error) {
-			if cause != nil {
-				logger.Debug("remote oauth diagnostic", "site", site.ID, "request_id", oauth.RequestID(ctx),
-					"phase", phase, "outcome", outcome, "cause_type", fmt.Sprintf("%T", cause))
+		Permit: permit,
+		RenderConsent: func(w http.ResponseWriter, r *http.Request, view oauth.ConsentView) {
+			// The issuer resolves ClientID from validated pre-enrollment, not
+			// a consent form field or an untrusted capability hint.
+			client, ok := clients[view.ClientID]
+			if !ok || !client.Enabled {
+				http.Error(w, "invalid enrolled client", http.StatusForbidden)
+				return
 			}
+			renderRixaOAuthConsent(w, view, client.AllowDraftWrites)
+		},
+		Diagnostic: func(ctx context.Context, phase, outcome string, cause error) {
+			logRemoteOAuthDiagnostic(logger, site.ID, issuerURL, oauth.RequestID(ctx), phase, outcome, cause)
 		},
 	})
 	if err != nil {
@@ -186,16 +193,7 @@ func newSiteRemote(site ResolvedSite, accounts *identity.Service, editor *Editor
 			return achrix.ErrDenied
 		},
 		Diagnostic: func(_ context.Context, d bridge.Diagnostic) {
-			fields := []any{"site", site.ID, "request_id", d.Request.ID,
-				"user", string(d.Request.Caller.Principal),
-				"client", d.Request.Caller.ClientID, "connection", d.Request.Caller.ConnectionID,
-				"channel", d.Request.Channel, "operation", d.Request.Operation,
-				"phase", d.Phase, "outcome", string(d.Outcome), "code", d.Code}
-			if d.Cause != nil {
-				logger.Debug("remote request diagnostics", append(fields, "cause_type", fmt.Sprintf("%T", d.Cause))...)
-			} else {
-				logger.Info("remote request completed", fields...)
-			}
+			logRemoteBridgeDiagnostic(logger, site.ID, resourceURL, d)
 		},
 	}, func(reg *bridge.Registrar) error {
 		return registerRemoteContentTools(reg, editor)
@@ -230,12 +228,88 @@ func (s *siteRemote) close() {
 	}
 }
 
+// The INFO event is the normal operational record for every Bridge outcome,
+// including failures, uncertain writes, and post-dispatch delivery errors.
+// Raw causes are intentionally confined to a DEBUG diagnostic detail event.
+func logRemoteBridgeDiagnostic(logger *slog.Logger, site, resource string, d bridge.Diagnostic) {
+	attrs := []any{
+		"site", site, "resource", resource,
+		"request_id", d.Request.ID,
+		"user", string(d.Request.Caller.Principal),
+		"client", d.Request.Caller.ClientID,
+		"connection", d.Request.Caller.ConnectionID,
+		"channel", d.Request.Channel,
+		"operation", d.Request.Operation,
+		"phase", d.Phase, "dispatched", d.Dispatched,
+		"outcome", string(d.Outcome), "code", d.Code,
+		"reference", d.Reference,
+	}
+	if d.Cause != nil {
+		attrs = append(attrs, "cause_type", fmt.Sprintf("%T", d.Cause))
+	}
+	logger.Info("remote bridge operation", attrs...)
+	if d.Cause != nil && logger.Enabled(context.Background(), slog.LevelDebug) {
+		logger.Debug("remote bridge protected cause", append(attrs, "cause_detail", remoteProtectedCause(d.Cause))...)
+	}
+}
+
+func logRemoteOAuthDiagnostic(logger *slog.Logger, site, issuer, requestID, phase, outcome string, cause error) {
+	if cause == nil {
+		return
+	}
+	attrs := []any{
+		"site", site, "issuer", issuer, "request_id", requestID,
+		"phase", phase, "outcome", outcome,
+		"cause_type", fmt.Sprintf("%T", cause),
+	}
+	logger.Info("remote oauth failure", attrs...)
+	if logger.Enabled(context.Background(), slog.LevelDebug) {
+		logger.Debug("remote oauth protected cause", append(attrs, "cause_detail", remoteProtectedCause(cause))...)
+	}
+}
+
+// Preserve technical root-cause context for authorized DEBUG diagnostics
+// while excluding common credential-bearing spans and private payloads.
+// Do not log raw unbounded errors in the normal INFO operational channel.
+var (
+	remoteURLCredentials = regexp.MustCompile(`(?i)\b((?:postgres(?:ql)?|https?|redis(?:s)?|mysql)://)[^\s/@]+@`)
+	remoteAuthorization  = regexp.MustCompile(`(?i)\b((?:bearer|basic)\s+)[a-z0-9._~+/-]+=*`)
+	remoteSecretField    = regexp.MustCompile(`(?i)\b((?:password|passwd|access[_-]?token|refresh[_-]?token|api[_-]?key|client[_-]?secret|authorization|cookie|secret|dsn|database[_-]?url)"?\s*(?:=|:)\s*)(?:"(?:\\.|[^"])*"|'[^']*'|[^\s&,;}]+)`)
+	remotePrivateField   = regexp.MustCompile(`(?is)\b((?:body_html|payload|raw_html)"?\s*(?:=|:)\s*)[^\r\n]+`)
+	remoteHTMLPayload    = regexp.MustCompile(`(?s)<[^>]+>.*?</[^>]+>`)
+)
+
+func remoteProtectedCause(cause error) string {
+	if cause == nil {
+		return ""
+	}
+	detail := cause.Error()
+	detail = remoteURLCredentials.ReplaceAllString(detail, "${1}[redacted]@")
+	detail = remoteAuthorization.ReplaceAllString(detail, "${1}[redacted]")
+	detail = remotePrivateField.ReplaceAllString(detail, "${1}[private content]")
+	detail = remoteSecretField.ReplaceAllString(detail, "${1}[redacted]")
+	detail = remoteHTMLPayload.ReplaceAllString(detail, "[private markup]")
+	// A malicious/long source error is not allowed to produce unbounded
+	// diagnostic output or multiple synthetic log lines.
+	if len(detail) > 1024 {
+		detail = detail[:1024]
+	}
+	return strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return ' '
+		}
+		return r
+	}, detail)
+}
+
 var consentTemplate = template.Must(template.New("rixa-consent").Parse(`<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Connect to Rixa</title></head><body><main>
 <h1>Authorize Rixa access</h1>
 <p><strong>{{.ClientName}}</strong> requests private content access as <strong>{{.Subject}}</strong>.</p>
-<p>Access is limited by your current Rixa site permissions and the configured client operations.</p>
+{{if .AllowDraftWrites}}<p>This client can read authorized private content and can create and save private drafts when your current Rixa edit permissions allow it.</p>
+{{else}}<p>This client can inspect authorized private content (read-only). It cannot create or save drafts.</p>{{end}}
+<p>This connection does not grant publishing or Theme modification.</p>
 <form method="post" action="{{.FormAction}}">
 <input type="hidden" name="transaction" value="{{.Transaction}}">
 <input type="hidden" name="csrf" value="{{.CSRF}}">
@@ -243,9 +317,12 @@ var consentTemplate = template.Must(template.New("rixa-consent").Parse(`<!doctyp
 <button type="submit" name="decision" value="deny">Deny</button>
 </form></main></body></html>`))
 
-func renderRixaOAuthConsent(w http.ResponseWriter, _ *http.Request, view oauth.ConsentView) {
+func renderRixaOAuthConsent(w http.ResponseWriter, view oauth.ConsentView, allowDraftWrites bool) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := consentTemplate.Execute(w, view); err != nil {
+	if err := consentTemplate.Execute(w, struct {
+		oauth.ConsentView
+		AllowDraftWrites bool
+	}{ConsentView: view, AllowDraftWrites: allowDraftWrites}); err != nil {
 		// AChrix's issuer owns the CSRF and one-use pending transaction.
 		// Consent rendering failure never implies consent approval.
 		return

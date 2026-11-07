@@ -2,6 +2,7 @@
 package product
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"crypto/tls"
@@ -269,9 +270,25 @@ func TestRemoteOAuthMCPRealSiteDraftAndRevocation(t *testing.T) {
 			"code_challenge_method": {"S256"}, "code_challenge": {base64.RawURLEncoding.EncodeToString(digest[:])},
 			"scope": {remoteOAuthScope}, "state": {"stable-request-state"},
 		}
+		// A query-string hint is not enrollment authority: even an
+		// untrusted request to elevate a read-only client cannot alter
+		// the displayed effective capability.
+		args.Set("allow_draft_writes", "true")
 		status, _, consent := do("GET", remoteTestOrigin+"/oauth/authorize?"+args.Encode(), nil, "", cookie, "")
 		if status != 200 {
 			t.Fatalf("consent GET = %d, %s", status, string(consent))
+		}
+		if !bytes.Contains(consent, []byte("does not grant publishing or Theme modification")) {
+			t.Fatalf("consent failed to disclose non-publishing boundary for %s", clientID)
+		}
+		if clientID == "test-reader" {
+			if !bytes.Contains(consent, []byte("(read-only)")) ||
+				bytes.Contains(consent, []byte("can create and save private drafts")) {
+				t.Fatalf("untrusted consent hint escalated the read-only client: %s", consent)
+			}
+		} else if !bytes.Contains(consent, []byte("can create and save private drafts")) ||
+			bytes.Contains(consent, []byte("(read-only)")) {
+			t.Fatalf("write-enabled client consent omitted effective operations: %s", consent)
 		}
 		tx, csrf := consentValues(consent)
 		grantForm := url.Values{"transaction": {tx}, "csrf": {csrf}, "decision": {"allow"}}

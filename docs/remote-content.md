@@ -111,7 +111,22 @@ The selected first-profile client uses OAuth authorization code + PKCE S256,
 exact pre-registered redirect and intended `resource`/audience. The OAuth
 consent is a same-origin form using the logged-in site's current Identity
 cookie and server-issued CSRF transaction. It cannot be approved by a headless
-caller-selected actor.
+caller-selected actor. Consent explicitly distinguishes read-only clients
+from enrolled clients that may also create/save private drafts when the
+actual account has current edit permission; neither kind permits publishing
+or Theme changes. The displayed capability comes from the site's trusted
+registered client, never a user-supplied authorization parameter.
+
+Operational observability: each Bridge operation success and failure, including
+known conflict, denial, unknown write and delivery failure, emits one structured
+INFO event containing site/resource, trusted principal/client/connection/channel,
+request ID, operation, phase, dispatch status, outcome, code and authorized
+recovery reference. OAuth failures also emit correlated INFO diagnostics.
+Protected, bounded original-cause details are available at DEBUG with targeted
+credential/payload redaction. DEBUG diagnostic sinks must be limited to
+authorized operators with appropriate retention and access controls; never
+publish their contents to clients. The application does not add a second
+Audit store, weaken Bridge outcome categories or expose private response bodies.
 
 ## Validation boundaries
 
