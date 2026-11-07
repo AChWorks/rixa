@@ -336,9 +336,18 @@ func remoteFailure(err error, operationID string) error {
 	}
 }
 
+// Effect hints describe the actual immutable draft/receipt semantics; Bridge
+// and the owning product still enforce authorization independent of hints.
+func remoteTool(name, description string, readOnly bool) *mcp.Tool {
+	closed := false
+	return &mcp.Tool{Name: name, Description: description, Annotations: &mcp.ToolAnnotations{
+		ReadOnlyHint: readOnly, IdempotentHint: !readOnly,
+		DestructiveHint: &closed, OpenWorldHint: &closed,
+	}}
+}
+
 func registerRemoteContentTools(reg *bridge.Registrar, editor *EditorialService) error {
-	if err := bridge.AddTool(reg, &mcp.Tool{Name: remoteListTool,
-		Description: "List bounded private draft content in this verified Rixa site."},
+	if err := bridge.AddTool(reg, remoteTool(remoteListTool, "List bounded private draft content in this verified Rixa site.", true),
 		func(ctx context.Context, in remoteListInput) (remoteListOutput, error) {
 			req, ok := bridge.RequestFromContext(ctx)
 			if !ok {
@@ -357,8 +366,7 @@ func registerRemoteContentTools(reg *bridge.Registrar, editor *EditorialService)
 		}); err != nil {
 		return err
 	}
-	if err := bridge.AddTool(reg, &mcp.Tool{Name: remoteHeadTool,
-		Description: "Read one private draft's current head in this verified Rixa site."},
+	if err := bridge.AddTool(reg, remoteTool(remoteHeadTool, "Read one private draft's current head in this verified Rixa site.", true),
 		func(ctx context.Context, in remoteHeadInput) (remoteContentOutput, error) {
 			req, ok := bridge.RequestFromContext(ctx)
 			if !ok {
@@ -372,8 +380,7 @@ func registerRemoteContentTools(reg *bridge.Registrar, editor *EditorialService)
 		}); err != nil {
 		return err
 	}
-	if err := bridge.AddTool(reg, &mcp.Tool{Name: remoteCreateTool,
-		Description: "Create a private draft using an exact reusable operation_id. Does not publish."},
+	if err := bridge.AddTool(reg, remoteTool(remoteCreateTool, "Create a private draft using an exact reusable operation_id. Does not publish.", false),
 		func(ctx context.Context, in remoteCreateInput) (remoteContentOutput, error) {
 			req, ok := bridge.RequestFromContext(ctx)
 			if !ok {
@@ -388,8 +395,7 @@ func registerRemoteContentTools(reg *bridge.Registrar, editor *EditorialService)
 		}); err != nil {
 		return err
 	}
-	if err := bridge.AddTool(reg, &mcp.Tool{Name: remoteSaveTool,
-		Description: "CAS-save private draft HTML. expected_revision is a decimal string; never publishes."},
+	if err := bridge.AddTool(reg, remoteTool(remoteSaveTool, "CAS-save private draft HTML. expected_revision is a decimal string; never publishes.", false),
 		func(ctx context.Context, in remoteSaveInput) (remoteContentOutput, error) {
 			req, ok := bridge.RequestFromContext(ctx)
 			if !ok {
@@ -409,8 +415,7 @@ func registerRemoteContentTools(reg *bridge.Registrar, editor *EditorialService)
 		}); err != nil {
 		return err
 	}
-	return bridge.AddTool(reg, &mcp.Tool{Name: remoteOperationTool,
-		Description: "Inspect only your own committed create/save operation receipt. Absent does not prove rollback."},
+	return bridge.AddTool(reg, remoteTool(remoteOperationTool, "Inspect only your own committed create/save operation receipt. Absent does not prove rollback.", true),
 		func(ctx context.Context, in remoteOperationInput) (remoteOperationOutput, error) {
 			req, ok := bridge.RequestFromContext(ctx)
 			if !ok {

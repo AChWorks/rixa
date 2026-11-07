@@ -38,6 +38,7 @@ expected="$(awk '
 # tagged dependency manifests. They are NOT compiled Rixa capabilities.
 transitive="$(awk '
   /^      transitiveModules:$/ { if (found++) exit 1; active=1; next }
+  /^      transitiveModules: \{\}$/ { if (found++) exit 1; active=0; next }
   active && /^        [^ ]/ {
     if (NF != 2 || $1 !~ /:$/) exit 1
     sub(/:$/, "", $1); print $1 "\t" $2; next
@@ -50,10 +51,12 @@ required_paths="$(printf '%s\n' \
   github.com/AChWorks/achrix \
   github.com/AChWorks/achrix/admin \
   github.com/AChWorks/achrix/audit \
+  github.com/AChWorks/achrix/bridge \
   github.com/AChWorks/achrix/identity \
   github.com/AChWorks/achrix/installation \
   github.com/AChWorks/achrix/media \
-  github.com/AChWorks/achrix/multisite | LC_ALL=C sort)"
+  github.com/AChWorks/achrix/multisite \
+  github.com/AChWorks/achrix/oauth | LC_ALL=C sort)"
 [[ "$expected_paths" == "$required_paths" ]] || {
   echo "descriptor must identify the complete selected AChrix component set" >&2
   exit 1
@@ -63,7 +66,7 @@ while IFS=$'\t' read -r module version; do
     echo "invalid released component identity: $module" >&2
     exit 1
   }
-done <<<"$(printf '%s\n%s\n' "$expected" "$transitive")"
+done <<<"$(printf '%s\n%s\n' "$expected" "$transitive" | sed '/^[[:space:]]*$/d')"
 
 replaced="$(go list -m -f '{{if .Replace}}{{.Path}}{{end}}' all)"
 [[ -z "$replaced" ]] || {
@@ -71,7 +74,7 @@ replaced="$(go list -m -f '{{if .Replace}}{{.Path}}{{end}}' all)"
   exit 1
 }
 actual="$(go list -m -f '{{.Path}} {{.Version}}' all | awk '$1 ~ /^github\.com\/AChWorks\/achrix($|\/)/ {print $1 "\t" $2}' | LC_ALL=C sort)"
-expected_graph="$(printf '%s\n%s\n' "$expected" "$transitive" | LC_ALL=C sort)"
+expected_graph="$(printf '%s\n%s\n' "$expected" "$transitive" | sed '/^[[:space:]]*$/d' | LC_ALL=C sort)"
 [[ "$actual" == "$expected_graph" ]] || {
   echo "resolved AChrix graph differs from declared selected and transitive module versions" >&2
   exit 1

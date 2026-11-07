@@ -6,6 +6,7 @@ import (
 	"github.com/AChWorks/achrix"
 	"github.com/AChWorks/achrix/admin"
 	"github.com/AChWorks/achrix/audit"
+	"github.com/AChWorks/achrix/bridge"
 	"github.com/AChWorks/achrix/identity"
 	"github.com/AChWorks/achrix/installation"
 	"github.com/AChWorks/achrix/media"
@@ -24,9 +25,11 @@ func FoundationVersions() map[string]string {
 		"github.com/AChWorks/achrix":              achrix.Version(),
 		"github.com/AChWorks/achrix/admin":        admin.Version(),
 		"github.com/AChWorks/achrix/audit":        audit.Version(),
+		"github.com/AChWorks/achrix/bridge":       bridge.Version(),
 		"github.com/AChWorks/achrix/identity":     identity.Version(),
 		"github.com/AChWorks/achrix/installation": installation.Version(),
 		"github.com/AChWorks/achrix/media":        media.Version(),
 		"github.com/AChWorks/achrix/multisite":    multisite.Version(),
+		"github.com/AChWorks/achrix/oauth":        achrix.DependencyVersion("github.com/AChWorks/achrix/oauth"),
 	}
 }
