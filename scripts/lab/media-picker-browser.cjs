@@ -105,14 +105,14 @@ async function main() {
             })
           );
         },site.asset_id);
-        check(await page.locator("[data-media-id]").inputValue() === site.asset_id &&
+        check(await page.locator("input[data-media-id]").inputValue() === site.asset_id &&
           await page.locator("[data-media-revision]").textContent() === "9007199254740993" &&
           writes === 0 && await page.locator("[data-editor] figure").count() === figureCount,
           "synthetic selection caused an edit or lost exact revision");
 
         await picker.locator("ul li button").first().click();
         await page.waitForFunction(id => {
-          const field = document.querySelector("[data-media-id]");
+          const field = document.querySelector("input[data-media-id]");
           const output = document.querySelector("[data-media-revision]");
           return field?.value === id && output && /^[1-9][0-9]{0,18}$/.test(output.textContent) &&
             output.textContent !== "9007199254740993";
@@ -247,7 +247,7 @@ async function main() {
       });
       await tabA.waitForTimeout(100);
       check(stale.disconnected && stale.proposals === 0 && apiRequests[0].length === beforeStale &&
-        await tabA.locator("[data-media-id]").inputValue() === "",
+        await tabA.locator("input[data-media-id]").inputValue() === "",
         "detached site-A controls affected newly selected site-B Picker");
       await tabA.evaluate(() => document.querySelector("achrix-media-picker")
         .setAttribute("endpoint", "/admin/sites/site/site-a/media/picker"));
@@ -261,7 +261,7 @@ async function main() {
       });
       await tabA.waitForTimeout(100);
       check(apiRequests[0].length === beforeReturn &&
-        await tabA.locator("[data-media-id]").inputValue() === "",
+        await tabA.locator("input[data-media-id]").inputValue() === "",
         "A->B->A accepted a stale original DOM action");
 
       // Only an explicit user action proposes a Media reference, only Save
@@ -274,7 +274,7 @@ async function main() {
         }
         const startFigures = await tab.locator("[data-editor] figure").count();
         await picker.locator("ul li button").first().click();
-        await tab.waitForFunction(id => document.querySelector("[data-media-id]")?.value === id,site.asset_id);
+        await tab.waitForFunction(id => document.querySelector("input[data-media-id]")?.value === id,site.asset_id);
         check(/^[1-9][0-9]{0,18}$/.test(await tab.locator("[data-media-revision]").textContent()) &&
           mutations[index].length === 0 &&
           await tab.locator("[data-editor] figure").count() === startFigures,
@@ -285,7 +285,7 @@ async function main() {
             id:foreign,revision:"9007199254740993",mime:"text/html"
           }})
         ),fixture.sites[1-index].asset_id);
-        check(await tab.locator("[data-media-id]").inputValue() === site.asset_id,
+        check(await tab.locator("input[data-media-id]").inputValue() === site.asset_id,
           "unsupported Media MIME proposal replaced Control selection");
         await tab.locator("[data-media-caption]").fill("Control فارسی " + site.id);
         await tab.locator("[data-add-media]").click();
@@ -323,7 +323,7 @@ async function main() {
       // A manual foreign-ID reference must fail again at the actual Save
       // boundary. No cross-site BFF result/metadata can authorize that save.
       const siteA = fixture.sites[0], foreignID = fixture.sites[1].asset_id;
-      await tabA.locator("[data-media-id]").fill(foreignID);
+      await tabA.locator("input[data-media-id]").fill(foreignID);
       await tabA.locator("[data-add-media]").click();
       const afterValid = await tabA.locator("[data-current-revision]").textContent();
       const deniedOperation = await tabA.locator("[data-content-save] input[name=operation_id]").inputValue();
