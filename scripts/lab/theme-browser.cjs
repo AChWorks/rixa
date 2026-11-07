@@ -122,7 +122,13 @@ async function main(){
     passes.push("explicit-publish-browser-executable-responsive-csp");
 
     const stale=await page.evaluate(async previous=>{
-      const token=await fetch("/auth/csrf",{headers:{"X-Identity-Request":"1"},credentials:"same-origin"}).then(r=>r.json());
+      const tokenResponse=await fetch("/auth/csrf",{
+        mode:"same-origin",redirect:"error",referrer:location.origin+"/",
+        referrerPolicy:"same-origin",headers:{"X-Identity-Request":"1"},
+        credentials:"same-origin",cache:"no-store"
+      });
+      if(!tokenResponse.ok)return tokenResponse.status;
+      const token=await tokenResponse.json();
       const result=await fetch("/admin/site-theme/publish",{
         method:"POST",credentials:"same-origin",
         headers:{"Content-Type":"application/json","X-CSRF-Token":token.csrf,"X-Identity-Request":"1"},

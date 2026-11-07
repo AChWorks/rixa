@@ -90,11 +90,15 @@ type SiteTransferSummary struct {
 	SourceSessionRows   int64  `json:"source_session_rows"`
 	AppearanceRevision  int64  `json:"appearance_revision"`
 	Theme               string `json:"theme"`
+	ThemeHeadRevision   int64  `json:"theme_head_revision"`
+	ThemeRevisions      int64  `json:"theme_revisions"`
 }
 
 type SiteTransferSite struct {
 	ID                   string             `json:"id"`
 	Origin               string             `json:"origin"`
+	ManagementOrigin     string             `json:"management_origin,omitempty"`
+	PreviewOrigin        string             `json:"preview_origin,omitempty"`
 	AdminPrincipal       string             `json:"admin_principal"`
 	PublicEnabled        bool               `json:"public_enabled"`
 	PublicPolicy         PublicPolicyConfig `json:"public_policy,omitempty"`
@@ -268,6 +272,7 @@ func CaptureSite(parent context.Context, config Config, siteID, destination stri
 		PGDumpVersion:        pgDumpVersion,
 		Site: SiteTransferSite{
 			ID: site.ID, Origin: site.Origin, AdminPrincipal: site.AdminPrincipal,
+			ManagementOrigin: site.ManagementOrigin, PreviewOrigin: site.PreviewOrigin,
 			PublicEnabled: site.PublicRoot != "", PublicPolicy: site.PublicPolicy,
 			AuthorizationProfile: "rixa.fixed-site-admin-v1",
 		},
@@ -523,6 +528,8 @@ func validateSiteTransferCompatibility(site SiteConfig, manifest SiteTransferMan
 		return fmt.Errorf("%w: incompatible source dependency identity", ErrSiteTransfer)
 	}
 	if manifest.Site.ID != site.ID || manifest.Site.Origin != site.Origin ||
+		manifest.Site.ManagementOrigin != site.ManagementOrigin ||
+		manifest.Site.PreviewOrigin != site.PreviewOrigin ||
 		manifest.Site.AdminPrincipal != site.AdminPrincipal ||
 		manifest.Site.PublicEnabled != (site.PublicRoot != "") ||
 		!reflect.DeepEqual(manifest.Site.PublicPolicy, site.PublicPolicy) {
@@ -542,6 +549,27 @@ func validateSiteTransferManifest(manifest SiteTransferManifest) error {
 		manifest.GlobalControlPolicy != "not-captured-target-must-recreate-and-remap" ||
 		len(manifest.Excluded) == 0 {
 		return fmt.Errorf("%w: invalid transfer manifest", ErrSiteTransfer)
+	}
+	// A restored executable Theme must retain the management/public/preview
+	// boundaries. A captured three-host Theme cannot be restored as a legacy
+	// single-host site solely by changing the target config.
+	if (manifest.Site.ManagementOrigin == "") != (manifest.Site.PreviewOrigin == "") {
+		return fmt.Errorf("%w: incomplete Theme origin boundaries", ErrSiteTransfer)
+	}
+	if manifest.Site.ManagementOrigin != "" {
+		seen := make(map[string]bool, 6)
+		for _, origin := range []string{manifest.Site.Origin, manifest.Site.ManagementOrigin, manifest.Site.PreviewOrigin} {
+			authority, hostname, originErr := originParts(origin)
+			if originErr != nil || seen[hostname] || seen[authority] {
+				return fmt.Errorf("%w: insecure Theme origin boundaries", ErrSiteTransfer)
+			}
+			seen[hostname] = true
+			seen[authority] = true
+		}
+	}
+	if manifest.Summary.ThemeHeadRevision < 0 || manifest.Summary.ThemeRevisions < 0 ||
+		manifest.Summary.ThemeHeadRevision != manifest.Summary.ThemeRevisions {
+		return fmt.Errorf("%w: invalid Theme source state summary", ErrSiteTransfer)
 	}
 	// Require the complete declared component set, including a Core identity
 	// consistent with the legacy field. Compatibility then compares exact values.
@@ -834,7 +862,8 @@ func beginSiteTransferDatabaseFence(parent context.Context, dsn, adminPrincipal 
 			media.schema_migrations, media.assets,
 			rixa.schema_migrations, rixa.content_items, rixa.content_revisions, rixa.content_media_refs,
 			rixa.appearance_revisions, rixa.appearance_head, rixa.operations,
-            rixa.site_grants, rixa.site_grant_history
+			rixa.theme_revisions, rixa.theme_head,
+			rixa.site_grants, rixa.site_grant_history
 		IN SHARE MODE
 	`
 	if _, err = tx.Exec(ctx, lockSQL); err != nil {
@@ -928,6 +957,7 @@ func inspectSiteTransferDatabaseQuery(parent context.Context, query siteTransfer
 		{&result.Summary.ContentRevisions, "SELECT count(*) FROM rixa.content_revisions"},
 		{&result.Summary.ContentMediaRefs, "SELECT count(*) FROM rixa.content_media_refs"},
 		{&result.Summary.EditorialOperations, "SELECT count(*) FROM rixa.operations"},
+		{&result.Summary.ThemeRevisions, "SELECT count(*) FROM rixa.theme_revisions"},
 		{&result.Summary.SiteGrants, "SELECT count(*) FROM rixa.site_grants"},
 		{&result.Summary.SiteGrantHistory, "SELECT count(*) FROM rixa.site_grant_history"},
 		{&result.Summary.ReadyMedia, "SELECT count(*) FROM media.assets WHERE state='ready'"},
@@ -940,6 +970,10 @@ func inspectSiteTransferDatabaseQuery(parent context.Context, query siteTransfer
 	}
 	if err = query.QueryRow(ctx, "SELECT r.revision,r.theme FROM rixa.appearance_head h JOIN rixa.appearance_revisions r ON r.revision=h.head_revision WHERE h.singleton").Scan(&result.Summary.AppearanceRevision, &result.Summary.Theme); err != nil {
 		return siteTransferSnapshot{}, fmt.Errorf("%w: summarize site appearance", ErrSiteTransfer)
+	}
+	if err = query.QueryRow(ctx, "SELECT head_revision FROM rixa.theme_head WHERE singleton=true").Scan(&result.Summary.ThemeHeadRevision); err != nil ||
+		result.Summary.ThemeHeadRevision != result.Summary.ThemeRevisions {
+		return siteTransferSnapshot{}, fmt.Errorf("%w: summarize immutable Theme history", ErrSiteTransfer)
 	}
 
 	rows, err := query.Query(ctx, "SELECT id,revision,size,sha256 FROM media.assets WHERE state='ready' ORDER BY id")

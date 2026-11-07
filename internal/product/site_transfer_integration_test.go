@@ -62,6 +62,8 @@ func TestSiteTransferRoundTrip(t *testing.T) {
 		"source-control.transfer.test",
 		"target-control.transfer.test",
 		"site-a.transfer.test",
+		"manage-site-a.transfer.test",
+		"preview-site-a.transfer.test",
 		"site-b.transfer.test",
 	})
 	source := Config{
@@ -72,7 +74,11 @@ func TestSiteTransferRoundTrip(t *testing.T) {
 		ShutdownTimeout: 10 * time.Second,
 		Control:         ControlConfig{Origin: "https://source-control.transfer.test:22443", DatabaseEnv: "TRANSFER_SOURCE_CONTROL"},
 		Sites: []SiteConfig{
-			{ID: "site-a", Origin: "https://site-a.transfer.test:22443", DatabaseEnv: "TRANSFER_SOURCE_A", MediaRoot: sourceMediaA, PublicRoot: sourcePublicA, PublicPolicy: testPublicPolicy()},
+			{ID: "site-a", Origin: "https://site-a.transfer.test:22443",
+				ManagementOrigin: "https://manage-site-a.transfer.test:22443",
+				PreviewOrigin:    "https://preview-site-a.transfer.test:22443",
+				DatabaseEnv:      "TRANSFER_SOURCE_A", MediaRoot: sourceMediaA,
+				PublicRoot: sourcePublicA, PublicPolicy: testPublicPolicy()},
 			{ID: "site-b", Origin: "https://site-b.transfer.test:22443", DatabaseEnv: "TRANSFER_SOURCE_B", MediaRoot: sourceMediaB, PublicRoot: sourcePublicB, PublicPolicy: testPublicPolicy()},
 		},
 	}
@@ -163,6 +169,28 @@ func TestSiteTransferRoundTrip(t *testing.T) {
 	if publication.Route != "/transferred-post/" {
 		t.Fatalf("source publication route=%q", publication.Route)
 	}
+	// The transfer must retain both active executable public source and
+	// privately saved newer revisions, without weakening three-Origin routing.
+	theme := defaultThemeBundle()
+	theme.HeaderHTML = "<header><strong>Transferred custom Theme v1</strong></header>"
+	theme.JavaScript = "document.body.dataset.transferred='v1';"
+	firstTheme, err := sourceRuntime.Sites["site-a"].Themes.SaveDraft(ctx, aAdmin, newOperationID(), 0, theme)
+	if err != nil || firstTheme.Revision != 1 {
+		t.Fatalf("source Theme save: %#v / %v", firstTheme, err)
+	}
+	themePublished, err := sourceRuntime.Sites["site-a"].Themes.PublishRevision(ctx, aAdmin, newOperationID(), 1, publication.Generation)
+	if err != nil {
+		t.Fatalf("source Theme publish: %v", err)
+	}
+	theme.HeaderHTML = "<header><strong>Private Theme draft v2</strong></header>"
+	secondTheme, err := sourceRuntime.Sites["site-a"].Themes.SaveDraft(ctx, aAdmin, newOperationID(), 1, theme)
+	if err != nil || secondTheme.Revision != 2 {
+		t.Fatalf("source private Theme save: %#v / %v", secondTheme, err)
+	}
+	if sourceRuntime.Sites["site-a"].Themes.PublishedRevision() != 1 ||
+		themePublished.Generation == publication.Generation {
+		t.Fatal("Theme publishing did not preserve active public history")
+	}
 
 	postB, err := sourceRuntime.Sites["site-b"].Editorial.Create(ctx, bAdmin, newOperationID(), ContentPost, "Site B only", "<p>must not transfer</p>")
 	if err != nil {
@@ -251,12 +279,18 @@ func TestSiteTransferRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, writerErr := writer.Exec(writerCtx, "UPDATE rixa.appearance_revisions SET footer_text=footer_text WHERE revision=2")
+	_, themeWriterErr := writer.Exec(writerCtx, "UPDATE rixa.theme_head SET head_revision=head_revision WHERE singleton=true")
 	_ = writer.Close(context.Background())
 	writerCancel()
 	var pgErr *pgconn.PgError
 	if !errors.As(writerErr, &pgErr) || pgErr.Code != "55P03" {
 		_ = fence.Close(context.Background())
 		t.Fatalf("capture fence did not block concurrent writer: %v", writerErr)
+	}
+	pgErr = nil
+	if !errors.As(themeWriterErr, &pgErr) || pgErr.Code != "55P03" {
+		_ = fence.Close(context.Background())
+		t.Fatalf("capture fence did not block concurrent Theme revision write: %v", themeWriterErr)
 	}
 	if err = fence.Close(context.Background()); err != nil {
 		t.Fatalf("release source database capture fence: %v", err)
@@ -269,6 +303,9 @@ func TestSiteTransferRoundTrip(t *testing.T) {
 	}
 	if manifest.Summary.SourceSessionRows < 1 || manifest.Summary.Accounts < 2 ||
 		manifest.Summary.ContentItems < 1 || manifest.Summary.ReadyMedia != 1 ||
+		manifest.Summary.ThemeHeadRevision != 2 || manifest.Summary.ThemeRevisions != 2 ||
+		manifest.Site.ManagementOrigin != source.Sites[0].ManagementOrigin ||
+		manifest.Site.PreviewOrigin != source.Sites[0].PreviewOrigin ||
 		manifest.Site.ID != "site-a" || manifest.Site.AdminPrincipal != string(aAdmin) {
 		t.Fatalf("capture manifest summary=%#v site=%#v", manifest.Summary, manifest.Site)
 	}
@@ -295,8 +332,11 @@ func TestSiteTransferRoundTrip(t *testing.T) {
 		ShutdownTimeout: 10 * time.Second,
 		Control:         ControlConfig{Origin: "https://target-control.transfer.test:22444", DatabaseEnv: "TRANSFER_TARGET_CONTROL"},
 		Sites: []SiteConfig{{
-			ID: "site-a", Origin: source.Sites[0].Origin, DatabaseEnv: "TRANSFER_TARGET_A",
-			MediaRoot: targetMedia, PublicRoot: targetPublic, PublicPolicy: source.Sites[0].PublicPolicy,
+			ID: "site-a", Origin: source.Sites[0].Origin,
+			ManagementOrigin: source.Sites[0].ManagementOrigin,
+			PreviewOrigin:    source.Sites[0].PreviewOrigin,
+			DatabaseEnv:      "TRANSFER_TARGET_A",
+			MediaRoot:        targetMedia, PublicRoot: targetPublic, PublicPolicy: source.Sites[0].PublicPolicy,
 			AdminPrincipal: source.Sites[0].AdminPrincipal,
 		}},
 	}
@@ -421,6 +461,9 @@ func TestSiteTransferRoundTrip(t *testing.T) {
 	if got := queryTransferCount(t, ctx, dsns["target-a"], "SELECT count(*) FROM media.assets WHERE id=$1", assetB.ID); got != 0 {
 		t.Fatalf("site B Media metadata leaked into restored DB: %d", got)
 	}
+	if got := queryTransferCount(t, ctx, dsns["target-a"], "SELECT count(*) FROM rixa.theme_revisions"); got != 2 {
+		t.Fatalf("Theme revisions not retained by restore: %d", got)
+	}
 
 	if err = Migrate(ctx, target, targetEnv); err != nil {
 		t.Fatalf("target migrate/check ledgers: %v", err)
@@ -478,13 +521,21 @@ func TestSiteTransferRoundTrip(t *testing.T) {
 	if err != nil || gotAppearance.Theme != "dark" || gotAppearance.FooterText != "transferred footer" {
 		t.Fatalf("restored appearance=%#v err=%v", gotAppearance, err)
 	}
+	restoredTheme, err := targetRuntime.Sites["site-a"].Themes.Head(ctx, aAdmin)
+	if err != nil || restoredTheme.Revision != 2 ||
+		restoredTheme.Bundle.HeaderHTML != "<header><strong>Private Theme draft v2</strong></header>" ||
+		targetRuntime.Sites["site-a"].Themes.PublishedRevision() != 1 {
+		t.Fatalf("source/public Theme state not restored: %#v / %v", restoredTheme, err)
+	}
 
 	publicReq := httptest.NewRequest(http.MethodGet, source.Sites[0].Origin+"/transferred-post/", nil)
 	publicReq.Host = mustTransferURL(t, source.Sites[0].Origin).Host
 	publicReq.TLS = &tls.ConnectionState{}
 	publicRec := httptest.NewRecorder()
 	targetRuntime.Handler.ServeHTTP(publicRec, publicReq)
-	if publicRec.Code != http.StatusOK || !strings.Contains(publicRec.Body.String(), "Transferred post") {
+	if publicRec.Code != http.StatusOK || !strings.Contains(publicRec.Body.String(), "Transferred post") ||
+		!strings.Contains(publicRec.Body.String(), "Transferred custom Theme v1") ||
+		strings.Contains(publicRec.Body.String(), "Private Theme draft v2") {
 		t.Fatalf("restored public response status=%d body=%s", publicRec.Code, publicRec.Body.String())
 	}
 

@@ -845,11 +845,10 @@ func snapshotRetainedFiles(t *testing.T, sites []SiteConfig) map[string]string {
 
 func assertRetainedSnapshots(t *testing.T, ctx context.Context, dsns map[string]string, sites []SiteConfig, configPath string, rows, files map[string]string, config []byte) {
 	t.Helper()
-	// The candidate deliberately adds the Rixa-owned v3 site-grant schema.
-	// Keep the retained-proof strict: only the exact new empty site tables and
-	// exact verified appended migration ledger may differ from the published
-	// v0.7.0 fixture. Every older table/row, credential/session, control table,
-	// file and config must remain byte-for-byte unchanged.
+	// The candidate appends Rixa-owned v3 site grants and v4 Code-first Theme
+	// tables. Keep the retained proof strict: only those empty new tables, the
+	// zero-revision Theme head and exact appended migration ledger may differ
+	// from the published v0.7.0 fixture. All older state must be unchanged.
 	after := snapshotRetainedRows(t, ctx, dsns)
 	want := make(map[string]string, len(rows))
 	for key, value := range rows {
@@ -861,20 +860,39 @@ func assertRetainedSnapshots(t *testing.T, ctx context.Context, dsns map[string]
 			t.Fatalf("published baseline lacks site ledger: %s", ledgerKey)
 		}
 		assertEditorialLedger(t, ctx, dsns[scope], []editorialLedgerRow{
-			{1, editorialMigrationIdentity}, {2, editorialMigration2Identity}, {3, editorialMigration3Identity},
+			{1, editorialMigrationIdentity}, {2, editorialMigration2Identity},
+			{3, editorialMigration3Identity}, {4, editorialMigration4Identity},
 		})
 		delete(want, ledgerKey)
 		delete(after, ledgerKey)
-		for _, table := range []string{"site_grants", "site_grant_history"} {
+		for _, table := range []string{"site_grants", "site_grant_history", "theme_revisions"} {
 			key := scope + "/" + (pgx.Identifier{"rixa", table}).Sanitize()
 			if _, existed := want[key]; existed {
 				t.Fatalf("published baseline unexpectedly owned new table %s", key)
 			}
 			if after[key] != fmt.Sprintf("0:%x", sha256.Sum256(nil)) {
-				t.Fatalf("new site grant table not empty/valid on upgrade: %s", key)
+				t.Fatalf("new candidate table not empty/valid on upgrade: %s", key)
 			}
 			delete(after, key)
 		}
+		// Theme head is a new singleton, but intentionally not empty. Check
+		// its exact zero state rather than ignoring a newly created table.
+		headKey := scope + "/" + (pgx.Identifier{"rixa", "theme_head"}).Sanitize()
+		if _, existed := want[headKey]; existed {
+			t.Fatalf("published baseline unexpectedly owned Theme head: %s", headKey)
+		}
+		conn, err := pgx.Connect(ctx, dsns[scope])
+		if err != nil {
+			t.Fatal(err)
+		}
+		var head, count int64
+		err = conn.QueryRow(ctx, "SELECT head_revision FROM rixa.theme_head WHERE singleton=true").Scan(&head)
+		countErr := conn.QueryRow(ctx, "SELECT count(*) FROM rixa.theme_head").Scan(&count)
+		_ = conn.Close(ctx)
+		if err != nil || countErr != nil || head != 0 || count != 1 {
+			t.Fatalf("new Theme head must be exactly one zero singleton: head=%d count=%d errors=%v/%v", head, count, err, countErr)
+		}
+		delete(after, headKey)
 	}
 	if !reflect.DeepEqual(after, want) {
 		var changed []string
