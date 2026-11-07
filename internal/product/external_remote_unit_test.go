@@ -30,8 +30,6 @@ func TestRemoteConfigRequiresDeliberateIsolatedOptIn(t *testing.T) {
 	}{
 		{"absent client", func(c *Config) { c.Sites[0].Remote.Clients = nil }},
 		{"unisolated management", func(c *Config) { c.Sites[0].ManagementOrigin = ""; c.Sites[0].PreviewOrigin = "" }},
-		{"disabled site", func(c *Config) { c.Sites[0].Disabled = true }},
-		{"unintended pre-enrollment", func(c *Config) { c.Sites[0].Remote.Enabled = false }},
 		{"duplicate clients", func(c *Config) {
 			c.Sites[0].Remote.Clients = append(c.Sites[0].Remote.Clients, c.Sites[0].Remote.Clients[0])
 		}},
@@ -49,9 +47,28 @@ func TestRemoteConfigRequiresDeliberateIsolatedOptIn(t *testing.T) {
 			}
 		})
 	}
-	c := valid()
-	c.Sites[0].Remote = RemoteConfig{}
-	if err := c.validateStructure(); err != nil {
-		t.Fatalf("default disabled must remain compatible: %v", err)
+	for _, tc := range []struct {
+		name   string
+		modify func(*Config)
+	}{
+		{"disabled site preserves inactive registration", func(c *Config) { c.Sites[0].Disabled = true }},
+		{"remote disabled preserves client configuration", func(c *Config) { c.Sites[0].Remote.Enabled = false }},
+		{"remote disabled keeps invalid inactive callback for later repair", func(c *Config) {
+			c.Sites[0].Remote.Enabled = false
+			c.Sites[0].Remote.Clients[0].RedirectURIs = []string{"http://needs-repair.example/cb"}
+		}},
+		{"site disabled retains inactive registration", func(c *Config) {
+			c.Sites[0].Disabled = true
+			c.Sites[0].Remote.Clients[0].RedirectURIs = []string{"http://needs-repair.example/cb"}
+		}},
+		{"default disabled", func(c *Config) { c.Sites[0].Remote = RemoteConfig{} }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := valid()
+			tc.modify(&c)
+			if err := c.validateStructure(); err != nil {
+				t.Fatalf("disabled/inactive remote configuration was rejected: %v", err)
+			}
+		})
 	}
 }

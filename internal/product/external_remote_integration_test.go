@@ -58,6 +58,12 @@ func TestRemoteOAuthMCPRealSiteDraftAndRevocation(t *testing.T) {
 			PreviewOrigin: "https://b.preview.remote.test", DatabaseEnv: "RIXA_REMOTE_B",
 			MediaRoot: filepath.Join(dir, "mb"), PublicRoot: filepath.Join(dir, "pb"),
 			PublicPolicy: testPublicPolicy(),
+			// Disabling the connector keeps client registration metadata without
+			// installing its database schema or exposing an MCP/OAuth handler.
+			Remote: RemoteConfig{Enabled: false, Clients: []RemoteClientConfig{{
+				ID: "retained-disabled-client", Name: "Retained but inert",
+				RedirectURIs: []string{remoteTestCallback}, Enabled: true,
+			}}},
 		},
 	}
 	for _, site := range sites {
@@ -138,6 +144,14 @@ func TestRemoteOAuthMCPRealSiteDraftAndRevocation(t *testing.T) {
 		t.Fatal(err)
 	}
 	srv := httptest.NewUnstartedServer(runtime.Handler)
+	// The official SDK rejects a public canonical Host on a loopback TCP
+	// LocalAddr as DNS rebinding. Exercise an actual non-loopback HTTPS socket
+	// rather than disabling its protection or rewriting the request Host.
+	listener := remoteTestNonLoopbackListener(t)
+	if err := srv.Listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+	srv.Listener = listener
 	srv.TLS = &tls.Config{Certificates: []tls.Certificate{pair}, MinVersion: tls.VersionTLS12}
 	srv.StartTLS()
 	defer srv.Close()
@@ -450,4 +464,40 @@ func TestRemoteOAuthMCPRealSiteDraftAndRevocation(t *testing.T) {
 	if _, err := site.Editorial.Head(ctx, achrix.Principal(reader.ID), contentID); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// remoteTestNonLoopbackListener exercises the official SDK's default Host
+// admission on an actual routable TLS socket, not a falsified LocalAddr.
+// CI must fail clearly when no such socket can be provisioned.
+func remoteTestNonLoopbackListener(t *testing.T) net.Listener {
+	t.Helper()
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, iface := range interfaces {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addrs, e := iface.Addrs()
+		if e != nil {
+			continue
+		}
+		for _, addr := range addrs {
+			ipNet, ok := addr.(*net.IPNet)
+			if !ok {
+				continue
+			}
+			ip := ipNet.IP.To4()
+			if ip == nil || ip.IsLoopback() || ip.IsUnspecified() || ip.IsMulticast() {
+				continue
+			}
+			listener, e := net.Listen("tcp", net.JoinHostPort(ip.String(), "0"))
+			if e == nil {
+				return listener
+			}
+		}
+	}
+	t.Fatal("real OAuth/MCP test requires an available non-loopback IPv4 listener to validate the canonical HTTPS Host")
+	return nil
 }

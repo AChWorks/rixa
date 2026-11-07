@@ -310,10 +310,10 @@ func (c Config) validateStructure() error {
 		}
 		authorities[authority] = true
 		hostnames[hostname] = true
-		if site.Remote.Enabled {
-			if site.Disabled || site.ManagementOrigin == "" || site.PreviewOrigin == "" ||
+		if site.Remote.Enabled && !site.Disabled {
+			if site.ManagementOrigin == "" || site.PreviewOrigin == "" ||
 				len(site.Remote.Clients) == 0 || len(site.Remote.Clients) > 128 {
-				return fmt.Errorf("%w: site remote requires isolated management and enrolled clients", ErrConfiguration)
+				return fmt.Errorf("%w: enabled site remote requires isolated management and enrolled clients", ErrConfiguration)
 			}
 			clientIDs := make(map[string]bool, len(site.Remote.Clients))
 			for _, client := range site.Remote.Clients {
@@ -332,9 +332,6 @@ func (c Config) validateStructure() error {
 					}
 				}
 			}
-		} else if len(site.Remote.Clients) != 0 {
-			// Configuration must not imply latent credentials/registration.
-			return fmt.Errorf("%w: site remote must be explicitly enabled", ErrConfiguration)
 		}
 		if (site.ManagementOrigin == "") != (site.PreviewOrigin == "") {
 			return fmt.Errorf("%w: management and preview origins must be configured together", ErrConfiguration)

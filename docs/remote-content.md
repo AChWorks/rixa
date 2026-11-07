@@ -49,7 +49,19 @@ OAuth `POST /oauth/revoke` terminates a supported client token/grant. Browser
 logout deliberately does **not** revoke an existing OAuth grant.
 
 With `remote.enabled=false` (default), no OAuth issuer, MCP endpoint or
-OAuth schema is provisioned. No MCP endpoint runs on public/preview origins.
+OAuth schema is provisioned. Previously enrolled client metadata can remain
+in the disabled configuration for later deliberate re-enablement without
+creating a listener, worker or authorization grant. No MCP endpoint runs on public/preview origins.
+The AChrix Bridge profile uses the official MCP SDK's DNS-rebinding guard.
+When the TCP listener itself is loopback (such as `127.0.0.1`) but the
+canonical external management Host is not, the SDK rejects MCP POST with
+HTTP 403 **before a tool runs**. For this reviewed staging profile, use a
+real non-loopback, TLS-protected listener for that canonical management
+hostname. Do not disable the SDK guard, inject forged LocalAddr context, or
+rewrite the Host header as a workaround. Support for a loopback-bound reverse
+proxy topology requires a separate validated upstream Bridge contract and
+appropriate admission controls before production deployment.
+
 Only the exact management hostname owns:
 
 - `/oauth/authorize`, `/oauth/token`, `/oauth/revoke` and RFC 8414 metadata at `/.well-known/oauth-authorization-server/oauth`
