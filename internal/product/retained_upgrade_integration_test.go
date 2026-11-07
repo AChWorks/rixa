@@ -34,6 +34,7 @@ import (
 	"time"
 
 	"github.com/AChWorks/achrix"
+	"github.com/AChWorks/achrix/audit"
 	"github.com/AChWorks/achrix/identity"
 	"github.com/jackc/pgx/v5"
 )
@@ -72,16 +73,18 @@ func TestRetainedReleaseUpgrade(t *testing.T) {
 	}
 	verifyRetainedBaseline(t, binary)
 	// Pin the approved target profile independently of FoundationVersions() so
-	// this published-release upgrade must exercise the actual Media v0.5.1
-	// transition, not quietly accept an accidental future module bump.
+	// this published-release upgrade must exercise the real Media v0.5.1
+	// and Audit v0.3.0 forward-only migrations, not quietly accept an accidental future module bump.
 	for module, expected := range map[string]string{
 		"github.com/AChWorks/achrix":              "v0.5.0",
 		"github.com/AChWorks/achrix/admin":        "v0.3.0",
-		"github.com/AChWorks/achrix/audit":        "v0.2.0",
-		"github.com/AChWorks/achrix/identity":     "v0.3.0",
+		"github.com/AChWorks/achrix/audit":        "v0.3.0",
+		"github.com/AChWorks/achrix/bridge":       "v0.1.0",
+		"github.com/AChWorks/achrix/identity":     "v0.4.0",
 		"github.com/AChWorks/achrix/installation": "v0.2.0",
 		"github.com/AChWorks/achrix/media":        "v0.5.1",
 		"github.com/AChWorks/achrix/multisite":    "v0.1.1",
+		"github.com/AChWorks/achrix/oauth":        "v0.1.0",
 	} {
 		if achrix.DependencyVersion(module) != expected {
 			t.Fatalf("retained-upgrade candidate component identity mismatch: %s", module)
@@ -185,10 +188,12 @@ func TestRetainedReleaseUpgrade(t *testing.T) {
 	assertRetainedFixturePopulated(t, ctx, dsns)
 	backups := captureRetainedPublishedBackups(t, ctx, dsns, config, configPath, beforeFiles)
 
-	// The authentic v0.8 candidate cannot start on the v0.7 editorial-v2
-	// schema. This must fail closed without changing old data: Native Update
-	// currently runs candidate check before migrate, so it cannot yet manage
-	// this transition. Manual explicit migration below is NOT Native Update.
+	// The candidate cannot start on the published v0.7 database: Audit
+	// schema v2 requires an explicit migration, before editorial-v3 readiness
+	// is reached. This must fail closed without changing old data: Native
+	// Update currently runs candidate check before migrate, so it cannot
+	// manage this forward-only transition. Explicit migration below is not
+	// proof of a supported managed Native Update.
 	resolved, err := config.ResolveRuntime(ctx, mapLookup(secrets))
 	if err != nil {
 		t.Fatal(err)
@@ -197,8 +202,8 @@ func TestRetainedReleaseUpgrade(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if checkErr := Check(ctx, beforeMigration); !errors.Is(checkErr, ErrEditorialUnavailable) {
-		t.Fatalf("expected v0.8 schema precheck rejection on v0.7 data, got: %v", checkErr)
+	if checkErr := Check(ctx, beforeMigration); !errors.Is(checkErr, audit.ErrUnavailable) {
+		t.Fatalf("candidate must reject v0.7 data until Audit v2 explicit migration: %v", checkErr)
 	}
 	if !reflect.DeepEqual(snapshotRetainedRows(t, ctx, dsns), beforeRows) {
 		t.Fatal("failed candidate precheck mutated retained database rows")
@@ -228,8 +233,9 @@ func TestRetainedReleaseUpgrade(t *testing.T) {
 		t.Fatalf("old schema rejection was not a verified child exit: %v", oldErr)
 	}
 	// A generic child exit could hide an unrelated executable or environment
-	// failure. The authentic v0.7 CLI must report the editorial readiness
-	// category from its exact-prefix ledger validator, not just exit nonzero.
+	// failure. The authentic v0.7 CLI must report the exact Audit-v1 schema
+	// refusal after the candidate's forward-only Audit-v2 migration, not just
+	// exit nonzero or an unrelated database failure.
 	if exited.ExitCode() != 1 || len(oldOutput) != 0 || !retainedOldSchemaDiagnostic(exited.Stderr) {
 		t.Fatalf("published v0.7 check failed for an unexpected reason: exit=%d stdout_bytes=%d stderr=%s",
 			exited.ExitCode(), len(oldOutput), retainedDiagnostic(string(exited.Stderr), env))
@@ -423,7 +429,7 @@ func TestRetainedReleaseUpgrade(t *testing.T) {
 	stopNew()
 	proveRetainedPublishedRestore(t, ctx, dsn, backups, dsns, binary, config, configPath,
 		beforeRows, beforeFiles, beforeConfig)
-	t.Log("RIXA_RETAINED_UPGRADE baseline=v0.7.0 candidate_core=v0.5.0 candidate_audit=v0.2.0 sites=2 exact_rows_files_ledgers=true physical_targets_retained=true scoped_restart=true valid_sessions_retained=true revoked_foreign_denied=true control_dispatch=true")
+	t.Log("RIXA_RETAINED_UPGRADE baseline=v0.7.0 candidate_core=v0.5.0 candidate_audit=v0.3.0 sites=2 exact_rows_files_ledgers=true physical_targets_retained=true scoped_restart=true valid_sessions_retained=true revoked_foreign_denied=true control_dispatch=true")
 }
 
 func verifyRetainedBaseline(t *testing.T, path string) {
@@ -771,7 +777,17 @@ func snapshotRetainedRows(t *testing.T, ctx context.Context, dsns map[string]str
 		}
 		for _, table := range tables {
 			name := pgx.Identifier{table[0], table[1]}.Sanitize()
-			rows, err = conn.Query(ctx, "SELECT row_to_json(t)::text FROM "+name+" t ORDER BY row_to_json(t)::text")
+			query := "SELECT row_to_json(t)::text FROM " + name + " t ORDER BY row_to_json(t)::text"
+			if table[0] == "audit" && table[1] == "records" {
+				// Audit v0.3's forward-only v2 migration adds five NULL
+				// attribution columns. The old immutable record values are
+				// compared byte-for-byte as JSON with their original column
+				// order; the new columns are verified separately below.
+				query = "SELECT row_to_json(t)::text FROM " +
+					"(SELECT seq,id,actor,action,target,authority,outcome,occurred_at FROM audit.records) t " +
+					"ORDER BY row_to_json(t)::text"
+			}
+			rows, err = conn.Query(ctx, query)
 			if err != nil {
 				t.Fatalf("retained snapshot query failed: %s/%s", scope, name)
 			}
@@ -845,14 +861,58 @@ func snapshotRetainedFiles(t *testing.T, sites []SiteConfig) map[string]string {
 
 func assertRetainedSnapshots(t *testing.T, ctx context.Context, dsns map[string]string, sites []SiteConfig, configPath string, rows, files map[string]string, config []byte) {
 	t.Helper()
-	// The candidate appends Rixa-owned v3 site grants and v4 Code-first Theme
-	// tables. Keep the retained proof strict: only those empty new tables, the
-	// zero-revision Theme head and exact appended migration ledger may differ
-	// from the published v0.7.0 fixture. All older state must be unchanged.
+	// The candidate appends Audit-v2 attribution (five NULL fields on
+	// historical immutable records), and Rixa-owned v3 site grants / v4
+	// Code-first Theme tables. Keep the retained proof strict: the old Audit
+	// records and migration v1 bytes, old state, and historical Rixa ledgers
+	// remain unchanged. Only explicitly verified new schema state differs.
 	after := snapshotRetainedRows(t, ctx, dsns)
 	want := make(map[string]string, len(rows))
 	for key, value := range rows {
 		want[key] = value
+	}
+	for _, scope := range []string{"control", "a", "b"} {
+		key := scope + "/" + (pgx.Identifier{"audit", "schema_migrations"}).Sanitize()
+		if _, exists := want[key]; !exists {
+			t.Fatalf("published baseline lacks Audit migration ledger: %s", key)
+		}
+		conn, err := pgx.Connect(ctx, dsns[scope])
+		if err != nil {
+			t.Fatal(err)
+		}
+		var total, versionMin, versionMax int
+		err = conn.QueryRow(ctx, "SELECT count(*),min(version),max(version) FROM audit.schema_migrations").
+			Scan(&total, &versionMin, &versionMax)
+		if err != nil || total != 2 || versionMin != 1 || versionMax != 2 {
+			_ = conn.Close(ctx)
+			t.Fatalf("Audit must contain exactly authenticated migrations 1 and 2: %s count=%d min=%d max=%d err=%v",
+				scope, total, versionMin, versionMax, err)
+		}
+		var originalLedgerRow string
+		err = conn.QueryRow(ctx, "SELECT row_to_json(t)::text FROM audit.schema_migrations t WHERE version=1").
+			Scan(&originalLedgerRow)
+		originalLedgerHash := sha256.Sum256([]byte(originalLedgerRow + "\n"))
+		if err != nil || want[key] != fmt.Sprintf("1:%x", originalLedgerHash) {
+			_ = conn.Close(ctx)
+			t.Fatalf("Audit migration 1 was modified, or its original checksum changed: %s err=%v", scope, err)
+		}
+		// The additive v2 migration must never invent client/request/actor
+		// attribution for a historical/direct audit event. Audit.Check
+		// independently verifies the migration checksums and constraints.
+		var legacyCount, attributedCount int
+		err = conn.QueryRow(ctx, `
+            SELECT count(*), count(*) FILTER (WHERE client_id IS NOT NULL
+              OR connection_id IS NOT NULL OR channel IS NOT NULL
+              OR request_id IS NOT NULL OR operation IS NOT NULL)
+            FROM audit.records
+        `).Scan(&legacyCount, &attributedCount)
+		_ = conn.Close(ctx)
+		if err != nil || attributedCount != 0 {
+			t.Fatalf("retained Audit records acquired invented attribution: %s total=%d attributed=%d err=%v",
+				scope, legacyCount, attributedCount, err)
+		}
+		delete(after, key)
+		delete(want, key)
 	}
 	for _, scope := range []string{"a", "b"} {
 		ledgerKey := scope + "/" + (pgx.Identifier{"rixa", "schema_migrations"}).Sanitize()
@@ -945,11 +1005,13 @@ func assertRetainedFixturePopulated(t *testing.T, ctx context.Context, dsns map[
 	}
 }
 
-// The published v0.7 CLI emits this stable, scoped readiness category after
-// encountering the v3 editorial ledger. Informational JSON startup logs may
-// precede it; any other CLI failure or trailing diagnostic must not pass.
+// The published v0.7 CLI reports this exact fail-closed Audit-v1 category
+// after a candidate Audit-v2 migration, *before* editorial-v3 is inspected.
+// The known category was verified against the actual retained v0.7 binary in
+// GitHub's real PostgreSQL upgrade fixture. Preceding structured diagnostics
+// may exist, but unrelated CLI failure or trailing output is never accepted.
 func retainedOldSchemaDiagnostic(stderr []byte) bool {
-	const expected = "rixa: site site-a editorial: editorial unavailable"
+	const expected = "rixa: component achrix.audit start: audit unavailable"
 	lines := strings.Split(strings.TrimSpace(string(stderr)), "\n")
 	found := false
 	for i, line := range lines {
@@ -964,15 +1026,16 @@ func retainedOldSchemaDiagnostic(stderr []byte) bool {
 }
 
 func TestRetainedOldSchemaDiagnostic(t *testing.T) {
-	const expected = "rixa: site site-a editorial: editorial unavailable"
+	const expected = "rixa: component achrix.audit start: audit unavailable"
 	cases := []struct {
 		name, diagnostic string
 		want             bool
 	}{
 		{"expected", "{\"level\":\"INFO\"}\n" + expected + "\n", true},
 		{"unrelated process failure", "rixa: database connection refused\n", false},
-		{"other editorial failure", "rixa: site site-b editorial: editorial unavailable\n", false},
-		{"partial category", "rixa: site site-a editorial\n", false},
+		{"other component failure", "rixa: site site-a editorial: editorial unavailable\n", false},
+		{"different audit failure", "rixa: component achrix.audit start: schema unavailable\n", false},
+		{"partial category", "rixa: component achrix.audit start\n", false},
 		{"unrelated cli failure before expected", "rixa: invalid configuration\n" + expected + "\n", false},
 		{"expected not terminal", expected + "\nrixa: database connection refused\n", false},
 		{"diagnostic only inside log", "{\"message\":\"" + expected + "\"}\n", false},

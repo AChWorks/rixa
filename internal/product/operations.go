@@ -15,9 +15,22 @@ import (
 	"github.com/AChWorks/achrix/audit"
 	"github.com/AChWorks/achrix/identity"
 	"github.com/AChWorks/achrix/media"
+	"github.com/AChWorks/achrix/oauth"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 const migrationTimeout = 30 * time.Second
+
+// OAuth migration is explicit and site-local; merely loading a binary never
+// installs oauth tables or enables an external endpoint.
+func migrateSiteOAuth(ctx context.Context, dsn string) error {
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	return oauth.Migrate(ctx, pool)
+}
 
 func Migrate(parent context.Context, config Config, getenv func(string) (string, bool)) error {
 	if err := validateDeclaredMediaRoots(config.Sites); err != nil {
@@ -26,6 +39,10 @@ func Migrate(parent context.Context, config Config, getenv func(string) (string,
 	targets, err := config.DatabaseTargets(parent, getenv)
 	if err != nil {
 		return err
+	}
+	enabledRemote := make(map[string]bool, len(config.Sites))
+	for _, site := range config.Sites {
+		enabledRemote[site.ID] = site.Remote != nil && site.Remote.Enabled && !site.Disabled
 	}
 	for _, target := range targets {
 		ctx, cancel := context.WithTimeout(parent, migrationTimeout)
@@ -38,6 +55,9 @@ func Migrate(parent context.Context, config Config, getenv func(string) (string,
 		}
 		if err == nil && target.Kind == DatabaseSite {
 			err = migrateEditorial(ctx, target.DSN, target.ID)
+		}
+		if err == nil && target.Kind == DatabaseSite && enabledRemote[target.ID] {
+			err = migrateSiteOAuth(ctx, target.DSN)
 		}
 		cancel()
 		if err != nil {
@@ -81,6 +101,9 @@ func MigrateAddedSite(parent context.Context, config Config, getenv func(string)
 		}
 		if err == nil {
 			err = migrateEditorial(ctx, target.DSN, target.ID)
+		}
+		if err == nil && config.Sites[1].Remote != nil && config.Sites[1].Remote.Enabled {
+			err = migrateSiteOAuth(ctx, target.DSN)
 		}
 		cancel()
 		if err != nil {
