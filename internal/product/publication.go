@@ -40,6 +40,8 @@ type PublicationRequest struct {
 	ExpectedGeneration string
 	ContentID          string
 	Route              string
+	ThemeRevision      int64
+	UseDefaultTheme    bool
 	// Nonzero target preconditions bind a reviewed selected-site change to the
 	// actual current editorial head/intent. Zero preserves legacy direct paths.
 	ExpectedHead           int64
@@ -55,12 +57,13 @@ type PublicationResult struct {
 }
 
 type PublicationOperation struct {
-	ID          string    `json:"id"`
-	RequestHash string    `json:"request_hash"`
-	Generation  string    `json:"generation"`
-	ContentID   string    `json:"content_id,omitempty"`
-	Route       string    `json:"route,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
+	ID            string    `json:"id"`
+	RequestHash   string    `json:"request_hash"`
+	Generation    string    `json:"generation"`
+	ContentID     string    `json:"content_id,omitempty"`
+	Route         string    `json:"route,omitempty"`
+	ThemeRevision int64     `json:"theme_revision,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 type PublicationState struct {
@@ -112,6 +115,7 @@ type publicationFile struct {
 	Path        string `json:"path"`
 	ContentType string `json:"content_type"`
 	Cache       string `json:"cache"`
+	CSP         string `json:"csp,omitempty"`
 	Robots      string `json:"robots,omitempty"`
 	Size        int64  `json:"size"`
 	SHA256      string `json:"sha256"`
@@ -126,6 +130,7 @@ type publicationManifest struct {
 	CreatedAt          time.Time                   `json:"created_at"`
 	SourceFingerprint  string                      `json:"source_fingerprint"`
 	AppearanceRevision int64                       `json:"appearance_revision"`
+	ThemeRevision      int64                       `json:"theme_revision,omitempty"`
 	Policy             PublicPolicyConfig          `json:"policy"`
 	Operation          PublicationOperation        `json:"operation"`
 	Entries            map[string]publicationEntry `json:"entries"`
@@ -158,6 +163,7 @@ type PublicationService struct {
 	policy    PublicPolicyConfig
 	app       *achrix.Application
 	editorial *EditorialService
+	themes    *ThemeService
 	media     *media.Service
 	slots     chan struct{}
 	applyGate chan struct{}
@@ -218,7 +224,11 @@ func (s *PublicationService) Stop(ctx context.Context) error {
 	if s.lifecycleCancel != nil {
 		s.lifecycleCancel()
 	}
-	return s.drainApplyGate(ctx)
+	err := s.drainApplyGate(ctx)
+	if err == nil && s.themes != nil {
+		s.themes.cleanupPreviews()
+	}
+	return err
 }
 
 func (s *PublicationService) rollbackReady(ctx context.Context) error {
@@ -306,6 +316,9 @@ func (s *PublicationService) Apply(ctx context.Context, actor achrix.Principal, 
 	}
 	stopLifecycleCancel := context.AfterFunc(s.lifecycleCtx, cancel)
 	defer stopLifecycleCancel()
+	if request.ThemeRevision < 0 || (request.UseDefaultTheme && request.ThemeRevision != 0) {
+		return PublicationResult{}, ErrEditorialInvalid
+	}
 	if request.ExpectedGeneration != "" && !validEditorialID(request.ExpectedGeneration) {
 		return PublicationResult{}, ErrEditorialInvalid
 	}
@@ -327,8 +340,19 @@ func (s *PublicationService) Apply(ctx context.Context, actor achrix.Principal, 
 	if err := s.editorial.authorize(ctx, actor, CapabilityPublicationApply, PublicationTarget); err != nil {
 		return PublicationResult{}, err
 	}
+	if request.ThemeRevision > 0 || request.UseDefaultTheme {
+		if s.themes == nil {
+			return PublicationResult{}, ErrEditorialUnavailable
+		}
+		if err := s.themes.authorize(ctx, actor, CapabilityThemePublish); err != nil {
+			return PublicationResult{}, err
+		}
+	}
 
 	hashParts := []string{"publication.apply", string(actor), request.ExpectedGeneration, request.ContentID, request.Route}
+	if request.ThemeRevision > 0 || request.UseDefaultTheme {
+		hashParts = append(hashParts, "theme.revision.v1", strconv.FormatInt(request.ThemeRevision, 10))
+	}
 	if preconditioned {
 		hashParts = append(hashParts, "reviewed-content.v1",
 			strconv.FormatInt(request.ExpectedHead, 10),
@@ -394,6 +418,24 @@ func (s *PublicationService) Apply(ctx context.Context, actor achrix.Principal, 
 	if request.ExpectedGeneration != currentGeneration {
 		return PublicationResult{}, ErrEditorialConflict
 	}
+	selectedTheme := int64(0)
+	if previous != nil {
+		selectedTheme = previous.ThemeRevision
+	}
+	if request.ThemeRevision > 0 || request.UseDefaultTheme {
+		selectedTheme = request.ThemeRevision
+	}
+	var bundle *ThemeBundle
+	if selectedTheme > 0 {
+		if s.themes == nil || !s.themes.enabled() {
+			return PublicationResult{}, ErrEditorialUnavailable
+		}
+		resolved, e := s.themes.loadRevisionTrusted(ctx, selectedTheme)
+		if e != nil {
+			return PublicationResult{}, e
+		}
+		bundle = &resolved.Bundle
+	}
 
 	snapshot, err := s.editorial.store.publicationSnapshot(ctx)
 	if err != nil {
@@ -437,7 +479,7 @@ func (s *PublicationService) Apply(ctx context.Context, actor achrix.Principal, 
 	manifest := &publicationManifest{
 		Version: publicationManifestVersion, SiteID: s.siteID, Origin: s.origin,
 		Generation: generation, CreatedAt: now, SourceFingerprint: snapshot.Fingerprint,
-		AppearanceRevision: snapshot.Appearance.Revision, Policy: s.policy,
+		AppearanceRevision: snapshot.Appearance.Revision, ThemeRevision: selectedTheme, Policy: s.policy,
 		Entries: entries, Routes: routes, Assets: assets,
 		Files: make(map[string]publicationFile),
 	}
@@ -446,7 +488,7 @@ func (s *PublicationService) Apply(ctx context.Context, actor achrix.Principal, 
 	}
 	manifest.Operation = PublicationOperation{
 		ID: request.OperationID, RequestHash: requestHash, Generation: generation,
-		ContentID: request.ContentID, CreatedAt: now,
+		ContentID: request.ContentID, ThemeRevision: selectedTheme, CreatedAt: now,
 	}
 
 	if request.ContentID != "" {
@@ -455,7 +497,7 @@ func (s *PublicationService) Apply(ctx context.Context, actor achrix.Principal, 
 		}
 	}
 
-	renderedBytes, err := renderPublication(publicDir, manifest, snapshot, assets, s.catalog)
+	renderedBytes, err := renderPublication(publicDir, manifest, snapshot, assets, s.catalog, bundle)
 	if err != nil {
 		return PublicationResult{}, err
 	}

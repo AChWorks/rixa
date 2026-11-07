@@ -411,6 +411,12 @@
     },
     "publication_mark_first": {
       "other": "Select a saved revision for publication first. Saving alone does not make anything public."
+    },
+    "site_theme": {
+      "other": "Code-first Site Theme"
+    },
+    "theme_security_notice": {
+      "other": "Trusted site administrators may edit and publish executable public HTML/CSS/JavaScript. Code runs only on the isolated public/preview origin; review third-party scripts, privacy and links before publishing."
     }
   }
 }

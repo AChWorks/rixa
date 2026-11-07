@@ -165,6 +165,10 @@ func (s *editorialStore) ready(parent context.Context) error {
 	if err = conn.QueryRow(ctx, "SELECT to_regclass('rixa.site_grants') IS NOT NULL AND to_regclass('rixa.site_grant_history') IS NOT NULL").Scan(&grantsReady); err != nil || !grantsReady {
 		return ErrEditorialUnavailable
 	}
+	var themeHead int64
+	if err = conn.QueryRow(ctx, "SELECT head_revision FROM rixa.theme_head WHERE singleton=true").Scan(&themeHead); err != nil || themeHead < 0 {
+		return ErrEditorialUnavailable
+	}
 	return nil
 }
 

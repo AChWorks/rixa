@@ -30,6 +30,9 @@ func (s *PublicationService) Ready() error {
 	if err := syncDir(s.root); err != nil {
 		return ErrEditorialUnavailable
 	}
+	if err := cleanupStaleThemePreviews(s.root); err != nil {
+		return err
+	}
 	generationsDir := filepath.Join(s.root, "generations")
 	if err := os.MkdirAll(generationsDir, 0o700); err != nil {
 		return ErrEditorialUnavailable
@@ -67,6 +70,9 @@ func (s *PublicationService) Ready() error {
 				break
 			}
 			return loadErr
+		}
+		if generation.manifest.ThemeRevision > 0 && (s.themes == nil || !s.themes.enabled()) {
+			return ErrEditorialUnavailable
 		}
 		generations = append(generations, generation)
 		next = generation.manifest.ParentGeneration
@@ -154,7 +160,8 @@ func (s *PublicationService) validateManifest(root string, manifest *publication
 		!validEditorialID(manifest.Generation) ||
 		filepath.Base(root) != manifest.Generation ||
 		manifest.CreatedAt.IsZero() || !validSHA256(manifest.SourceFingerprint) ||
-		manifest.AppearanceRevision < 1 {
+		manifest.AppearanceRevision < 1 || manifest.ThemeRevision < 0 ||
+		manifest.Operation.ThemeRevision != manifest.ThemeRevision {
 		return ErrEditorialUnavailable
 	}
 	if manifest.ParentGeneration != "" &&
@@ -204,6 +211,17 @@ func (s *PublicationService) validateManifest(root string, manifest *publication
 			return ErrEditorialUnavailable
 		}
 		if err = verifyFileSHA256(path, meta.SHA256); err != nil {
+			return ErrEditorialUnavailable
+		}
+		if manifest.ThemeRevision > 0 && strings.HasSuffix(key, ".html") {
+			if meta.Size > 3<<20 || meta.CSP == "" {
+				return ErrEditorialUnavailable
+			}
+			markup, readErr := os.ReadFile(path)
+			if readErr != nil || meta.CSP != themeCSP(markup) {
+				return ErrEditorialUnavailable
+			}
+		} else if meta.CSP != "" {
 			return ErrEditorialUnavailable
 		}
 	}
@@ -261,6 +279,32 @@ func (s *PublicationService) validateManifest(root string, manifest *publication
 		if !safeManifestRoute(route) {
 			return ErrEditorialUnavailable
 		}
+		if strings.HasPrefix(route, "/theme-assets/") {
+			if manifest.ThemeRevision == 0 || target.Kind != "file" ||
+				target.File != strings.TrimPrefix(route, "/") {
+				return ErrEditorialUnavailable
+			}
+			name := strings.TrimPrefix(route, "/theme-assets/")
+			parts := strings.SplitN(name, "-", 2)
+			if len(parts) != 2 || !validSHA256(parts[0]) ||
+				(parts[1] != "site.css" && parts[1] != "site.js" && !themeAssetNamePattern.MatchString(parts[1])) {
+				return ErrEditorialUnavailable
+			}
+			meta, ok := manifest.Files[target.File]
+			if !ok || meta.SHA256 != parts[0] {
+				return ErrEditorialUnavailable
+			}
+			switch parts[1] {
+			case "site.css":
+				if meta.ContentType != "text/css; charset=utf-8" {
+					return ErrEditorialUnavailable
+				}
+			case "site.js":
+				if meta.ContentType != "text/javascript; charset=utf-8" {
+					return ErrEditorialUnavailable
+				}
+			}
+		}
 		switch target.Kind {
 		case "file":
 			if !safeGeneratedFilePath(target.File) {
@@ -308,6 +352,12 @@ func safeManifestRoute(value string) bool {
 	}
 	if strings.HasPrefix(value, "/assets/") {
 		return false
+	}
+	if strings.HasPrefix(value, "/theme-assets/") {
+		name := strings.TrimPrefix(value, "/theme-assets/")
+		parts := strings.SplitN(name, "-", 2)
+		return len(parts) == 2 && validSHA256(parts[0]) &&
+			(parts[1] == "site.css" || parts[1] == "site.js" || themeAssetNamePattern.MatchString(parts[1]))
 	}
 	normalized, err := normalizePublicationRoute(value)
 	return err == nil && normalized == value
@@ -563,6 +613,9 @@ func (s *PublicationService) servePublishedFile(w http.ResponseWriter, r *http.R
 
 	setPublicSecurityHeaders(w)
 	w.Header().Set("Content-Type", meta.ContentType)
+	if meta.CSP != "" {
+		w.Header().Set("Content-Security-Policy", meta.CSP)
+	}
 	w.Header().Set("Cache-Control", meta.Cache)
 	w.Header().Set("ETag", "\"sha256-"+meta.SHA256+"\"")
 	if meta.Robots != "" {

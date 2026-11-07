@@ -289,6 +289,11 @@ func TestSiteTransferRejectsDifferentComponentSet(t *testing.T) {
 	site := SiteConfig{ID: "site-a", Origin: "https://a.rixa.test", AdminPrincipal: strings.Repeat("A", 26)}
 	artifact := SiteTransferArtifact{File: "state.dump", Size: 1, SHA256: strings.Repeat("0", 64)}
 	makeManifest := func() SiteTransferManifest {
+		plan := editorialMigrationPlan()
+		ledger := make([]SiteTransferLedgerEntry, len(plan))
+		for i, migration := range plan {
+			ledger[i] = SiteTransferLedgerEntry{Version: i + 1, Identity: migration.identity}
+		}
 		return SiteTransferManifest{
 			Schema: siteTransferSchema, CapturedAt: time.Now(), RixaVersion: Version,
 			AChrixVersion: achrix.Version(), AChrixComponents: FoundationVersions(),
@@ -297,7 +302,7 @@ func TestSiteTransferRejectsDifferentComponentSet(t *testing.T) {
 			SessionPolicy: "excluded-at-capture", GlobalControlPolicy: "not-captured-target-must-recreate-and-remap",
 			Excluded: []string{"identity session rows"}, Database: artifact, MediaArchive: artifact,
 			Ledgers: map[string][]SiteTransferLedgerEntry{
-				"identity": {{Version: 1}}, "audit": {{Version: 1}}, "media": {{Version: 1}}, "rixa": {{Version: 1}},
+				"identity": {{Version: 1}}, "audit": {{Version: 1}}, "media": {{Version: 1}}, "rixa": ledger,
 			},
 		}
 	}
@@ -312,9 +317,17 @@ func TestSiteTransferRejectsDifferentComponentSet(t *testing.T) {
 			delete(m.AChrixComponents, "github.com/AChWorks/achrix/admin")
 			m.AChrixComponents["github.com/AChWorks/achrix/unknown"] = "v0.1.0"
 		},
-		"inconsistent Core":     func(m *SiteTransferManifest) { m.AChrixComponents["github.com/AChWorks/achrix"] = "v9.0.0" },
-		"old schema":            func(m *SiteTransferManifest) { m.Schema = "rixa.site-transfer.v1" },
-		"missing component set": func(m *SiteTransferManifest) { m.AChrixComponents = nil },
+		"inconsistent Core":               func(m *SiteTransferManifest) { m.AChrixComponents["github.com/AChWorks/achrix"] = "v9.0.0" },
+		"old schema":                      func(m *SiteTransferManifest) { m.Schema = "rixa.site-transfer.v1" },
+		"missing component set":           func(m *SiteTransferManifest) { m.AChrixComponents = nil },
+		"old code-free ledger":            func(m *SiteTransferManifest) { m.Ledgers["rixa"] = m.Ledgers["rixa"][:3] },
+		"forged Theme migration identity": func(m *SiteTransferManifest) { m.Ledgers["rixa"][3].Identity = "forged" },
+		"forged Theme source summary":     func(m *SiteTransferManifest) { m.Summary.ThemeRevisions = 2; m.Summary.ThemeHeadRevision = 1 },
+		"single management host":          func(m *SiteTransferManifest) { m.Site.ManagementOrigin = "https://manage.rixa.test" },
+		"identical public and preview host": func(m *SiteTransferManifest) {
+			m.Site.ManagementOrigin = "https://manage.rixa.test"
+			m.Site.PreviewOrigin = site.Origin
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			manifest := makeManifest()

@@ -15,6 +15,7 @@ const (
 	editorialMigrationIdentity        = "rixa-editorial-v1-20261006"
 	editorialMigration2Identity       = "rixa-editorial-v2-20261006"
 	editorialMigration3Identity       = "rixa-editorial-v3-20261031-site-grants"
+	editorialMigration4Identity       = "rixa-editorial-v4-20261107-code-themes"
 	editorialMigrationLock      int64 = 74199742106
 )
 
@@ -44,6 +45,25 @@ CREATE TABLE rixa.site_grant_history (
 );
 `
 
+// Theme revisions are immutable, site-local JSON source bundles. The shared
+// editorial operations ledger records draft mutations; the existing static
+// generation manifest remains the publication/republish receipt.
+const editorialMigration4SQL = `
+CREATE TABLE rixa.theme_revisions (
+    revision bigint PRIMARY KEY CHECK (revision >= 1),
+    bundle jsonb NOT NULL,
+    source_hash text NOT NULL CHECK (char_length(source_hash) = 64),
+    actor text NOT NULL,
+    created_at timestamptz NOT NULL,
+    operation_id text NOT NULL UNIQUE
+);
+CREATE TABLE rixa.theme_head (
+    singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton),
+    head_revision bigint NOT NULL CHECK (head_revision >= 0)
+);
+INSERT INTO rixa.theme_head(singleton,head_revision) VALUES(true,0);
+`
+
 type editorialMigration struct {
 	sql      string
 	identity string
@@ -54,6 +74,7 @@ func editorialMigrationPlan() []editorialMigration {
 		{sql: editorialMigrationSQL, identity: editorialMigrationIdentity},
 		{sql: editorialMigration2SQL, identity: editorialMigration2Identity},
 		{sql: editorialMigration3SQL, identity: editorialMigration3Identity},
+		{sql: editorialMigration4SQL, identity: editorialMigration4Identity},
 	}
 }
 

@@ -111,8 +111,14 @@ func TestNativeUpdatePreStopReadOnlyRealPostgres(t *testing.T) {
 	if _, err = site.Exec(ctx, "INSERT INTO rixa.schema_migrations(version,identity) VALUES(3,$1)", "rixa-editorial-v3-20261031-site-grants"); err != nil {
 		t.Fatal("cannot seed current editorial ledger")
 	}
+	if err := updateEditorialPreflight(ctx, prior); !errors.Is(err, errPreStopEditorialPending) {
+		t.Fatalf("current version 3 is now behind the candidate version 4: %v", err)
+	}
+	if _, err = site.Exec(ctx, "INSERT INTO rixa.schema_migrations(version,identity) VALUES(4,$1)", "rixa-editorial-v4-20261107-code-themes"); err != nil {
+		t.Fatal("cannot seed candidate-current theme ledger")
+	}
 	if err := updateEditorialPreflight(ctx, prior); err != nil {
-		t.Fatalf("current observer ledger must defer to candidate check: %v", err)
+		t.Fatalf("candidate-current observer ledger must defer to candidate check: %v", err)
 	}
 	if err = site.QueryRow(ctx, "SELECT to_regclass('rixa.site_grants') IS NOT NULL").Scan(&grants); err != nil || grants {
 		t.Fatalf("current ledger preflight wrongly installed schema: %v grants=%v", err, grants)
