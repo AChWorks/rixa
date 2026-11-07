@@ -422,7 +422,7 @@ var themeEditorTemplate = template.Must(template.New("theme-editor").Parse(`{{de
 <button type="submit">Publish this revision</button>
 </form></section>
 <section><h3>Portable source bundle</h3>
-<p><a href="/admin/site-theme/export/{{.Current.Revision}}" download>Export current Theme ZIP</a></p>
+<p><a href="/admin/site-theme/export/{{.Current.Revision}}" data-theme-current-export download>Export current Theme ZIP</a></p>
 <form data-admin-form data-theme-import action="/admin/site-theme/import" method="post">
 <input type="hidden" name="operation_id" value="{{.ImportOperationID}}" data-operation-field>
 <input type="hidden" name="expected_head" value="{{.Current.Revision}}" data-theme-expected>

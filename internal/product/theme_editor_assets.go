@@ -38,6 +38,8 @@ const themeEditorJS = `
     root.querySelector("[data-theme-current]").textContent=revision;
     root.querySelectorAll("[data-theme-expected]").forEach(node=>node.value=revision);
     root.querySelectorAll("[data-theme-revision]").forEach(node=>node.value=revision);
+    const exportCurrent=root.querySelector("[data-theme-current-export]");
+    if (exportCurrent) exportCurrent.href="/admin/site-theme/export/"+revision;
   }
   async function loadRevision(revision){
     saveButton.disabled=true;

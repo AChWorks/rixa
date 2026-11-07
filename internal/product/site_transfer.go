@@ -607,6 +607,19 @@ func validateSiteTransferManifest(manifest SiteTransferManifest) error {
 			return fmt.Errorf("%w: missing %s migration ledger", ErrSiteTransfer, ledger)
 		}
 	}
+	// A bundle from the former code-free ledger is not a v4 executable
+	// Theme site even if its Rixa Version says "development". Reject before
+	// creating target directories or restoring a database.
+	plan := editorialMigrationPlan()
+	actual := manifest.Ledgers["rixa"]
+	if len(actual) != len(plan) {
+		return fmt.Errorf("%w: incompatible Rixa Theme migration ledger", ErrSiteTransfer)
+	}
+	for i, migration := range plan {
+		if actual[i].Version != i+1 || actual[i].Identity != migration.identity {
+			return fmt.Errorf("%w: incompatible Rixa Theme migration ledger", ErrSiteTransfer)
+		}
+	}
 	return nil
 }
 
