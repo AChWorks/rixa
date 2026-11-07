@@ -139,9 +139,23 @@ An optional `theme.json` `settings` example:
 }
 ```
 
-Read a public setting using `{{(index .Theme.Settings "brand_color").Value}}`. Supported types: `text` (up to 256 visible characters), six-digit `color`, sanitized `url`. These values are public; never store credentials or private details in Theme settings. Public CSS may be edited independently; asset URLs are resolved at render time for HTML via `asset`.
+Read a public setting using `{{(index .Theme.Settings "brand_color").Value}}`. Supported types: `text` (up to 256 visible characters), six-digit `color`, sanitized `url`. These values are public; never store credentials or private details in Theme settings. Public CSS may be edited independently; asset URLs are resolved at render time for HTML and CSS via `asset`.
 
 Rixa always owns document doctype, `html` language/direction, `title`, `description`, canonical, robots and structured JSON-LD metadata; do **not** supply replacement canonical/title/robots/description in any slot. The static publisher transforms sanitized editorial HTML and private Media references into authorized public image representations **before** calling the Theme renderer.
+
+
+For approved bundled images/fonts in **site.css**, use the same bounded lookup
+inside CSS source; the static publisher resolves and hashes the final CSS:
+
+```css
+.brand { background-image: url({{asset "logo.png"}}); }
+@font-face { font-family: Custom; src: url({{asset "custom.woff2"}}); }
+```
+
+Unknown asset names cause draft validation failure. Browsers only request the
+content-hashed, site-owned public asset URLs; this does not allow private Media
+IDs or remote file paths.
+
 
 ### Portable ZIP format v1
 

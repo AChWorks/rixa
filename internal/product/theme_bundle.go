@@ -18,6 +18,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	texttemplate "text/template"
 	"unicode/utf8"
 )
 
@@ -171,6 +172,9 @@ func (b ThemeBundle) validate() error {
 	if err := verifyThemeExampleRender(b); err != nil {
 		return fmt.Errorf("%w: theme binding: %v", ErrEditorialInvalid, err)
 	}
+	if _, err := resolveThemeCSS(b); err != nil {
+		return fmt.Errorf("%w: CSS asset binding: %v", ErrEditorialInvalid, err)
+	}
 	return nil
 }
 
@@ -201,6 +205,29 @@ type themeRenderBinding struct {
 	Content *themeContentBinding
 	Home    themeHomeBinding
 	Theme   struct{ Settings map[string]ThemeSetting }
+}
+
+// CSS is trusted public source, not HTML. Only explicitly admitted asset
+// names may resolve, and text/template does not insert HTML escaping or
+// expose server functions. The resulting file is immutable and content-hashed.
+func resolveThemeCSS(bundle ThemeBundle) (string, error) {
+	tmpl, err := texttemplate.New("site.css").Option("missingkey=error").Funcs(texttemplate.FuncMap{
+		"asset": func(name string) (string, error) {
+			asset, allowed := bundle.Assets[name]
+			if !allowed {
+				return "", fmt.Errorf("unknown approved theme asset %q", name)
+			}
+			return themeAssetPath(name, asset), nil
+		},
+	}).Parse(bundle.CSS)
+	if err != nil {
+		return "", err
+	}
+	out := &cappedThemeWriter{max: 2 << 20}
+	if err = tmpl.Execute(out, nil); err != nil {
+		return "", err
+	}
+	return out.String(), nil
 }
 
 type cappedThemeWriter struct {

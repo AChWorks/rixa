@@ -59,3 +59,15 @@ jobs:
           NODE_PATH: ${{ runner.temp }}/rixa-theme-playwright/node_modules
           PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/rixa-theme-browsers
         run: bash scripts/lab/run-theme-browser.sh
+
+      - name: Retain public-only visual acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: code-theme-browser-visual-evidence
+          retention-days: 7
+          if-no-files-found: ignore
+          path: |
+            ${{ runner.temp }}/rixa-theme-browser-${{ github.run_id }}-${{ github.run_attempt }}/code-theme-desktop.png
+            ${{ runner.temp }}/rixa-theme-browser-${{ github.run_id }}-${{ github.run_attempt }}/code-theme-mobile.png
+            ${{ runner.temp }}/rixa-theme-browser-${{ github.run_id }}-${{ github.run_attempt }}/browser-evidence.json

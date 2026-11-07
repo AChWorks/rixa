@@ -135,7 +135,11 @@ func stageThemeAssets(publicDir string, manifest *publicationManifest, bundle Th
 		manifest.Routes[url] = publicationRoute{Kind: "file", File: relative}
 		return url, nil
 	}
-	cssURL, err = add("site.css", bundle.CSS, "text/css; charset=utf-8")
+	cssSource, renderErr := resolveThemeCSS(bundle)
+	if renderErr != nil {
+		return "", "", 0, fmt.Errorf("%w: Theme CSS asset reference", ErrEditorialInvalid)
+	}
+	cssURL, err = add("site.css", cssSource, "text/css; charset=utf-8")
 	if err != nil {
 		return "", "", 0, err
 	}

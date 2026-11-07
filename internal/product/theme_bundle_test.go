@@ -34,6 +34,7 @@ func TestThemeBundlePortableRoundTripAndAdmission(t *testing.T) {
 		t.Fatal(err)
 	}
 	bundle.Assets = map[string]ThemeAsset{"logo.png": {MIME: "image/png", Data: content.Bytes()}}
+	bundle.CSS += ".brand{background-image:url(" + `{{asset "logo.png"}}` + ")}"
 	if err := bundle.validate(); err != nil {
 		t.Fatalf("valid bundle rejected: %v", err)
 	}
@@ -64,6 +65,20 @@ func TestThemeBundlePortableRoundTripAndAdmission(t *testing.T) {
 	if strings.Contains(string(archive), "/var/lib/") {
 		t.Fatal("theme bundle references server paths")
 	}
+	root := t.TempDir()
+	manifest := &publicationManifest{
+		SiteID: "site-a", Origin: "https://example.test",
+		Routes: map[string]publicationRoute{}, Files: map[string]publicationFile{},
+	}
+	cssURL, _, _, err := stageThemeAssets(root, manifest, imported)
+	if err != nil {
+		t.Fatal(err)
+	}
+	css, err := os.ReadFile(filepath.Join(root, strings.TrimPrefix(cssURL, "/")))
+	if err != nil || !strings.Contains(string(css), themeAssetPath("logo.png", imported.Assets["logo.png"])) ||
+		strings.Contains(string(css), "{{asset") {
+		t.Fatalf("CSS public asset reference unresolved: %q / %v", css, err)
+	}
 }
 
 func TestThemeBundleRejectsDangerousSources(t *testing.T) {
@@ -74,6 +89,7 @@ func TestThemeBundleRejectsDangerousSources(t *testing.T) {
 		"inline event":       func(b *ThemeBundle) { b.HeaderHTML = `<img src="/x" onerror="alert(1)">` },
 		"external script":    func(b *ThemeBundle) { b.HeaderHTML = `<script src="//evil.test/x.js"></script>` },
 		"unknown context":    func(b *ThemeBundle) { b.HeaderHTML = `{{.Site.SecretKey}}` },
+		"unknown CSS asset":  func(b *ThemeBundle) { b.CSS = "body{background:url(" + `{{asset "inaccessible.jpg"}}` + ")}" },
 		"unknown asset":      func(b *ThemeBundle) { b.HeaderHTML = `{{asset "private.jpg"}}` },
 		"server privilege":   func(b *ThemeBundle) { b.HeaderHTML = `{{env "HOME"}}` },
 		"oversize source":    func(b *ThemeBundle) { b.CSS = strings.Repeat("x", maxThemeSourceBytes+1) },
