@@ -34,6 +34,7 @@ import (
 	"time"
 
 	"github.com/AChWorks/achrix"
+	"github.com/AChWorks/achrix/audit"
 	"github.com/AChWorks/achrix/identity"
 	"github.com/jackc/pgx/v5"
 )
@@ -187,10 +188,12 @@ func TestRetainedReleaseUpgrade(t *testing.T) {
 	assertRetainedFixturePopulated(t, ctx, dsns)
 	backups := captureRetainedPublishedBackups(t, ctx, dsns, config, configPath, beforeFiles)
 
-	// The authentic v0.8 candidate cannot start on the v0.7 editorial-v2
-	// schema. This must fail closed without changing old data: Native Update
-	// currently runs candidate check before migrate, so it cannot yet manage
-	// this transition. Manual explicit migration below is NOT Native Update.
+	// The candidate cannot start on the published v0.7 database: Audit
+	// schema v2 requires an explicit migration, before editorial-v3 readiness
+	// is reached. This must fail closed without changing old data: Native
+	// Update currently runs candidate check before migrate, so it cannot
+	// manage this forward-only transition. Explicit migration below is not
+	// proof of a supported managed Native Update.
 	resolved, err := config.ResolveRuntime(ctx, mapLookup(secrets))
 	if err != nil {
 		t.Fatal(err)
@@ -199,8 +202,8 @@ func TestRetainedReleaseUpgrade(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if checkErr := Check(ctx, beforeMigration); !errors.Is(checkErr, ErrEditorialUnavailable) {
-		t.Fatalf("expected v0.8 schema precheck rejection on v0.7 data, got: %v", checkErr)
+	if checkErr := Check(ctx, beforeMigration); !errors.Is(checkErr, audit.ErrUnavailable) {
+		t.Fatalf("candidate must reject v0.7 data until Audit v2 explicit migration: %v", checkErr)
 	}
 	if !reflect.DeepEqual(snapshotRetainedRows(t, ctx, dsns), beforeRows) {
 		t.Fatal("failed candidate precheck mutated retained database rows")
