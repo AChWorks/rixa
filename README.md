@@ -25,6 +25,8 @@ interactive operator behavior; destructive Purge remains separate. See the
 [operator guide](docs/server-management.md) and
 [Issue #29](https://github.com/AChWorks/rixa/issues/29) for precise evidence.
 
+**Accepted next capability, not shipped:** Site-owned code-first themes will let trusted operators author independent Head/Header/shared Body/Footer HTML plus CSS and browser JavaScript, with safe typed Rixa data bindings, isolated Preview and explicit static Publish. The user/AI contract is documented in [Theme architecture](docs/site-themes.md) and [Human/AI usage](docs/site-themes-usage.md); implementation and exact verification are tracked in [#74](https://github.com/AChWorks/rixa/issues/74), while connected-user MCP support remains separately dependent on [#49](https://github.com/AChWorks/rixa/issues/49). **The code-theme editor, custom JavaScript execution and Theme API/MCP are not delivered by the existing development profile; check the exact selected release and #74 before relying on them.**
+
 ## What you can do
 
 - Run one site or several declared sites from one compatible product build, with separate site databases, accounts and private Media.
@@ -79,6 +81,7 @@ Source builds report `development`; release builds embed their Rixa version. Bot
 | Publication and controlled site transfer | [Static publication](docs/static-publication.md), [site transfer](docs/site-transfer.md) |
 | Release publisher and artifact verification | [Release verification](docs/release-verification.md) |
 | Selected-site saved content and recovery | [Control content guide](docs/selected-site-content.md) |
+| Accepted code-first site Theme architecture, human and AI usage (**not yet shipped**) | [Theme architecture](docs/site-themes.md), [human/AI guide](docs/site-themes-usage.md), [delivery Issue #74](https://github.com/AChWorks/rixa/issues/74) |
 | Guided native server management and recovery | [Native operator guide](docs/server-management.md), [bootstrap recovery](docs/bootstrap-operations.md) |
 | Temporary browser management and the aaPanel native profile | [Browser console guide](docs/management-web.md) |
 | Shared assessment and protected configuration preparation | [Setup operations](docs/setup-operations.md) |
