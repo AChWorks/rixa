@@ -42,7 +42,7 @@ func Migrate(parent context.Context, config Config, getenv func(string) (string,
 	}
 	enabledRemote := make(map[string]bool, len(config.Sites))
 	for _, site := range config.Sites {
-		enabledRemote[site.ID] = site.Remote.Enabled && !site.Disabled
+		enabledRemote[site.ID] = site.Remote != nil && site.Remote.Enabled && !site.Disabled
 	}
 	for _, target := range targets {
 		ctx, cancel := context.WithTimeout(parent, migrationTimeout)
@@ -102,7 +102,7 @@ func MigrateAddedSite(parent context.Context, config Config, getenv func(string)
 		if err == nil {
 			err = migrateEditorial(ctx, target.DSN, target.ID)
 		}
-		if err == nil && config.Sites[1].Remote.Enabled {
+		if err == nil && config.Sites[1].Remote != nil && config.Sites[1].Remote.Enabled {
 			err = migrateSiteOAuth(ctx, target.DSN)
 		}
 		cancel()

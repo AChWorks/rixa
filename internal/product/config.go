@@ -140,7 +140,7 @@ type SiteConfig struct {
 	Origin           string             `json:"origin"`
 	ManagementOrigin string             `json:"management_origin,omitempty"`
 	PreviewOrigin    string             `json:"preview_origin,omitempty"`
-	Remote           RemoteConfig       `json:"remote,omitempty"`
+	Remote           *RemoteConfig      `json:"remote,omitempty"`
 	DatabaseEnv      string             `json:"database_env"`
 	MediaRoot        string             `json:"media_root"`
 	PublicRoot       string             `json:"public_root,omitempty"`
@@ -310,7 +310,7 @@ func (c Config) validateStructure() error {
 		}
 		authorities[authority] = true
 		hostnames[hostname] = true
-		if site.Remote.Enabled && !site.Disabled {
+		if site.Remote != nil && site.Remote.Enabled && !site.Disabled {
 			if site.ManagementOrigin == "" || site.PreviewOrigin == "" ||
 				len(site.Remote.Clients) == 0 || len(site.Remote.Clients) > 128 {
 				return fmt.Errorf("%w: enabled site remote requires isolated management and enrolled clients", ErrConfiguration)

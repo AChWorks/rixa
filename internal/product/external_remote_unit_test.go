@@ -2,6 +2,8 @@
 package product
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"testing"
 )
@@ -15,7 +17,7 @@ func TestRemoteConfigRequiresDeliberateIsolatedOptIn(t *testing.T) {
 				ManagementOrigin: "https://a.manage.example.test",
 				PreviewOrigin:    "https://a.preview.example.test",
 				DatabaseEnv:      "RIXA_A", MediaRoot: "/var/lib/rixa/a",
-				Remote: RemoteConfig{Enabled: true, Clients: []RemoteClientConfig{{
+				Remote: &RemoteConfig{Enabled: true, Clients: []RemoteClientConfig{{
 					ID: "manual-approved-client", RedirectURIs: []string{"https://client.example/cb"}, Enabled: true,
 				}}},
 			}},
@@ -47,6 +49,25 @@ func TestRemoteConfigRequiresDeliberateIsolatedOptIn(t *testing.T) {
 			}
 		})
 	}
+	// Published binaries parse strict JSON: adding an empty optional field
+	// to a legacy config must never make the old binary reject that config.
+	without := valid()
+	without.Sites[0].Remote = nil
+	encoded, err := json.Marshal(without.Sites[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(encoded, []byte(`"remote"`)) {
+		t.Fatalf("a default disabled remote unexpectedly changed old config JSON: %s", encoded)
+	}
+	withRemote, err := json.Marshal(valid().Sites[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(withRemote, []byte(`"remote"`)) {
+		t.Fatal("enabled remote was omitted from the new config")
+	}
+
 	for _, tc := range []struct {
 		name   string
 		modify func(*Config)
@@ -61,7 +82,7 @@ func TestRemoteConfigRequiresDeliberateIsolatedOptIn(t *testing.T) {
 			c.Sites[0].Disabled = true
 			c.Sites[0].Remote.Clients[0].RedirectURIs = []string{"http://needs-repair.example/cb"}
 		}},
-		{"default disabled", func(c *Config) { c.Sites[0].Remote = RemoteConfig{} }},
+		{"default disabled", func(c *Config) { c.Sites[0].Remote = nil }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c := valid()

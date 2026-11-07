@@ -45,7 +45,7 @@ type siteRemote struct {
 
 func newSiteRemote(site ResolvedSite, accounts *identity.Service, editor *EditorialService,
 	access *SiteAccess, siteApp *achrix.Application, operator achrix.Principal, logger *slog.Logger) (*siteRemote, error) {
-	if !site.Remote.Enabled {
+	if site.Remote == nil || !site.Remote.Enabled {
 		return nil, nil
 	}
 	if site.ManagementOrigin == "" || site.PreviewOrigin == "" || accounts == nil || editor == nil ||

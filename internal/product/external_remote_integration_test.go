@@ -49,7 +49,7 @@ func TestRemoteOAuthMCPRealSiteDraftAndRevocation(t *testing.T) {
 			PreviewOrigin: "https://a.preview.remote.test", DatabaseEnv: "RIXA_REMOTE_A",
 			MediaRoot: filepath.Join(dir, "ma"), PublicRoot: filepath.Join(dir, "pa"),
 			PublicPolicy: testPublicPolicy(),
-			Remote: RemoteConfig{Enabled: true, Clients: []RemoteClientConfig{
+			Remote: &RemoteConfig{Enabled: true, Clients: []RemoteClientConfig{
 				{ID: "test-editor", Name: "Test editor", RedirectURIs: []string{remoteTestCallback}, Enabled: true, AllowDraftWrites: true},
 				{ID: "test-reader", Name: "Test reader", RedirectURIs: []string{remoteTestCallback}, Enabled: true},
 			}},
@@ -60,7 +60,7 @@ func TestRemoteOAuthMCPRealSiteDraftAndRevocation(t *testing.T) {
 			PublicPolicy: testPublicPolicy(),
 			// Disabling the connector keeps client registration metadata without
 			// installing its database schema or exposing an MCP/OAuth handler.
-			Remote: RemoteConfig{Enabled: false, Clients: []RemoteClientConfig{{
+			Remote: &RemoteConfig{Enabled: false, Clients: []RemoteClientConfig{{
 				ID: "retained-disabled-client", Name: "Retained but inert",
 				RedirectURIs: []string{remoteTestCallback}, Enabled: true,
 			}}},
@@ -331,7 +331,7 @@ func TestRemoteOAuthMCPRealSiteDraftAndRevocation(t *testing.T) {
 	writerToken := issue("test-editor", writerSession.Token)
 	readerToken := issue("test-editor", readerSession.Token)
 	readonlyClientToken := issue("test-reader", writerSession.Token)
-	mcpCall := func(token, name string, args any) (int, map[string]any) {
+	newMCPRequest := func(token, name string, args any) *http.Request {
 		t.Helper()
 		params := map[string]any{"name": name, "arguments": args}
 		data, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": params})
@@ -346,7 +346,11 @@ func TestRemoteOAuthMCPRealSiteDraftAndRevocation(t *testing.T) {
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Accept", "application/json, text/event-stream")
 		req.Header.Set("Mcp-Protocol-Version", "2025-11-25")
-		res, err := client.Do(req)
+		return req
+	}
+	mcpCall := func(token, name string, args any) (int, map[string]any) {
+		t.Helper()
+		res, err := client.Do(newMCPRequest(token, name, args))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -396,16 +400,21 @@ func TestRemoteOAuthMCPRealSiteDraftAndRevocation(t *testing.T) {
 	input := map[string]any{"operation_id": op1, "kind": "page", "title": "Private first page", "body_html": "<p>Draft one</p>"}
 	requireDenied(readonlyClientToken, remoteCreateTool, input)
 	requireDenied(readerToken, remoteCreateTool, input)
-	created := requireResult(writerToken, remoteCreateTool, input)
-	contentID, _ := created["id"].(string)
-	if !validEditorialID(contentID) || created["revision"] != "1" {
-		t.Fatalf("invalid created draft %#v", created)
+	// A client loses the response body after the request is submitted:
+	// it has the stable operation ID but no output or generated content ID.
+	// Only an authorized own-operation lookup may recover the committed
+	// result; do not send another write with a new operation ID.
+	discarded, err := client.Do(newMCPRequest(writerToken, remoteCreateTool, input))
+	if err != nil {
+		t.Fatal(err)
 	}
-	// Deliberately ignore an acknowledged write response, then reconcile by
-	// author-owned operation ID, never by a new-ID mutation.
+	if err := discarded.Body.Close(); err != nil {
+		t.Fatal(err)
+	}
 	own := requireResult(writerToken, remoteOperationTool, map[string]any{"operation_id": op1})
-	if own["resource_id"] != contentID || own["result_revision"] != "1" {
-		t.Fatalf("lost-response reconciliation failed: %#v", own)
+	contentID, _ := own["resource_id"].(string)
+	if !validEditorialID(contentID) || own["result_revision"] != "1" {
+		t.Fatalf("lost-response reconciliation did not recover the committed result: %#v", own)
 	}
 	requireDenied(readerToken, remoteOperationTool, map[string]any{"operation_id": op1})
 	head := requireResult(readerToken, remoteHeadTool, map[string]any{"id": contentID})
