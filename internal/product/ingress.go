@@ -11,10 +11,10 @@ import (
 )
 
 type ingressHandler struct {
-	runtime          *Runtime
-	controlAuthority string
-	singleAuthority  string
-	singleSiteID     string
+	runtime           *Runtime
+	controlAuthority  string
+	singleAuthorities map[string]bool
+	singleSiteID      string
 }
 
 func newIngressHandler(runtime *Runtime) http.Handler {
@@ -22,7 +22,13 @@ func newIngressHandler(runtime *Runtime) http.Handler {
 	h := &ingressHandler{runtime: runtime, controlAuthority: control}
 	if runtime.router == nil && len(runtime.Config.Sites) == 1 {
 		authority, _ := originAuthority(runtime.Config.Sites[0].Origin)
-		h.singleAuthority = authority
+		h.singleAuthorities = map[string]bool{authority: true}
+		for _, origin := range []string{runtime.Config.Sites[0].ManagementOrigin, runtime.Config.Sites[0].PreviewOrigin} {
+			if origin != "" {
+				additional, _ := originAuthority(origin)
+				h.singleAuthorities[additional] = true
+			}
+		}
 		h.singleSiteID = runtime.Config.Sites[0].ID
 	}
 	return h
@@ -38,7 +44,7 @@ func (h *ingressHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.runtime.router == nil {
-		if r.Host != h.singleAuthority {
+		if !h.singleAuthorities[r.Host] {
 			failIngress(w, http.StatusNotFound)
 			return
 		}

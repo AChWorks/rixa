@@ -1,5 +1,8 @@
 # Code-first site themes: accepted design contract
 
+> **Implementation status (Issue #74):** The code-first implementation is under validation in its dedicated feature branch. The currently published prerelease is not evidence of this feature. Live remote HTTP/MCP/Gateway authentication remains separately dependent on Issue #49. For actual candidate UI routes, configuration, templates, limits, operation examples and remaining gates, see [site-themes-usage.md](site-themes-usage.md).
+
+
 **State:** Owner-approved product direction; **NOT implemented in the current released development profile**. [Rixa #74](https://github.com/AChWorks/rixa/issues/74) owns implementation, exact tests, review and delivery. This document is the product-owned architectural contract, not evidence that any UI, HTTP endpoint, MCP tool or published code-theme artifact exists. The [human and AI usage guide](site-themes-usage.md) gives future operator journeys and examples; use the exact selected release's instructions when this feature ships.
 
 ## Goal and ownership

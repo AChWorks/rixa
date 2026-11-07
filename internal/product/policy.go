@@ -92,6 +92,10 @@ func sitePolicy(siteAdmin, controlOperator achrix.Principal, access *SiteAccess)
 			if resource == AppearanceTarget {
 				return nil
 			}
+		case CapabilityThemeRead, CapabilityThemeEdit, CapabilityThemePreview, CapabilityThemePublish:
+			if resource == ThemeTarget && isAdmin {
+				return nil
+			}
 		case CapabilityOperationRead:
 			if resource == OperationCollectionTarget {
 				return nil

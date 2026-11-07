@@ -29,6 +29,7 @@ type publicPageView struct {
 	Language        string
 	Direction       string
 	Theme           string
+	Kind            ContentKind
 	SiteTitle       string
 	SiteDescription string
 	ShowSiteTitle   bool
@@ -105,7 +106,7 @@ var publicHomeTemplate = template.Must(template.New("public-home").Parse(`<!doct
 {{if .FooterText}}<footer dir="auto">{{.FooterText}}</footer>{{end}}
 </body></html>`))
 
-func renderPublication(publicDir string, manifest *publicationManifest, snapshot publicationSnapshot, assets map[string]publicationAsset, catalog *localize.Catalog) (int64, error) {
+func renderPublication(publicDir string, manifest *publicationManifest, snapshot publicationSnapshot, assets map[string]publicationAsset, catalog *localize.Catalog, theme ...*ThemeBundle) (int64, error) {
 	if manifest == nil {
 		return 0, ErrEditorialUnavailable
 	}
@@ -132,6 +133,19 @@ func renderPublication(publicDir string, manifest *publicationManifest, snapshot
 	sort.Strings(ids)
 
 	var total int64
+	var themeSource *ThemeBundle
+	var themeCSSURL, themeJSURL string
+	if len(theme) != 0 {
+		themeSource = theme[0]
+	}
+	if themeSource != nil {
+		var themeBytes int64
+		themeCSSURL, themeJSURL, themeBytes, err = stageThemeAssets(publicDir, manifest, *themeSource)
+		if err != nil {
+			return 0, err
+		}
+		total += themeBytes
+	}
 	for _, id := range ids {
 		content := contents[id]
 		entry := manifest.Entries[id]
@@ -155,6 +169,7 @@ func renderPublication(publicDir string, manifest *publicationManifest, snapshot
 			Language:        snapshot.Appearance.SiteLanguage,
 			Direction:       locale.Locale().Direction,
 			Theme:           snapshot.Appearance.Theme,
+			Kind:            content.Kind,
 			SiteTitle:       snapshot.Appearance.SiteTitle,
 			SiteDescription: snapshot.Appearance.SiteDescription,
 			ShowSiteTitle:   snapshot.Appearance.HeaderShowTitle,
@@ -170,10 +185,21 @@ func renderPublication(publicDir string, manifest *publicationManifest, snapshot
 			Structured:      template.JS(structured),
 		}
 		var page bytes.Buffer
-		if err = publicPageTemplate.Execute(&page, view); err != nil {
-			return 0, ErrEditorialUnavailable
+		if themeSource == nil {
+			if err = publicPageTemplate.Execute(&page, view); err != nil {
+				return 0, ErrEditorialUnavailable
+			}
+		} else {
+			markup, e := renderThemeHTML(*themeSource, snapshot.Appearance, manifest.Origin, view, nil, themeCSSURL, themeJSURL)
+			if e != nil {
+				return 0, e
+			}
+			page.Write(markup)
 		}
 		n, err := addGeneratedFile(publicDir, manifest, entry.File, page.Bytes(), "text/html; charset=utf-8", generatedFileCache, view.Robots)
+		if err == nil && themeSource != nil {
+			manifest.Files[entry.File] = publicationFileWithThemeCSP(manifest.Files[entry.File], page.Bytes())
+		}
 		if err != nil {
 			return 0, err
 		}
@@ -218,10 +244,21 @@ func renderPublication(publicDir string, manifest *publicationManifest, snapshot
 			Structured:      template.JS(structured),
 		}
 		var home bytes.Buffer
-		if err = publicHomeTemplate.Execute(&home, view); err != nil {
-			return 0, ErrEditorialUnavailable
+		if themeSource == nil {
+			if err = publicHomeTemplate.Execute(&home, view); err != nil {
+				return 0, ErrEditorialUnavailable
+			}
+		} else {
+			markup, e := renderThemeHTML(*themeSource, snapshot.Appearance, manifest.Origin, view, &view, themeCSSURL, themeJSURL)
+			if e != nil {
+				return 0, e
+			}
+			home.Write(markup)
 		}
 		n, err := addGeneratedFile(publicDir, manifest, "home.html", home.Bytes(), "text/html; charset=utf-8", generatedFileCache, view.Robots)
+		if err == nil && themeSource != nil {
+			manifest.Files["home.html"] = publicationFileWithThemeCSP(manifest.Files["home.html"], home.Bytes())
+		}
 		if err != nil {
 			return 0, err
 		}

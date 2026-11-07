@@ -60,7 +60,7 @@ func TestInspectEditorialMigrationsReadOnlyOnIndependentSites(t *testing.T) {
 	// candidate plan but must not initialize the database or imply admission.
 	initial := inspect()
 	for _, site := range initial.Sites {
-		if site.State != "uninitialized" || site.Current != 0 || site.Target != 3 || len(site.Pending) != 3 {
+		if site.State != "uninitialized" || site.Current != 0 || site.Target != 4 || len(site.Pending) != 4 {
 			t.Fatalf("uninitialized state wrongly admitted as an upgrade: %#v", site)
 		}
 	}
@@ -74,8 +74,8 @@ func TestInspectEditorialMigrationsReadOnlyOnIndependentSites(t *testing.T) {
 	seedEditorialV1(t, ctx, dsns["a"])
 	v1 := inspect()
 	if v1.Sites[0].Current != 1 || v1.Sites[0].State != "pending" ||
-		len(v1.Sites[0].Pending) != 2 || v1.Sites[0].Pending[0] != editorialMigration2Identity ||
-		v1.Sites[0].Pending[1] != editorialMigration3Identity {
+		len(v1.Sites[0].Pending) != 3 || v1.Sites[0].Pending[0] != editorialMigration2Identity ||
+		v1.Sites[0].Pending[1] != editorialMigration3Identity || v1.Sites[0].Pending[2] != editorialMigration4Identity {
 		t.Fatalf("v1 pending plan not an exact prefix: %#v", v1.Sites[0])
 	}
 	assertEditorialLedger(t, ctx, dsns["a"], []editorialLedgerRow{{1, editorialMigrationIdentity}})
@@ -94,10 +94,10 @@ func TestInspectEditorialMigrationsReadOnlyOnIndependentSites(t *testing.T) {
 	}
 	v2 := inspect()
 	if v2.Sites[0].State != "pending" || v2.Sites[0].Current != 2 ||
-		len(v2.Sites[0].Pending) != 1 || v2.Sites[0].Pending[0] != editorialMigration3Identity {
+		len(v2.Sites[0].Pending) != 2 || v2.Sites[0].Pending[0] != editorialMigration3Identity || v2.Sites[0].Pending[1] != editorialMigration4Identity {
 		t.Fatalf("actual retained v2 ledger not observed: %#v", v2.Sites[0])
 	}
-	if v2.Sites[1].State != "current" || v2.Sites[1].Current != 3 || len(v2.Sites[1].Pending) != 0 {
+	if v2.Sites[1].State != "current" || v2.Sites[1].Current != 4 || len(v2.Sites[1].Pending) != 0 {
 		t.Fatalf("current independent site not observed: %#v", v2.Sites[1])
 	}
 	assertEditorialLedger(t, ctx, dsns["a"], []editorialLedgerRow{
@@ -117,7 +117,7 @@ func TestInspectEditorialMigrationsReadOnlyOnIndependentSites(t *testing.T) {
 	// Malformed, future or gapped ledgers must stop observation without a
 	// partial success receipt or any migration effects.
 	conn = editorialMigrationConn(t, ctx, dsns["a"])
-	if _, err := conn.Exec(ctx, "INSERT INTO rixa.schema_migrations(version,identity) VALUES(4,'future-v4')"); err != nil {
+	if _, err := conn.Exec(ctx, "INSERT INTO rixa.schema_migrations(version,identity) VALUES(5,'future-v5')"); err != nil {
 		t.Fatal(err)
 	}
 	_ = conn.Close(context.Background())
@@ -125,7 +125,7 @@ func TestInspectEditorialMigrationsReadOnlyOnIndependentSites(t *testing.T) {
 		t.Fatalf("unsupported future ledger admitted: %#v, %v", result, err)
 	}
 	assertEditorialLedger(t, ctx, dsns["a"], []editorialLedgerRow{
-		{1, editorialMigrationIdentity}, {2, editorialMigration2Identity}, {4, "future-v4"},
+		{1, editorialMigrationIdentity}, {2, editorialMigration2Identity}, {5, "future-v5"},
 	})
 
 	// Physical target reuse is rejected by the existing Control/Site identity

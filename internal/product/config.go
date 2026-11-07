@@ -119,14 +119,16 @@ func (p PublicPolicyConfig) validate() error {
 }
 
 type SiteConfig struct {
-	ID             string             `json:"id"`
-	Origin         string             `json:"origin"`
-	DatabaseEnv    string             `json:"database_env"`
-	MediaRoot      string             `json:"media_root"`
-	PublicRoot     string             `json:"public_root,omitempty"`
-	PublicPolicy   PublicPolicyConfig `json:"public_policy,omitempty"`
-	AdminPrincipal string             `json:"admin_principal,omitempty"`
-	Disabled       bool               `json:"disabled,omitempty"`
+	ID               string             `json:"id"`
+	Origin           string             `json:"origin"`
+	ManagementOrigin string             `json:"management_origin,omitempty"`
+	PreviewOrigin    string             `json:"preview_origin,omitempty"`
+	DatabaseEnv      string             `json:"database_env"`
+	MediaRoot        string             `json:"media_root"`
+	PublicRoot       string             `json:"public_root,omitempty"`
+	PublicPolicy     PublicPolicyConfig `json:"public_policy,omitempty"`
+	AdminPrincipal   string             `json:"admin_principal,omitempty"`
+	Disabled         bool               `json:"disabled,omitempty"`
 }
 
 type Config struct {
@@ -290,6 +292,20 @@ func (c Config) validateStructure() error {
 		}
 		authorities[authority] = true
 		hostnames[hostname] = true
+		if (site.ManagementOrigin == "") != (site.PreviewOrigin == "") {
+			return fmt.Errorf("%w: management and preview origins must be configured together", ErrConfiguration)
+		}
+		for _, extra := range []string{site.ManagementOrigin, site.PreviewOrigin} {
+			if extra == "" {
+				continue
+			}
+			additionalAuthority, additionalHost, e := originParts(extra)
+			if e != nil || authorities[additionalAuthority] || hostnames[additionalHost] {
+				return fmt.Errorf("%w: isolated site origins", ErrConfiguration)
+			}
+			authorities[additionalAuthority] = true
+			hostnames[additionalHost] = true
+		}
 		if !envNameSyntax.MatchString(site.DatabaseEnv) || dbEnvs[site.DatabaseEnv] {
 			return fmt.Errorf("%w: site database reference", ErrConfiguration)
 		}
@@ -462,8 +478,13 @@ func validateDirectTLSOrigins(c Config, listenPort string) error {
 	}
 	for _, site := range c.Sites {
 		if !site.Disabled {
-			if err := check(site.Origin); err != nil {
-				return fmt.Errorf("%w: direct TLS site origin must match listener port", ErrConfiguration)
+			for _, origin := range []string{site.Origin, site.ManagementOrigin, site.PreviewOrigin} {
+				if origin == "" {
+					continue
+				}
+				if err := check(origin); err != nil {
+					return fmt.Errorf("%w: direct TLS site origin must match listener port", ErrConfiguration)
+				}
 			}
 		}
 	}
@@ -498,9 +519,14 @@ func validateDirectTLSCertificate(c Config, pair tls.Certificate, now time.Time)
 		if site.Disabled {
 			continue
 		}
-		_, hostname, err := originParts(site.Origin)
-		if err != nil || leaf.VerifyHostname(hostname) != nil {
-			return fmt.Errorf("%w: direct TLS certificate site hostname", ErrConfiguration)
+		for _, origin := range []string{site.Origin, site.ManagementOrigin, site.PreviewOrigin} {
+			if origin == "" {
+				continue
+			}
+			_, hostname, err := originParts(origin)
+			if err != nil || leaf.VerifyHostname(hostname) != nil {
+				return fmt.Errorf("%w: direct TLS certificate site hostname", ErrConfiguration)
+			}
 		}
 	}
 	return nil

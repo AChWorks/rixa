@@ -24,15 +24,18 @@ import (
 )
 
 type SiteRuntime struct {
-	ID          string
-	Origin      string
-	App         *achrix.Application
-	Identity    *identity.Service
-	Media       *media.Service
-	Editorial   *EditorialService
-	Access      *SiteAccess
-	Publication *PublicationService
-	Handler     http.Handler
+	ID               string
+	Origin           string
+	ManagementOrigin string
+	PreviewOrigin    string
+	App              *achrix.Application
+	Identity         *identity.Service
+	Media            *media.Service
+	Editorial        *EditorialService
+	Themes           *ThemeService
+	Access           *SiteAccess
+	Publication      *PublicationService
+	Handler          http.Handler
 
 	adminPrincipal achrix.Principal
 	operator       achrix.Principal
@@ -255,7 +258,11 @@ func buildSite(config Config, site ResolvedSite, adminPrincipal, operator achrix
 	if err != nil {
 		return nil, fmt.Errorf("editorial service: %w", err)
 	}
-	web, err := identity.NewWeb(identityService, site.Origin)
+	managementOrigin := site.Origin
+	if site.ManagementOrigin != "" {
+		managementOrigin = site.ManagementOrigin
+	}
+	web, err := identity.NewWeb(identityService, managementOrigin)
 	if err != nil {
 		return nil, fmt.Errorf("identity web: %w", err)
 	}
@@ -279,6 +286,11 @@ func buildSite(config Config, site ResolvedSite, adminPrincipal, operator achrix
 	if err != nil {
 		return nil, fmt.Errorf("publication service: %w", err)
 	}
+	themes := newThemeService(editorialService, site.ManagementOrigin, site.PreviewOrigin)
+	if publicationService != nil {
+		publicationService.themes = themes
+		themes.publication = publicationService
+	}
 	contentSurface, err := newContentSurface(editorialService, publicationService, adminPrincipal, contentLocales(catalog)...)
 	if err != nil {
 		return nil, fmt.Errorf("content surface: %w", err)
@@ -287,33 +299,39 @@ func buildSite(config Config, site ResolvedSite, adminPrincipal, operator achrix
 	if err != nil {
 		return nil, fmt.Errorf("appearance surface: %w", err)
 	}
+	surfaces := []shell.Surface{accounts, library, contentSurface, appearanceSurface,
+		interfaceLanguageSurface(CapabilityContentList, ContentCollectionTarget, catalog.Locales)}
+	if themes.enabled() && publicationService != nil {
+		themeSurface, e := newThemeSurface(themes)
+		if e != nil {
+			return nil, fmt.Errorf("theme surface: %w", e)
+		}
+		surfaces = append(surfaces, themeSurface)
+	}
 	adminShell, err := shell.New(
-		shell.Config{Origin: site.Origin, AuthPath: "/auth", Language: config.Language, Catalogs: sources, SelectLanguage: selectInterfaceLanguage},
-		authenticator,
-		app,
-		accounts,
-		library,
-		contentSurface,
-		appearanceSurface,
-		interfaceLanguageSurface(CapabilityContentList, ContentCollectionTarget, catalog.Locales),
+		shell.Config{Origin: managementOrigin, AuthPath: "/auth", Language: config.Language, Catalogs: sources, SelectLanguage: selectInterfaceLanguage},
+		authenticator, app, surfaces...,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("admin: %w", err)
 	}
 	management := managementHandler(web, adminShell)
 	return &SiteRuntime{
-		ID:             site.ID,
-		Origin:         site.Origin,
-		App:            app,
-		Identity:       identityService,
-		Media:          mediaService,
-		Editorial:      editorialService,
-		Access:         access,
-		Publication:    publicationService,
-		Handler:        siteRequestHandler(management, publicationService),
-		adminPrincipal: adminPrincipal,
-		operator:       operator,
-		catalogs:       []fs.FS{accounts.Catalogs, library.Catalogs},
+		ID:               site.ID,
+		Origin:           site.Origin,
+		ManagementOrigin: site.ManagementOrigin,
+		PreviewOrigin:    site.PreviewOrigin,
+		App:              app,
+		Identity:         identityService,
+		Media:            mediaService,
+		Editorial:        editorialService,
+		Themes:           themes,
+		Access:           access,
+		Publication:      publicationService,
+		Handler:          isolatedSiteHandler(site, management, publicationService, themes.PreviewHandler()),
+		adminPrincipal:   adminPrincipal,
+		operator:         operator,
+		catalogs:         []fs.FS{accounts.Catalogs, library.Catalogs},
 	}, nil
 }
 
@@ -325,10 +343,23 @@ func buildRouter(config Config, sites []ResolvedSite, logger *slog.Logger) (*rou
 		if err != nil {
 			return nil, ErrConfiguration
 		}
-		authorities[authority] = true
+		authorityList := []string{authority}
+		for _, extra := range []string{site.ManagementOrigin, site.PreviewOrigin} {
+			if extra == "" {
+				continue
+			}
+			additional, e := originAuthority(extra)
+			if e != nil {
+				return nil, ErrConfiguration
+			}
+			authorityList = append(authorityList, additional)
+		}
+		for _, name := range authorityList {
+			authorities[name] = true
+		}
 		inventory = append(inventory, multisite.Site{
 			ID:          multisite.SiteID(site.ID),
-			Authorities: []string{authority},
+			Authorities: authorityList,
 			Disabled:    site.Disabled,
 		})
 	}
@@ -358,6 +389,43 @@ func managementHandler(web *identity.Web, adminShell *shell.Shell) http.Handler 
 	mux.Handle("/admin", localized)
 	mux.Handle("/admin/", localized)
 	return mux
+}
+
+// isolatedSiteHandler prevents the public and preview JavaScript origins from
+// ever serving site authentication or the privileged Admin shell. Distinct
+// hostnames (not path or port aliases) are validated in Config.
+func isolatedSiteHandler(site ResolvedSite, management http.Handler, publication *PublicationService, preview http.Handler) http.Handler {
+	if site.ManagementOrigin == "" {
+		return siteRequestHandler(management, publication) // legacy code-free site
+	}
+	publicAuthority, _ := originAuthority(site.Origin)
+	managementAuthority, _ := originAuthority(site.ManagementOrigin)
+	previewAuthority, _ := originAuthority(site.PreviewOrigin)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.TLS == nil {
+			failIngress(w, http.StatusNotFound)
+			return
+		}
+		switch r.Host {
+		case managementAuthority:
+			if r.URL.Path == "/admin" || strings.HasPrefix(r.URL.Path, "/admin/") ||
+				r.URL.Path == "/auth" || strings.HasPrefix(r.URL.Path, "/auth/") {
+				management.ServeHTTP(w, r)
+				return
+			}
+		case publicAuthority:
+			if publication != nil {
+				publication.ServeHTTP(w, r)
+				return
+			}
+		case previewAuthority:
+			if preview != nil {
+				preview.ServeHTTP(w, r)
+				return
+			}
+		}
+		failIngress(w, http.StatusNotFound)
+	})
 }
 
 func siteRequestHandler(management http.Handler, publication *PublicationService) http.Handler {
