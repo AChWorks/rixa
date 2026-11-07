@@ -194,10 +194,13 @@ func runSelectedSiteBrowserFixture(t *testing.T, publication, picker bool) {
 			t.Fatal("draft browser journey changed Media originals or static publication files")
 		}
 		for table, before := range beforeRows {
-			// Picker-only Browser uses independent site logins. Control database
-			// must remain fully untouched, including sessions and Audit.
-			if picker && strings.HasPrefix(table, "control/") && afterRows[table] != before {
-				t.Fatalf("Picker unexpectedly changed Control database: %s", table)
+			// Control Picker signs into the Control shell, so only its
+			// identity session and audit log may change; no Control account,
+			// capability, inventory or content data may be modified.
+			if picker && strings.HasPrefix(table, "control/") && afterRows[table] != before &&
+				!strings.HasSuffix(table, "/\"identity\".\"sessions\"") &&
+				!strings.HasSuffix(table, "/\"audit\".\"records\"") {
+				t.Fatalf("Picker unexpectedly changed protected Control database table: %s", table)
 			}
 			// Only site sessions/audit and source-editorial effects are accepted here.
 			if selectedSiteMutableTable(table) {
@@ -226,63 +229,78 @@ func runSelectedSiteBrowserFixture(t *testing.T, publication, picker bool) {
 func assertMediaPickerBrowserIsolation(t *testing.T, ctx context.Context, dsns map[string]string, root string, fixture selectedSiteFixtureReceipt) {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join(root, "media-picker-result.json"))
-	if err != nil || len(data) == 0 || len(data) > 4096 {
+	if err != nil || len(data) == 0 || len(data) > 8192 {
 		t.Fatal("missing or oversized real Media Picker browser receipt")
 	}
+	type pickerSaveProof struct {
+		OperationID string `json:"operation_id"`
+		ContentID   string `json:"content_id"`
+		AssetID     string `json:"asset_id"`
+		Revision    string `json:"revision"`
+	}
 	var result struct {
-		Schema       string   `json:"schema"`
-		BinarySHA256 string   `json:"binary_sha256"`
-		Checks       []string `json:"checks"`
-		Sites        map[string]struct {
-			OperationID string `json:"operation_id"`
-			ContentID   string `json:"content_id"`
-			AssetID     string `json:"asset_id"`
-			Revision    string `json:"revision"`
-		} `json:"sites"`
+		Schema        string                     `json:"schema"`
+		BinarySHA256  string                     `json:"binary_sha256"`
+		Checks        []string                   `json:"checks"`
+		Sites         map[string]pickerSaveProof `json:"sites"`
+		ControlChecks []string                   `json:"control_checks"`
+		ControlSites  map[string]pickerSaveProof `json:"control_sites"`
 	}
 	if json.Unmarshal(data, &result) != nil ||
-		result.Schema != "rixa.media-picker-browser.v1" ||
+		result.Schema != "rixa.media-picker-browser.v2" ||
 		result.BinarySHA256 != fixture.BinarySHA256 || len(result.Sites) != 2 ||
-		len(result.Checks) != 2 ||
+		len(result.ControlSites) != 2 || len(result.Checks) != 2 || len(result.ControlChecks) != 2 ||
 		result.Checks[0] != "site-a-picker-ready-site-isolation-fa-en-explicit-save-private-preview" ||
-		result.Checks[1] != "site-b-picker-ready-site-isolation-fa-en-explicit-save-private-preview" {
-		t.Fatal("Media Picker receipt does not prove both real site-browser journeys")
+		result.Checks[1] != "site-b-picker-ready-site-isolation-fa-en-explicit-save-private-preview" ||
+		result.ControlChecks[0] != "site-a-control-scoped-picker-save" ||
+		result.ControlChecks[1] != "site-b-control-scoped-picker-save" {
+		t.Fatal("Media Picker receipt does not prove both Site Admin and Control real browser journeys")
 	}
 	for _, site := range fixture.Sites {
-		proof, ok := result.Sites[site.ID]
-		revision, convertErr := strconv.ParseInt(proof.Revision, 10, 64)
-		if !ok || !validOperationID(proof.OperationID) ||
-			proof.ContentID != site.ContentID || proof.AssetID != site.AssetID ||
-			convertErr != nil || revision <= 56 {
-			t.Fatalf("incomplete Media Picker save evidence for %s", site.ID)
+		siteProof, okSite := result.Sites[site.ID]
+		controlProof, okControl := result.ControlSites[site.ID]
+		if !okSite || !okControl || siteProof.OperationID == controlProof.OperationID {
+			t.Fatalf("missing/duplicated scope operation for %s", site.ID)
 		}
-		// Control is a separate application database without site editorial
-		// tables. Inspect both actual site databases for leaked operations.
-		for dbName, dsn := range map[string]string{"a": dsns["a"], "b": dsns["b"]} {
-			conn, err := pgx.Connect(ctx, dsn)
-			if err != nil {
-				t.Fatal(err)
+		for phase, proof := range map[string]pickerSaveProof{"site-admin": siteProof, "control": controlProof} {
+			revision, convertErr := strconv.ParseInt(proof.Revision, 10, 64)
+			minimum := int64(56)
+			if phase == "control" {
+				minimum = 57
 			}
-			var count int
-			err = conn.QueryRow(ctx, "SELECT count(*) FROM rixa.operations WHERE operation_id=$1 AND kind='content.save' AND resource_id=$2 AND result_revision=$3", proof.OperationID, site.ContentID, revision).Scan(&count)
-			if err == nil {
-				want := 0
-				if dbName == "a" && site.ID == "site-a" || dbName == "b" && site.ID == "site-b" {
-					want = 1
-				}
-				if count != want {
-					err = fmt.Errorf("site %s operation appeared %d times in %s (want %d)", site.ID, count, dbName, want)
-				}
+			if !validOperationID(proof.OperationID) ||
+				proof.ContentID != site.ContentID || proof.AssetID != site.AssetID ||
+				convertErr != nil || revision <= minimum {
+				t.Fatalf("incomplete %s Picker Save proof for %s", phase, site.ID)
 			}
-			if err == nil && count == 1 {
-				err = conn.QueryRow(ctx, "SELECT count(*) FROM rixa.content_media_refs WHERE item_id=$1 AND revision=$2 AND asset_id=$3", site.ContentID, revision, site.AssetID).Scan(&count)
-				if err == nil && count != 1 {
-					err = fmt.Errorf("site %s stored %d exact selected Media references", site.ID, count)
+			// Verify each committed operation and media reference only exist
+			// in its own real PostgreSQL site database, never in the other.
+			for dbName, dsn := range map[string]string{"a": dsns["a"], "b": dsns["b"]} {
+				conn, err := pgx.Connect(ctx, dsn)
+				if err != nil {
+					t.Fatal(err)
 				}
-			}
-			_ = conn.Close(ctx)
-			if err != nil {
-				t.Fatal(err)
+				var count int
+				err = conn.QueryRow(ctx, "SELECT count(*) FROM rixa.operations WHERE operation_id=$1 AND kind='content.save' AND resource_id=$2 AND result_revision=$3", proof.OperationID, site.ContentID, revision).Scan(&count)
+				if err == nil {
+					want := 0
+					if dbName == "a" && site.ID == "site-a" || dbName == "b" && site.ID == "site-b" {
+						want = 1
+					}
+					if count != want {
+						err = fmt.Errorf("%s site %s operation appeared %d times in %s (want %d)", phase, site.ID, count, dbName, want)
+					}
+				}
+				if err == nil && count == 1 {
+					err = conn.QueryRow(ctx, "SELECT count(*) FROM rixa.content_media_refs WHERE item_id=$1 AND revision=$2 AND asset_id=$3", site.ContentID, revision, site.AssetID).Scan(&count)
+					if err == nil && count != 1 {
+						err = fmt.Errorf("%s site %s stored %d exact selected Media references", phase, site.ID, count)
+					}
+				}
+				_ = conn.Close(ctx)
+				if err != nil {
+					t.Fatal(err)
+				}
 			}
 		}
 	}

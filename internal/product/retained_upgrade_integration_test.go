@@ -72,7 +72,7 @@ func TestRetainedReleaseUpgrade(t *testing.T) {
 	}
 	verifyRetainedBaseline(t, binary)
 	// Pin the approved target profile independently of FoundationVersions() so
-	// this published-release upgrade must exercise the actual Media v0.5.0
+	// this published-release upgrade must exercise the actual Media v0.5.1
 	// transition, not quietly accept an accidental future module bump.
 	for module, expected := range map[string]string{
 		"github.com/AChWorks/achrix":              "v0.5.0",
@@ -80,7 +80,7 @@ func TestRetainedReleaseUpgrade(t *testing.T) {
 		"github.com/AChWorks/achrix/audit":        "v0.2.0",
 		"github.com/AChWorks/achrix/identity":     "v0.3.0",
 		"github.com/AChWorks/achrix/installation": "v0.2.0",
-		"github.com/AChWorks/achrix/media":        "v0.5.0",
+		"github.com/AChWorks/achrix/media":        "v0.5.1",
 		"github.com/AChWorks/achrix/multisite":    "v0.1.1",
 	} {
 		if achrix.DependencyVersion(module) != expected {

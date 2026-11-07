@@ -89,8 +89,8 @@ func pickerFail(w http.ResponseWriter, view shell.Request, err error) {
 
 // An authenticated Control Admin request is rooted at:
 // /admin/sites/site/{siteID}/media/picker/{messages|page[/cursor]|asset/{id}}.
-// The official AChrix Picker can mount this endpoint only after the matching
-// public module version is released and consumed. No Picker JS is duplicated.
+// AChrix Media v0.5.1 Picker mounts this endpoint with an explicit site root.
+// The unchanged official script is provided separately on the Control origin.
 func serveControlMediaPicker(manager controlPickerManager, w http.ResponseWriter, r *http.Request, view shell.Request) {
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", "GET")

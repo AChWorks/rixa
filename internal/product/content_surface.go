@@ -52,16 +52,17 @@ type contentIndexView struct {
 	OperationID string
 }
 type contentEditView struct {
-	Routes        contentRoutes
-	DraftOnly     bool
-	PickerEnabled bool
-	NextCursor    string
-	Locale        *localize.Localizer
-	Revision      ContentRevision
-	History       []RevisionSummary
-	Body          template.HTML
-	Publication   PublicationState
-	OperationID   string
+	Routes         contentRoutes
+	DraftOnly      bool
+	PickerEnabled  bool
+	PickerEndpoint string
+	NextCursor     string
+	Locale         *localize.Localizer
+	Revision       ContentRevision
+	History        []RevisionSummary
+	Body           template.HTML
+	Publication    PublicationState
+	OperationID    string
 }
 type contentPreviewView struct {
 	Routes           contentRoutes
@@ -175,7 +176,16 @@ func (h *contentSurface) edit(w http.ResponseWriter, r *http.Request, view shell
 			return
 		}
 	}
-	if err = renderProductPage(view, "edit_content", shell.Page{Template: contentEditTemplate, Data: contentEditView{Locale: view.Localizer, PickerEnabled: h.siteAdmin != "" && view.Principal == h.siteAdmin && view.Allowed != nil && view.Allowed(media.List, media.LibraryTarget), Revision: revision, Routes: h.routes, DraftOnly: h.intentService == nil, History: history.Items, NextCursor: history.NextCursor, Body: body, Publication: publication, OperationID: newOperationID()}}); err != nil {
+	// Site-origin administrators retain the unmodified default Picker route.
+	// A Control actor sees a Picker only while authorized for the exact site.
+	// The Control BFF rechecks this grant and Media List/Select per request.
+	pickerEnabled := h.siteAdmin != "" && view.Principal == h.siteAdmin && view.Allowed != nil && view.Allowed(media.List, media.LibraryTarget)
+	pickerEndpoint := ""
+	if h.routes.SiteID != "" && view.Allowed != nil && view.Allowed(CapabilityControlSiteManage, h.routes.SiteID) {
+		pickerEnabled = true
+		pickerEndpoint = "/admin/sites/site/" + h.routes.SiteID + "/media/picker"
+	}
+	if err = renderProductPage(view, "edit_content", shell.Page{Template: contentEditTemplate, Data: contentEditView{Locale: view.Localizer, PickerEnabled: pickerEnabled, PickerEndpoint: pickerEndpoint, Revision: revision, Routes: h.routes, DraftOnly: h.intentService == nil, History: history.Items, NextCursor: history.NextCursor, Body: body, Publication: publication, OperationID: newOperationID()}}); err != nil {
 		editorialHTTPFail(w, ErrEditorialUnavailable, "")
 	}
 }
@@ -482,9 +492,9 @@ var contentIndexTemplate = template.Must(template.New("content-index").Parse(`{{
 {{define "operation-lookup"}}<section><h2>{{.Locale.Text "rixa" "inspect_mutation_outcome" nil}}</h2><p>{{.Locale.Text "rixa" "unknown_mutation_notice" nil}}</p><form data-admin-form data-read-only data-operation-lookup action="{{.Routes.Base}}/operation" method="post"><label>{{.Locale.Text "rixa" "operation_id" nil}} <input name="operation_id" data-operation-lookup-input dir="ltr" maxlength="36" required></label><button type="submit">{{.Locale.Text "rixa" "inspect" nil}}</button></form></section>{{end}}` + contentScopeTemplates))
 
 var contentEditTemplate = template.Must(template.New("content-edit").Parse(`{{define "content"}}
-<div data-content-workspace data-base="{{.Routes.Base}}" data-site-id="{{.Routes.SiteID}}" data-origin="{{.Routes.Origin}}">{{template "content-scope" .}}<link rel="stylesheet" href="{{.Routes.Assets}}/editor.css">{{if .PickerEnabled}}<script src="/admin/media/picker.js" defer></script>{{end}}<script src="{{.Routes.Assets}}/editor.js" defer></script><p><a href="{{.Routes.Base}}">{{.Locale.Text "rixa" "content_list" nil}}</a></p><p>{{.Locale.Text "rixa" "id" nil}}: <code dir="ltr">{{.Revision.ID}}</code> · {{.Locale.Text "rixa" "revision" nil}} <output data-current-revision>{{.Revision.Revision}}</output></p>
+<div data-content-workspace data-base="{{.Routes.Base}}" data-site-id="{{.Routes.SiteID}}" data-origin="{{.Routes.Origin}}">{{template "content-scope" .}}<link rel="stylesheet" href="{{.Routes.Assets}}/editor.css">{{if .PickerEnabled}}<script src="{{if .PickerEndpoint}}/admin/sites/picker.js{{else}}/admin/media/picker.js{{end}}" defer></script>{{end}}<script src="{{.Routes.Assets}}/editor.js" defer></script><p><a href="{{.Routes.Base}}">{{.Locale.Text "rixa" "content_list" nil}}</a></p><p>{{.Locale.Text "rixa" "id" nil}}: <code dir="ltr">{{.Revision.ID}}</code> · {{.Locale.Text "rixa" "revision" nil}} <output data-current-revision>{{.Revision.Revision}}</output></p>
 <p>{{.Locale.Text "rixa" "save_source_notice" nil}}</p><form data-draft-form data-content-save action="{{.Routes.Base}}/save" method="post"><input type="hidden" name="operation_id" value="{{.OperationID}}" data-operation-field><input type="hidden" name="id" value="{{.Revision.ID}}"><input type="hidden" name="expected_head" value="{{.Revision.Revision}}" data-head-field><textarea name="body_html" data-editor-source hidden></textarea><label>{{.Locale.Text "rixa" "title" nil}} <input name="title" value="{{.Revision.Title}}" maxlength="200" required dir="auto"></label>
-<fieldset><legend>{{.Locale.Text "rixa" "formatting" nil}}</legend><div class="editor-toolbar" role="toolbar"><button type="button" data-wrap="strong" aria-label="{{.Locale.Text "rixa" "bold" nil}}"><strong>B</strong></button><button type="button" data-wrap="em" aria-label="{{.Locale.Text "rixa" "italic" nil}}"><em>I</em></button><button type="button" data-block="p" aria-label="{{.Locale.Text "rixa" "paragraph" nil}}">P</button><button type="button" data-block="h2" aria-label="{{.Locale.Text "rixa" "heading_2" nil}}">H2</button><button type="button" data-block="h3" aria-label="{{.Locale.Text "rixa" "heading_3" nil}}">H3</button></div><label>{{.Locale.Text "rixa" "link_url" nil}} <input data-link-url dir="ltr"></label><button type="button" data-add-link>{{.Locale.Text "rixa" "link_selection" nil}}</button>{{if .PickerEnabled}}<achrix-media-picker accept="image/png,image/jpeg"></achrix-media-picker><p>{{.Locale.Text "rixa" "revision" nil}}: <output data-media-revision dir="ltr">—</output></p>{{end}}<label>{{.Locale.Text "rixa" "media_id" nil}} <input data-media-id dir="ltr" maxlength="26" pattern="[A-Z2-7]{26}"></label><label>{{.Locale.Text "rixa" "media_description" nil}} <input data-media-caption maxlength="300" dir="auto"></label><button type="button" data-add-media>{{.Locale.Text "rixa" "insert_media_reference" nil}}</button></fieldset>
+<fieldset><legend>{{.Locale.Text "rixa" "formatting" nil}}</legend><div class="editor-toolbar" role="toolbar"><button type="button" data-wrap="strong" aria-label="{{.Locale.Text "rixa" "bold" nil}}"><strong>B</strong></button><button type="button" data-wrap="em" aria-label="{{.Locale.Text "rixa" "italic" nil}}"><em>I</em></button><button type="button" data-block="p" aria-label="{{.Locale.Text "rixa" "paragraph" nil}}">P</button><button type="button" data-block="h2" aria-label="{{.Locale.Text "rixa" "heading_2" nil}}">H2</button><button type="button" data-block="h3" aria-label="{{.Locale.Text "rixa" "heading_3" nil}}">H3</button></div><label>{{.Locale.Text "rixa" "link_url" nil}} <input data-link-url dir="ltr"></label><button type="button" data-add-link>{{.Locale.Text "rixa" "link_selection" nil}}</button>{{if .PickerEnabled}}<achrix-media-picker{{if .PickerEndpoint}} endpoint="{{.PickerEndpoint}}"{{end}} accept="image/png,image/jpeg"></achrix-media-picker><p>{{.Locale.Text "rixa" "revision" nil}}: <output data-media-revision dir="ltr">—</output></p>{{end}}<label>{{.Locale.Text "rixa" "media_id" nil}} <input data-media-id dir="ltr" maxlength="26" pattern="[A-Z2-7]{26}"></label><label>{{.Locale.Text "rixa" "media_description" nil}} <input data-media-caption maxlength="300" dir="auto"></label><button type="button" data-add-media>{{.Locale.Text "rixa" "insert_media_reference" nil}}</button></fieldset>
 <div data-editor contenteditable="true" role="textbox" aria-multiline="true" aria-label="{{.Locale.Text "rixa" "content_body" nil}}" dir="auto">{{.Body}}</div><button type="submit">{{.Locale.Text "rixa" "save_revision" nil}}</button></form>
 <p><a data-preview-link href="{{.Routes.Base}}/preview/{{.Revision.ID}}/{{.Revision.Revision}}">{{.Locale.Text "rixa" "preview_revision" nil}}</a></p>
 {{if not .DraftOnly}}<section><h2>{{.Locale.Text "rixa" "publication_intent" nil}}</h2><p>{{.Locale.Text "rixa" "publication_intent_notice" nil}}</p><form data-admin-form data-publication-form action="{{.Routes.Base}}/publication-intent" method="post"><input type="hidden" name="operation_id" value="{{.OperationID}}" data-operation-field><input type="hidden" name="id" value="{{.Revision.ID}}"><input type="hidden" name="expected_head" value="{{.Revision.Revision}}" data-head-field><input type="hidden" name="expected_publication_version" value="{{.Revision.PublicationIntentVersion}}" data-publication-version-field><label>{{.Locale.Text "rixa" "revision" nil}} <input name="revision" value="{{.Revision.Revision}}" data-revision-field inputmode="numeric" pattern="[0-9]+" required></label><button type="submit">{{.Locale.Text "rixa" "set_publication_intent" nil}}</button></form>{{if .Revision.PublicationIntentRevision}}<p>{{.Locale.Text "rixa" "marked_revision" nil}}: <output data-publication-intent-output>{{.Revision.PublicationIntentRevision}}</output></p>{{end}}

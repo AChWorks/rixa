@@ -3,6 +3,7 @@
 package product
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -22,6 +23,7 @@ import (
 	"github.com/AChWorks/achrix/admin/localize"
 	"github.com/AChWorks/achrix/identity"
 	"github.com/AChWorks/achrix/media"
+	mediaadmin "github.com/AChWorks/achrix/media/admin"
 )
 
 const pickerAssetA = "AAAAAAAAAAAAAAAAAAAAAAAAAA"
@@ -277,5 +279,32 @@ func TestControlPickerConcurrentSiteTabs(t *testing.T) {
 	}
 }
 
-// The Control endpoint accepts only metadata GET. A future official Picker
-// script and BFF wiring must not expose the original private file bytes.
+func TestControlPickerServesExactOfficialScriptWithoutMediaService(t *testing.T) {
+	manager := &pickerTestManager{}
+	view := shell.Request{Principal: "control-actor", Language: "en"}
+	req := httptest.NewRequest(http.MethodGet, "https://control.test/picker.js", nil)
+	actual := httptest.NewRecorder()
+	newControlSurface(nil, manager).Handler(actual, req, view)
+	if actual.Code != http.StatusOK || !strings.HasPrefix(actual.Header().Get("Content-Type"), "text/javascript") ||
+		actual.Header().Get("Cache-Control") != "private, no-store" || len(actual.Body.Bytes()) < 1000 {
+		t.Fatalf("Control script: %d %v", actual.Code, actual.Header())
+	}
+	official, err := mediaadmin.New(&media.Service{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected := httptest.NewRecorder()
+	official.Handler(expected, req, view)
+	if expected.Code != http.StatusOK || !bytes.Equal(actual.Body.Bytes(), expected.Body.Bytes()) {
+		t.Fatal("Control served modified or copied Picker instead of the official embedded Media asset")
+	}
+	if len(manager.calls) != 0 {
+		t.Fatal("serving static Picker script reached private Media service")
+	}
+	for _, target := range []string{"/picker/page", "/read/" + pickerAssetA, "/media.js"} {
+		response := pickerTestRequest(t, manager, "control-actor", "en", http.MethodGet, target)
+		if response.Code != http.StatusNotFound {
+			t.Fatalf("non-allowlisted Media route %q: %d", target, response.Code)
+		}
+	}
+}

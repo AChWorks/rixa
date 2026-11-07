@@ -65,7 +65,7 @@ func TestContentEditorPersianMixedDirectionSurface(t *testing.T) {
 	}
 }
 
-func TestContentEditOmitsPickerForControlAndRestrictedUsers(t *testing.T) {
+func TestContentEditOmitsPickerWithoutCurrentSiteManageGrant(t *testing.T) {
 	data := contentEditView{
 		Locale:      testProductLocalizer(t, "fa"),
 		Revision:    ContentRevision{ID: "AAAAAAAAAAAAAAAAAAAAAAAAAA", Kind: ContentPost, Revision: 1},
@@ -76,7 +76,7 @@ func TestContentEditOmitsPickerForControlAndRestrictedUsers(t *testing.T) {
 		t.Fatal(err)
 	}
 	page := output.String()
-	for _, forbidden := range []string{`<achrix-media-picker`, `/admin/media/picker.js`, `data-media-revision`} {
+	for _, forbidden := range []string{`<achrix-media-picker`, `/admin/media/picker.js`, `/admin/sites/picker.js`, `data-media-revision`} {
 		if strings.Contains(page, forbidden) {
 			t.Fatalf("unprivileged/Control editor exposed Picker %q", forbidden)
 		}
