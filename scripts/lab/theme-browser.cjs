@@ -61,6 +61,9 @@ async function main(){
     check((await page.locator("[data-theme-current]").textContent()).trim()==="0","initial Theme is not built-in");
     const body=await page.locator("#theme-body").inputValue();
     check(body.includes(".Content.BodyHTML")&&body.includes(".Home.Items"),"default Theme binding missing");
+    for(const field of ["#theme-header","#theme-css","#theme-js"]){
+      await page.locator("details:has("+field+") > summary").click();
+    }
     await page.locator("#theme-header").fill('<header class="custom"><strong>Theme v1 فارسی</strong></header>');
     await page.locator("#theme-css").fill('body{margin:0;background:#fafafa}.custom{padding:1rem}main{margin-inline:1rem}');
     await page.locator("#theme-js").fill('document.body.dataset.demo="theme-v1";');
