@@ -777,7 +777,17 @@ func snapshotRetainedRows(t *testing.T, ctx context.Context, dsns map[string]str
 		}
 		for _, table := range tables {
 			name := pgx.Identifier{table[0], table[1]}.Sanitize()
-			rows, err = conn.Query(ctx, "SELECT row_to_json(t)::text FROM "+name+" t ORDER BY row_to_json(t)::text")
+			query := "SELECT row_to_json(t)::text FROM " + name + " t ORDER BY row_to_json(t)::text"
+			if table[0] == "audit" && table[1] == "records" {
+				// Audit v0.3's forward-only v2 migration adds five NULL
+				// attribution columns. The old immutable record values are
+				// compared byte-for-byte as JSON with their original column
+				// order; the new columns are verified separately below.
+				query = "SELECT row_to_json(t)::text FROM " +
+					"(SELECT seq,id,actor,action,target,authority,outcome,occurred_at FROM audit.records) t " +
+					"ORDER BY row_to_json(t)::text"
+			}
+			rows, err = conn.Query(ctx, query)
 			if err != nil {
 				t.Fatalf("retained snapshot query failed: %s/%s", scope, name)
 			}
@@ -851,14 +861,58 @@ func snapshotRetainedFiles(t *testing.T, sites []SiteConfig) map[string]string {
 
 func assertRetainedSnapshots(t *testing.T, ctx context.Context, dsns map[string]string, sites []SiteConfig, configPath string, rows, files map[string]string, config []byte) {
 	t.Helper()
-	// The candidate appends Rixa-owned v3 site grants and v4 Code-first Theme
-	// tables. Keep the retained proof strict: only those empty new tables, the
-	// zero-revision Theme head and exact appended migration ledger may differ
-	// from the published v0.7.0 fixture. All older state must be unchanged.
+	// The candidate appends Audit-v2 attribution (five NULL fields on
+	// historical immutable records), and Rixa-owned v3 site grants / v4
+	// Code-first Theme tables. Keep the retained proof strict: the old Audit
+	// records and migration v1 bytes, old state, and historical Rixa ledgers
+	// remain unchanged. Only explicitly verified new schema state differs.
 	after := snapshotRetainedRows(t, ctx, dsns)
 	want := make(map[string]string, len(rows))
 	for key, value := range rows {
 		want[key] = value
+	}
+	for _, scope := range []string{"control", "a", "b"} {
+		key := scope + "/" + (pgx.Identifier{"audit", "schema_migrations"}).Sanitize()
+		if _, exists := want[key]; !exists {
+			t.Fatalf("published baseline lacks Audit migration ledger: %s", key)
+		}
+		conn, err := pgx.Connect(ctx, dsns[scope])
+		if err != nil {
+			t.Fatal(err)
+		}
+		var total, versionMin, versionMax int
+		err = conn.QueryRow(ctx, "SELECT count(*),min(version),max(version) FROM audit.schema_migrations").
+			Scan(&total, &versionMin, &versionMax)
+		if err != nil || total != 2 || versionMin != 1 || versionMax != 2 {
+			_ = conn.Close(ctx)
+			t.Fatalf("Audit must contain exactly authenticated migrations 1 and 2: %s count=%d min=%d max=%d err=%v",
+				scope, total, versionMin, versionMax, err)
+		}
+		var originalLedgerRow string
+		err = conn.QueryRow(ctx, "SELECT row_to_json(t)::text FROM audit.schema_migrations t WHERE version=1").
+			Scan(&originalLedgerRow)
+		originalLedgerHash := sha256.Sum256([]byte(originalLedgerRow + "\n"))
+		if err != nil || want[key] != fmt.Sprintf("1:%x", originalLedgerHash) {
+			_ = conn.Close(ctx)
+			t.Fatalf("Audit migration 1 was modified, or its original checksum changed: %s err=%v", scope, err)
+		}
+		// The additive v2 migration must never invent client/request/actor
+		// attribution for a historical/direct audit event. Audit.Check
+		// independently verifies the migration checksums and constraints.
+		var legacyCount, attributedCount int
+		err = conn.QueryRow(ctx, `
+            SELECT count(*), count(*) FILTER (WHERE client_id IS NOT NULL
+              OR connection_id IS NOT NULL OR channel IS NOT NULL
+              OR request_id IS NOT NULL OR operation IS NOT NULL)
+            FROM audit.records
+        `).Scan(&legacyCount, &attributedCount)
+		_ = conn.Close(ctx)
+		if err != nil || attributedCount != 0 {
+			t.Fatalf("retained Audit records acquired invented attribution: %s total=%d attributed=%d err=%v",
+				scope, legacyCount, attributedCount, err)
+		}
+		delete(after, key)
+		delete(want, key)
 	}
 	for _, scope := range []string{"a", "b"} {
 		ledgerKey := scope + "/" + (pgx.Identifier{"rixa", "schema_migrations"}).Sanitize()
