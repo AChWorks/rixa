@@ -15,6 +15,7 @@ import (
 	shell "github.com/AChWorks/achrix/admin"
 	"github.com/AChWorks/achrix/admin/localize"
 	"github.com/AChWorks/achrix/identity"
+	"github.com/AChWorks/achrix/media"
 )
 
 type controlSiteManager interface {
@@ -55,6 +56,16 @@ func newControlSurface(sites []SiteConfig, service controlSiteManager, languages
 				return
 			}
 			if strings.HasPrefix(r.URL.Path, "/site/") {
+				parts := strings.SplitN(strings.TrimPrefix(r.URL.Path, "/site/"), "/", 3)
+				if len(parts) >= 2 && parts[1] == "media" {
+					manager, ok := service.(controlPickerManager)
+					if !ok {
+						pickerFail(w, view, media.ErrUnavailable)
+						return
+					}
+					serveControlMediaPicker(manager, w, r, view)
+					return
+				}
 				manager, ok := service.(controlDraftManager)
 				if !ok {
 					editorialHTTPFail(w, ErrEditorialUnavailable, "")

@@ -312,6 +312,58 @@ func TestRetainedReleaseUpgrade(t *testing.T) {
 			choice.Message == "" {
 			t.Fatalf("site %d retained picker exact selection mismatch: %v", i, err)
 		}
+		// The selected-site Control BFF exercises the *same retained media*
+		// with a Control-only session and explicit per-request site path.
+		// This is real HTTPS/Admin/PG18/Media, not a browser-side BFF mock.
+		{
+			pickerPath := "/admin/sites/site/" + raw.Sites[i].ID + "/media/picker"
+			var controlReady struct {
+				Assets []struct {
+					ID       string `json:"id"`
+					State    string `json:"state"`
+					MIME     string `json:"mime"`
+					Revision string `json:"revision"`
+				} `json:"assets"`
+			}
+			pageBytes := httpFixture.get("control.rixa.test", pickerPath+"/page", &control, http.StatusOK)
+			if err := json.Unmarshal(pageBytes, &controlReady); err != nil ||
+				len(controlReady.Assets) != 1 || controlReady.Assets[0].ID != site.assetID ||
+				controlReady.Assets[0].State != "ready" || controlReady.Assets[0].MIME != "image/png" ||
+				controlReady.Assets[0].Revision != ready.Assets[0].Revision ||
+				bytes.Contains(pageBytes, []byte("sha256")) || bytes.Contains(pageBytes, []byte("storage_root")) {
+				t.Fatalf("site %d Control picker did not preserve private retained scope: %s %v", i, pageBytes, err)
+			}
+			var controlChoice struct {
+				Asset struct {
+					ID       string `json:"id"`
+					Revision string `json:"revision"`
+				} `json:"asset"`
+				Message string `json:"message"`
+			}
+			selection := httpFixture.get("control.rixa.test", pickerPath+"/asset/"+site.assetID, &control, http.StatusOK)
+			if err := json.Unmarshal(selection, &controlChoice); err != nil ||
+				controlChoice.Asset.ID != site.assetID ||
+				controlChoice.Asset.Revision != ready.Assets[0].Revision || controlChoice.Message == "" {
+				t.Fatalf("site %d Control exact asset selection mismatch: %s %v", i, selection, err)
+			}
+			var messages struct {
+				Locale   string            `json:"locale"`
+				Messages map[string]string `json:"messages"`
+			}
+			localized := httpFixture.get("control.rixa.test", pickerPath+"/messages", &control, http.StatusOK)
+			if err := json.Unmarshal(localized, &messages); err != nil ||
+				messages.Locale != "en" || len(messages.Messages) != len(pickerMessageKeys) {
+				t.Fatalf("site %d Control Picker messages mismatch: %s %v", i, localized, err)
+			}
+			otherSite := sites[1-i]
+			httpFixture.get("control.rixa.test", pickerPath+"/asset/"+otherSite.assetID, &control, http.StatusNotFound)
+			httpFixture.get("control.rixa.test", pickerPath+"/asset/"+site.assetID, &site.session, http.StatusUnauthorized)
+			if i == 0 {
+				for _, blockedSite := range []string{"disabled", "unknown"} {
+					httpFixture.get("control.rixa.test", "/admin/sites/site/"+blockedSite+"/media/picker/messages", &control, http.StatusForbidden)
+				}
+			}
+		}
 		httpFixture.get(site.host, site.assetPath, nil, http.StatusOK)
 		other := sites[1-i]
 		// Neither a valid unknown identity nor another site's retained asset
