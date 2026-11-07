@@ -357,7 +357,19 @@ func TestRetainedReleaseUpgrade(t *testing.T) {
 			}
 			otherSite := sites[1-i]
 			httpFixture.get("control.rixa.test", pickerPath+"/asset/"+otherSite.assetID, &control, http.StatusNotFound)
-			httpFixture.get("control.rixa.test", pickerPath+"/asset/"+site.assetID, &site.session, http.StatusUnauthorized)
+			// The shared Admin shell redirects unauthenticated GET requests;
+			// it returns 401 for POST, so a foreign cookie on this GET must
+			// yield the existing login redirect, never media data.
+			foreignPath := pickerPath + "/asset/" + site.assetID
+			foreignSession, err := httpFixture.request("control.rixa.test", http.MethodGet, foreignPath, "", nil, &site.session)
+			if err != nil {
+				t.Fatalf("foreign Site cookie on Control: %v", err)
+			}
+			if redirect := foreignSession.Header.Get("Location"); redirect != "/admin/login" {
+				foreignSession.Body.Close()
+				t.Fatalf("foreign Site cookie escaped Control authentication: status=%d redirect=%q", foreignSession.StatusCode, redirect)
+			}
+			httpFixture.read(foreignSession, http.MethodGet, foreignPath, http.StatusSeeOther)
 			if i == 0 {
 				for _, blockedSite := range []string{"disabled", "unknown"} {
 					httpFixture.get("control.rixa.test", "/admin/sites/site/"+blockedSite+"/media/picker/messages", &control, http.StatusForbidden)
