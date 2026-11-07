@@ -988,6 +988,9 @@ func inspectSiteTransferDatabaseQuery(parent context.Context, query siteTransfer
 		result.Summary.ThemeHeadRevision != result.Summary.ThemeRevisions {
 		return siteTransferSnapshot{}, fmt.Errorf("%w: summarize immutable Theme history", ErrSiteTransfer)
 	}
+	if err = verifySiteTransferThemeHistory(ctx, query, result.Summary.ThemeHeadRevision); err != nil {
+		return siteTransferSnapshot{}, err
+	}
 
 	rows, err := query.Query(ctx, "SELECT id,revision,size,sha256 FROM media.assets WHERE state='ready' ORDER BY id")
 	if err != nil {
@@ -1012,6 +1015,37 @@ func inspectSiteTransferDatabaseQuery(parent context.Context, query siteTransfer
 		return siteTransferSnapshot{}, fmt.Errorf("%w: content/Media references are not coherent", ErrSiteTransfer)
 	}
 	return result, nil
+}
+
+// Validate every retained private Theme revision while using the existing
+// capture fence or the restored database before roots are activated. Checking
+// count == head alone misses holes and corrupted older drafts.
+func verifySiteTransferThemeHistory(ctx context.Context, query siteTransferDatabaseQuery, head int64) error {
+	rows, err := query.Query(ctx, "SELECT revision,bundle,source_hash FROM rixa.theme_revisions ORDER BY revision")
+	if err != nil {
+		return fmt.Errorf("%w: inspect Theme history", ErrSiteTransfer)
+	}
+	defer rows.Close()
+	expected := int64(1)
+	for rows.Next() {
+		var revision int64
+		var source []byte
+		var hash string
+		if err := rows.Scan(&revision, &source, &hash); err != nil {
+			return fmt.Errorf("%w: read Theme revision", ErrSiteTransfer)
+		}
+		if revision != expected {
+			return fmt.Errorf("%w: noncontiguous Theme history", ErrSiteTransfer)
+		}
+		if _, err := decodeStoredThemeBundle(source, hash); err != nil {
+			return fmt.Errorf("%w: invalid stored Theme revision", ErrSiteTransfer)
+		}
+		expected++
+	}
+	if rows.Err() != nil || expected-1 != head {
+		return fmt.Errorf("%w: incomplete Theme history", ErrSiteTransfer)
+	}
+	return nil
 }
 
 func equalSourceTransferSnapshots(a, b siteTransferSnapshot) bool {

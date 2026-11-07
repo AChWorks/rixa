@@ -271,6 +271,14 @@ func verifyThemeExampleRender(b ThemeBundle) error {
 			return err
 		}
 	}
+	// A conditional Page-only binding must fail during draft validation,
+	// never first fail while staging an actual Page for publication.
+	example.Content.Kind = ContentPage
+	for _, slot := range []string{b.HeadHTML, b.HeaderHTML, b.BodyHTML, b.FooterHTML} {
+		if _, err := executeThemeSlot(slot, b, example); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

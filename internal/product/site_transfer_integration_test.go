@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -217,6 +218,11 @@ func TestSiteTransferRoundTrip(t *testing.T) {
 		t.Fatalf("source shutdown: %v", err)
 	}
 	stopCancel()
+
+	// Use rollback-only corruption fixtures against the same disposable site
+	// database. Both source capture and restored pre-activation inspection
+	// call inspectSiteTransferDatabaseQuery; no corrupt state is committed.
+	assertThemeTransferIntegrityRejections(t, ctx, dsns["source-a"], source.Sites[0].AdminPrincipal)
 
 	aliasCaptureConfig := source
 	aliasCaptureConfig.Sites = append([]SiteConfig(nil), source.Sites...)
@@ -702,4 +708,67 @@ func mustTransferURL(t *testing.T, raw string) *url.URL {
 		t.Fatal(err)
 	}
 	return value
+}
+
+// A capture fence and a restored-target inspection share this exact query
+// path. The mutations stay inside rolled-back transactions: no production,
+// persisted fixture, or actual captured bundle is corrupted by the test.
+func assertThemeTransferIntegrityRejections(t *testing.T, ctx context.Context, dsn, adminPrincipal string) {
+	t.Helper()
+	cases := []struct {
+		name string
+		sql  string
+	}{
+		{"stored source hash mismatch", "UPDATE rixa.theme_revisions SET source_hash=repeat('f',64) WHERE revision=1"},
+		{"missing retained revision", "DELETE FROM rixa.theme_revisions WHERE revision=1"},
+		{"hole with unchanged count and head", "UPDATE rixa.theme_revisions SET revision=3 WHERE revision=1"},
+		{"head/history inconsistency", "UPDATE rixa.theme_head SET head_revision=3 WHERE singleton=true"},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			conn, err := pgx.Connect(ctx, dsn)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer conn.Close(context.Background())
+			tx, err := conn.Begin(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer tx.Rollback(context.Background())
+			if _, err = tx.Exec(ctx, test.sql); err != nil {
+				t.Fatal(err)
+			}
+			if _, err = inspectSiteTransferDatabaseQuery(ctx, tx, adminPrincipal); !errors.Is(err, ErrSiteTransfer) {
+				t.Fatalf("corrupt Theme source accepted during transfer preflight: %v", err)
+			}
+		})
+	}
+	t.Run("invalid Bundle with matching stored hash", func(t *testing.T) {
+		conn, err := pgx.Connect(ctx, dsn)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer conn.Close(context.Background())
+		tx, err := conn.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tx.Rollback(context.Background())
+		bad := defaultThemeBundle()
+		bad.HeaderHTML = `{{if .Content}}{{if eq .Content.Kind "page"}}{{.Content.PageOnlySecret}}{{end}}{{end}}`
+		source, err := json.Marshal(bad)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err = tx.Exec(ctx, "UPDATE rixa.theme_revisions SET bundle=$1::jsonb,source_hash=$2 WHERE revision=2", string(source), bad.sourceHash()); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = inspectSiteTransferDatabaseQuery(ctx, tx, adminPrincipal); !errors.Is(err, ErrSiteTransfer) {
+			t.Fatalf("invalid Theme Bundle with matching hash accepted: %v", err)
+		}
+	})
+	if _, err := inspectSiteTransferDatabase(ctx, dsn, adminPrincipal); err != nil {
+		t.Fatalf("rolled-back negative fixtures changed the source site: %v", err)
+	}
 }

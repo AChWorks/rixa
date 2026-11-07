@@ -86,16 +86,26 @@ func readThemeRevision(ctx context.Context, q interface {
 	if err != nil {
 		return ThemeRevision{}, editorialReadError(err)
 	}
-	if err = json.Unmarshal(source, &value.Bundle); err != nil || value.Bundle.sourceHash() != value.SourceHash {
-		return ThemeRevision{}, ErrEditorialUnavailable
-	}
-	// Values are validated on first creation and when loaded: upgrades/restore
-	// must not turn previously rejected source into executable material.
-	if err = value.Bundle.validate(); err != nil {
-		return ThemeRevision{}, ErrEditorialUnavailable
+	value.Bundle, err = decodeStoredThemeBundle(source, value.SourceHash)
+	if err != nil {
+		return ThemeRevision{}, err
 	}
 	value.CreatedAt = value.CreatedAt.UTC()
 	return value, nil
+}
+
+// The same persisted-source integrity check is used by ordinary revision
+// reads and by capture/restore admission. Do not trust the stored digest or
+// treat a parseable but invalid Theme bundle as a usable private revision.
+func decodeStoredThemeBundle(source []byte, expectedHash string) (ThemeBundle, error) {
+	var bundle ThemeBundle
+	if err := json.Unmarshal(source, &bundle); err != nil || bundle.sourceHash() != expectedHash {
+		return ThemeBundle{}, ErrEditorialUnavailable
+	}
+	if err := bundle.validate(); err != nil {
+		return ThemeBundle{}, ErrEditorialUnavailable
+	}
+	return bundle, nil
 }
 
 func (s *ThemeService) Revision(ctx context.Context, actor achrix.Principal, revision int64) (ThemeRevision, error) {

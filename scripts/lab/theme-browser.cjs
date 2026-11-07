@@ -61,12 +61,16 @@ async function main(){
     check((await page.locator("[data-theme-current]").textContent()).trim()==="0","initial Theme is not built-in");
     const body=await page.locator("#theme-body").inputValue();
     check(body.includes(".Content.BodyHTML")&&body.includes(".Home.Items"),"default Theme binding missing");
+    const tailored=body.replace("{{if .Content}}",
+      '{{if .Content}}{{if eq .Content.Kind "page"}}<aside data-page-only>Page-only branch</aside>{{end}}');
+    check(tailored!==body,"fixture Page branch could not be installed");
     for(const field of ["#theme-header","#theme-css","#theme-js"]){
       await page.locator("details:has("+field+") > summary").click();
     }
     await page.locator("#theme-header").fill('<header class="custom"><strong>Theme v1 فارسی</strong></header>');
     await page.locator("#theme-css").fill('body{margin:0;background:#fafafa}.custom{padding:1rem}main{margin-inline:1rem}');
     await page.locator("#theme-js").fill('document.body.dataset.demo="theme-v1";');
+    await page.locator("#theme-body").fill(tailored);
     await page.locator("[data-theme-save] button[type=submit]").click();
     await waitRevision(1);
     const bundle=await page.evaluate(async()=>{
@@ -74,7 +78,7 @@ async function main(){
       return {status:r.status,json:await r.json()};
     });
     check(bundle.status===200&&bundle.json.header_html.includes("Theme v1 فارسی")&&
-      bundle.json.body_html===body,"saved immutable Theme not loadable");
+      bundle.json.body_html===tailored,"saved immutable Theme not loadable");
     await page.locator("[data-theme-compare-revision]").fill("0");
     await page.locator("[data-theme-compare-trigger]").click();
     await page.locator("[data-theme-diff-output]:not([hidden])").waitFor();
@@ -90,6 +94,48 @@ async function main(){
     check(await before.p.locator("body").getAttribute("data-demo")===null,"Theme draft changed public output");
     await before.p.close();
     passes.push("source-hydration-save-draft-without-publish");
+
+    // Exercise actual Theme POST admission with a syntactically valid draft.
+    // Rejected requests must not create a new source revision.
+    const writePayload=()=>({
+      operation_id:require("node:crypto").randomUUID(),
+      expected_head:"1",
+      head_html:bundle.json.head_html,header_html:bundle.json.header_html,
+      body_html:bundle.json.body_html,footer_html:bundle.json.footer_html,
+      site_css:bundle.json.css,site_js:bundle.json.javascript,
+      settings_json:JSON.stringify(bundle.json.settings||{})
+    });
+    const noToken=await context.request.post(f.management_a+"/admin/site-theme/save",{
+      headers:{"Content-Type":"application/json","Origin":f.management_a,
+        "X-Identity-Request":"1"},data:JSON.stringify(writePayload()),maxRedirects:0
+    });
+    check(noToken.status()===401||noToken.status()===403,
+      "Theme write without CSRF was not rejected: "+noToken.status());
+    const invalidToken=await context.request.post(f.management_a+"/admin/site-theme/save",{
+      headers:{"Content-Type":"application/json","Origin":f.management_a,
+        "X-Identity-Request":"1","X-CSRF-Token":"invalid"},data:JSON.stringify(writePayload()),maxRedirects:0
+    });
+    check(invalidToken.status()===401||invalidToken.status()===403,
+      "Theme write with invalid CSRF was not rejected: "+invalidToken.status());
+    check((await page.locator("[data-theme-current]").textContent()).trim()==="1",
+      "invalid Theme POST modified the revision");
+    const validToken=await page.evaluate(async()=>{
+      const response=await fetch("/auth/csrf",{
+        credentials:"same-origin",headers:{"X-Identity-Request":"1"},
+        referrer:location.origin+"/",referrerPolicy:"same-origin",cache:"no-store"
+      });
+      return response.ok?(await response.json()).csrf:"";
+    });
+    check(validToken.length>20,"active Site Admin did not provide normal CSRF token");
+    const untrustedOrigin=await context.request.post(f.management_a+"/admin/site-theme/save",{
+      headers:{"Content-Type":"application/json","X-Identity-Request":"1",
+        "Origin":"https://outside.localhost","Referer":f.management_a+"/",
+        "X-CSRF-Token":validToken},
+      data:JSON.stringify(writePayload()),maxRedirects:0
+    });
+    check(untrustedOrigin.status()>=400&&untrustedOrigin.status()<500,
+      "Theme write with untrusted Origin was not rejected: "+untrustedOrigin.status());
+    passes.push("theme-save-post-csrf-and-origin-denial");
 
     await page.locator("[data-theme-preview] button[type=submit]").click();
     await page.locator("[data-theme-preview-link]:not([hidden])").waitFor();
@@ -122,6 +168,23 @@ async function main(){
     check(published.r.headers()["content-security-policy"]?.includes("script-src 'self'")&&
       !published.r.headers()["content-security-policy"]?.includes("script-src 'unsafe-inline'"),
       "published static page CSP relaxed");
+    for (const [route, schemaKind, expectedBody] of [
+      [f.post_path,"BlogPosting","Visible HTML body"],
+      [f.page_path,"WebPage","Page-specific published body"]
+    ]) {
+      const result=await newPublic(f.public_a+route);
+      const canonical=await result.p.locator('link[rel="canonical"]').getAttribute("href");
+      const structured=await result.p.locator('script[type="application/ld+json"]').textContent();
+      const content=await result.p.locator("body").textContent();
+      check(canonical===f.public_a+route&&structured.includes(schemaKind)&&
+        content.includes(expectedBody)&&await result.p.locator("html").getAttribute("dir")==="rtl",
+        "Published Theme route, SEO or RTL mismatch: "+schemaKind);
+      const pageOnly=await result.p.locator("[data-page-only]").count();
+      check(pageOnly===(schemaKind==="WebPage"?1:0),
+        "Page-specific template branch wrong for "+schemaKind);
+      await result.p.close();
+    }
+    passes.push("home-post-page-canonical-structured-data-rtl");
     await published.p.screenshot({path:path.join(root,"code-theme-desktop.png"),fullPage:true});
     await published.p.setViewportSize({width:390,height:844});
     await published.p.screenshot({path:path.join(root,"code-theme-mobile.png"),fullPage:true});
@@ -203,7 +266,10 @@ async function main(){
         !await b.locator("#theme-header").inputValue().then(v=>v.includes("Theme v1")),
         "site A Theme source leaked to site B");
       await visit(b,f.public_b);
-      check(!(await b.content()).includes("Theme v1"),"site A publication leaked to site B");
+      check(!(await b.content()).includes("Theme v1")&&
+        await b.locator("html").getAttribute("lang")==="en"&&
+        await b.locator("html").getAttribute("dir")==="ltr",
+        "site A publication leaked to B or English/LTR failed");
       check((await b.goto(f.preview_b+"/")).status()===404,"site B preview exposed without ticket");
     }finally{await siteB.close()}
     passes.push("two-postgres-sites-and-three-origins-isolated");

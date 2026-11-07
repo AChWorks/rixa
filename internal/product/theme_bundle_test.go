@@ -112,6 +112,23 @@ func TestThemeBundleRejectsDangerousSources(t *testing.T) {
 	}
 }
 
+func TestThemeBundleRejectsPageOnlyInvalidBindingAtDraftTime(t *testing.T) {
+	bundle := defaultThemeBundle()
+	bundle.BodyHTML = `{{if .Content}}{{if eq .Content.Kind "page"}}{{.Content.PageOnlySecret}}{{end}}{{.Content.BodyHTML}}{{else}}<main>{{.Site.Title}}</main>{{end}}`
+	if err := bundle.validate(); !errors.Is(err, ErrEditorialInvalid) {
+		t.Fatalf("Page-only invalid field escaped draft validation: %v", err)
+	}
+}
+
+func TestThemeBundleAdmitsValidPageOnlyTemplateBranch(t *testing.T) {
+	bundle := defaultThemeBundle()
+	bundle.BodyHTML = strings.Replace(bundle.BodyHTML, "{{if .Content}}",
+		`{{if .Content}}{{if eq .Content.Kind "page"}}<aside data-page-only>Page</aside>{{end}}`, 1)
+	if err := bundle.validate(); err != nil {
+		t.Fatalf("valid Page-specific conditional rejected: %v", err)
+	}
+}
+
 func TestThemeZIPRejectsTraversalSymlinksAndExtraFiles(t *testing.T) {
 	fixture := defaultThemeBundle()
 	original, err := exportThemeBundle(fixture)
@@ -228,6 +245,24 @@ func TestThemeRenderUsesPublicTransformedHTMLAndCSP(t *testing.T) {
 	home.Structured = template.JS(`{"@type":"WebSite"}`)
 	if _, err := renderThemeHTML(b, appearance, "https://site.test", home, &home, "", ""); err != nil {
 		t.Fatalf("home render: %v", err)
+	}
+	english := Appearance{SiteTitle: "English site", SiteDescription: "About", SiteLanguage: "en"}
+	post := page
+	post.Kind = ContentPost
+	post.Title = "English article"
+	post.Canonical = "https://site.test/posts/example/"
+	post.Structured = template.JS(`{"@type":"BlogPosting"}`)
+	postHTML, err := renderThemeHTML(b, english, "https://site.test", post, nil, "", "")
+	if err != nil {
+		t.Fatalf("English public Post template: %v", err)
+	}
+	for _, want := range []string{`lang="en" dir="ltr"`, `rel="canonical" href="https://site.test/posts/example/"`, `"@type":"BlogPosting"`, `safe-public-photo.png`} {
+		if !strings.Contains(string(postHTML), want) {
+			t.Fatalf("English Post lost published content/SEO: %s", want)
+		}
+	}
+	if strings.Contains(string(postHTML), id) {
+		t.Fatal("English Post leaked private Media identifier")
 	}
 	bad := b
 	bad.BodyHTML = `{{if .Content}}<p>hide</p>{{else}}{{range .Home.Items}}<a href="{{.URL}}">{{.Title}}</a>{{end}}{{end}}{{.Content.BodyHTML}}`

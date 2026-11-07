@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/jackc/pgx/v5"
 	"time"
 
 	"github.com/AChWorks/achrix"
@@ -159,6 +161,18 @@ func TestCodeFirstThemeSiteIsolationPersistencePreviewAndPublication(t *testing.
 	if err != nil || defaultHead.Revision != 0 {
 		t.Fatalf("default Theme not available: %#v / %v", defaultHead, err)
 	}
+	badPageOnly := defaultHead.Bundle
+	badPageOnly.BodyHTML = `{{if .Content}}{{if eq .Content.Kind "page"}}{{.Content.PageOnlySecret}}{{end}}{{.Content.BodyHTML}}{{else}}<main>Home</main>{{end}}`
+	invalidSaveID := newOperationID()
+	if _, err = a.Themes.SaveDraft(ctx, aAdmin, invalidSaveID, 0, badPageOnly); !errors.Is(err, ErrEditorialInvalid) {
+		t.Fatalf("Page-only invalid binding accepted by SaveDraft: %v", err)
+	}
+	if head, headErr := a.Themes.Head(ctx, aAdmin); headErr != nil || head.Revision != 0 {
+		t.Fatalf("rejected Page-only draft mutated source head: %#v / %v", head, headErr)
+	}
+	if _, lookupErr := a.Themes.Operation(ctx, aAdmin, invalidSaveID); !errors.Is(lookupErr, ErrEditorialNotFound) {
+		t.Fatalf("invalid draft unexpectedly committed an operation: %v", lookupErr)
+	}
 	theme1 := defaultHead.Bundle
 	theme1.HeadHTML = `<script>document.documentElement.dataset.themeHook="v1";</script>`
 	theme1.JavaScript = `document.body.dataset.rixa="theme-v1";`
@@ -282,6 +296,40 @@ func TestCodeFirstThemeSiteIsolationPersistencePreviewAndPublication(t *testing.
 	}
 	if current := a.Themes.PublishedRevision(); current != 1 {
 		t.Fatalf("republished previous Theme revision not active: %d", current)
+	}
+
+	// A valid saved revision can become unreadable due to storage corruption.
+	// A failed Theme-specific apply must not replace the active public
+	// generation, install partial assets, or acknowledge the failed operation.
+	conn, err := pgx.Connect(ctx, dsns["a"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = conn.Exec(ctx, "UPDATE rixa.theme_revisions SET source_hash=repeat('f',64) WHERE revision=2"); err != nil {
+		_ = conn.Close(context.Background())
+		t.Fatal(err)
+	}
+	failedPublishID := newOperationID()
+	if _, err = a.Themes.PublishRevision(ctx, aAdmin, failedPublishID, 2, rolled.Generation); !errors.Is(err, ErrEditorialUnavailable) {
+		t.Fatalf("corrupt Theme revision unexpectedly published: %v", err)
+	}
+	if active := a.Publication.State("", ""); active.Generation != rolled.Generation ||
+		a.Themes.PublishedRevision() != 1 {
+		t.Fatalf("failed Theme publication changed the active generation: %#v", active)
+	}
+	if observed := request("a.rixa.test:19443", "/", nil); observed.Code != http.StatusOK ||
+		!strings.Contains(observed.Body.String(), "Theme v1") {
+		t.Fatal("failed Theme publication changed public output")
+	}
+	if _, err = a.Publication.Operation(ctx, aAdmin, failedPublishID); !errors.Is(err, ErrEditorialNotFound) {
+		t.Fatalf("failed Theme publication unexpectedly committed a receipt: %v", err)
+	}
+	if _, err = conn.Exec(ctx, "UPDATE rixa.theme_revisions SET source_hash=$1 WHERE revision=2", saved2.SourceHash); err != nil {
+		_ = conn.Close(context.Background())
+		t.Fatal(err)
+	}
+	if err = conn.Close(ctx); err != nil {
+		t.Fatal(err)
 	}
 
 	newRuntime, err := BuildRuntime(resolved, nil)

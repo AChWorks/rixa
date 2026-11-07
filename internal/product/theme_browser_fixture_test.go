@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -14,6 +15,8 @@ import (
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/AChWorks/achrix"
 )
 
 type themeBrowserReceipt struct {
@@ -26,6 +29,8 @@ type themeBrowserReceipt struct {
 	PreviewA    string `json:"preview_a"`
 	PreviewB    string `json:"preview_b"`
 	ContentID   string `json:"content_id"`
+	PostPath    string `json:"post_path"`
+	PagePath    string `json:"page_path"`
 	GenerationA string `json:"generation_a"`
 	GenerationB string `json:"generation_b"`
 }
@@ -118,6 +123,27 @@ func TestCodeFirstThemeChromiumFixture(t *testing.T) {
 	if a == nil || b == nil {
 		t.Fatal("missing two site runtimes")
 	}
+	// A real content editor can work with content while lacking executable
+	// Theme permissions; the browser proof must exercise that exact account.
+	editor, err := a.Identity.CreateAccount(ctx, a.adminPrincipal, "site-a-editor", "Site-A-Editor-Password-2026!")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = a.Access.Set(ctx, a.adminPrincipal, editor.ID, CapabilityContentEdit, true, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = a.Editorial.Create(ctx, achrix.Principal(editor.ID), newOperationID(), ContentPost, "Editor private draft", "<p>private</p>"); err != nil {
+		t.Fatalf("content editor lost ordinary editing permission: %v", err)
+	}
+	if _, err = a.Themes.Head(ctx, achrix.Principal(editor.ID)); !errors.Is(err, achrix.ErrDenied) {
+		t.Fatalf("ordinary content editor acquired Theme permission: %v", err)
+	}
+	if _, err = a.Themes.SaveDraft(ctx, achrix.Principal(editor.ID), newOperationID(), 0, defaultThemeBundle()); !errors.Is(err, achrix.ErrDenied) {
+		t.Fatalf("ordinary content editor acquired Theme write permission: %v", err)
+	}
+	if _, err = a.Themes.SaveDraft(ctx, b.adminPrincipal, newOperationID(), 0, defaultThemeBundle()); !errors.Is(err, achrix.ErrDenied) {
+		t.Fatalf("foreign-site administrator acquired Theme write permission: %v", err)
+	}
 	appearance, err := a.Editorial.Appearance(ctx, a.adminPrincipal)
 	if err != nil {
 		t.Fatal(err)
@@ -132,6 +158,13 @@ func TestCodeFirstThemeChromiumFixture(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err = a.Editorial.SetPublicationIntent(ctx, a.adminPrincipal, newOperationID(), post.ID, 1, 1, 1); err != nil {
+		t.Fatal(err)
+	}
+	page, err := a.Editorial.Create(ctx, a.adminPrincipal, newOperationID(), ContentPage, "English page proof", "<p>Page-specific published body</p>")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = a.Editorial.SetPublicationIntent(ctx, a.adminPrincipal, newOperationID(), page.ID, 1, 1, 1); err != nil {
 		t.Fatal(err)
 	}
 	publicationA, err := a.Publication.Apply(ctx, a.adminPrincipal, PublicationRequest{OperationID: newOperationID()})
@@ -167,7 +200,9 @@ func TestCodeFirstThemeChromiumFixture(t *testing.T) {
 		ManagementB: config.Sites[1].ManagementOrigin,
 		PublicA:     config.Sites[0].Origin, PublicB: config.Sites[1].Origin,
 		PreviewA: config.Sites[0].PreviewOrigin, PreviewB: config.Sites[1].PreviewOrigin,
-		ContentID: post.ID, GenerationA: publicationA.Generation, GenerationB: publicationB.Generation,
+		ContentID: post.ID, PostPath: defaultPublicationRoute(ContentPost, post.ID),
+		PagePath:    defaultPublicationRoute(ContentPage, page.ID),
+		GenerationA: publicationA.Generation, GenerationB: publicationB.Generation,
 	}
 	serialized, err := json.MarshalIndent(receipt, "", "  ")
 	if err != nil {
