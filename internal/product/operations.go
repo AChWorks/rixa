@@ -257,6 +257,25 @@ func (s *ControlService) ListSiteMedia(ctx context.Context, actor achrix.Princip
 	return site.Media.List(ctx, site.operator, cursor, limit)
 }
 
+// AuthorizeSiteMedia checks both the current Control-site grant and the
+// selected site's existing Media collection policy. It grants nothing new.
+func (s *ControlService) AuthorizeSiteMedia(ctx context.Context, actor achrix.Principal, siteID string) error {
+	site, err := s.site(ctx, actor, siteID)
+	if err != nil {
+		return err
+	}
+	return site.App.Authorize(ctx, site.operator, media.List, media.LibraryTarget)
+}
+
+// SelectSiteMedia is a current, site-bound exact-asset check, never Read.
+func (s *ControlService) SelectSiteMedia(ctx context.Context, actor achrix.Principal, siteID, assetID string) (media.Selection, error) {
+	site, err := s.site(ctx, actor, siteID)
+	if err != nil {
+		return media.Selection{}, err
+	}
+	return site.Media.Select(ctx, site.operator, assetID)
+}
+
 func (s *ControlService) ReadSiteMedia(ctx context.Context, actor achrix.Principal, siteID, assetID string) (media.Asset, []byte, error) {
 	site, err := s.site(ctx, actor, siteID)
 	if err != nil {

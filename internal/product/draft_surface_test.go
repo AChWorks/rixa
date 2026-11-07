@@ -118,6 +118,16 @@ func TestSelectedDraftRoutesBindOriginalActorAndOnePathScope(t *testing.T) {
 			if len(s.calls) == 0 {
 				t.Fatal("selected action bypassed service")
 			}
+			if strings.Contains(path, "/edit/") {
+				for _, expected := range []string{`src="/admin/sites/picker.js"`, `<achrix-media-picker endpoint="/admin/sites/site/site-a/media/picker" accept="image/png,image/jpeg">`} {
+					if !strings.Contains(page, expected) {
+						t.Fatalf("Control Picker missing exact site binding %q", expected)
+					}
+				}
+				if strings.Contains(page, `/admin/media/picker.js`) {
+					t.Fatal("Control editor borrowed Site Admin Picker script")
+				}
+			}
 			for _, forbidden := range []string{"/admin/content/", "/publication-intent", "/publish", "<title>", "StorageRoot"} {
 				if strings.Contains(page, forbidden) {
 					t.Fatalf("selected draft leaked %q", forbidden)

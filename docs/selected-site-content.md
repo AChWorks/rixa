@@ -8,11 +8,11 @@ The content list and revision history have bounded pages. Follow **More content*
 
 Private preview requires administration authority. Root-relative content links point to the selected site's declared public origin. Private originals remain private attachments/placeholders; preview does not authorize their publication.
 
-## Private Media selection (site administration)
+## Private Media selection (Site Admin and Control)
 
 The site's own **Content** editor offers the official AChrix Media Picker to the authenticated site administrator. It lists only that site's ready Media metadata, and an exact asset selection fills the ID and decimal-string revision in the editor's proposed reference controls. Choosing does **not** save a draft, read a private original, or publish content. Inserting a figure and saving still require current site and asset authorization, supported image MIME, and saved-revision/operation checks; publication is separate. Uploaded originals stay private.
 
-The Control-origin **Manage content** editor still uses its known-ID input, **not** a Picker: Media v0.5.0 hardcodes a same-origin `/admin/media/picker` endpoint and cannot safely address the selected site there. Editors without whole-library `media.List` cannot browse merely because they can edit content; no new Media.Read or collection grants are implied. The manual-ID field never bypasses reference authorization. A future explicitly site-bound Control adapter or narrower discovery contract needs separate acceptance under [Rixa #70](https://github.com/AChWorks/rixa/issues/70) and [AChrix #140](https://github.com/AChWorks/achrix/issues/140).
+The Control-origin **Manage content** editor composes the official AChrix Media v0.5.1 Picker against an **explicit selected-site endpoint** (`/admin/sites/site/{siteID}/media/picker`). Control serves the unchanged component script from `/admin/sites/picker.js`; requests carry the Control session only, recheck the Control actor's current site-management grant and the selected site's `media.List` and per-asset `media.Select`, and never borrow Site Admin cookies or ambient site state. The existing manual-ID field stays available; selection proposes only a reference and never saves content without an explicit Save with current authorization, ready-state and image-MIME checks. Restricted editors without whole-library `media.List` cannot browse by virtue of content-edit rights alone; no extra Media.Read or collection grant is implied. See [Rixa #70](https://github.com/AChWorks/rixa/issues/70) and [AChrix Media v0.5.1 Picker contract](https://github.com/AChWorks/achrix/blob/media/v0.5.1/media/admin/README.md#optional-composable-picker).
 
 ## Publishing or withdrawing from one selected site
 

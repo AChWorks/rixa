@@ -15,6 +15,8 @@ import (
 	shell "github.com/AChWorks/achrix/admin"
 	"github.com/AChWorks/achrix/admin/localize"
 	"github.com/AChWorks/achrix/identity"
+	"github.com/AChWorks/achrix/media"
+	mediaadmin "github.com/AChWorks/achrix/media/admin"
 )
 
 type controlSiteManager interface {
@@ -44,6 +46,19 @@ func newControlSurface(sites []SiteConfig, service controlSiteManager, languages
 		Title:      shell.Text{Domain: "rixa", Key: "sites"},
 		Capability: CapabilityControlInventoryRead,
 		Handler: func(w http.ResponseWriter, r *http.Request, view shell.Request) {
+			// Serve the official embedded Media component from the Control origin.
+			// Only its immutable script route is delegated; no Media service
+			// operations, site session or private-file route are composed here.
+			if r.Method == http.MethodGet && r.URL.Path == "/picker.js" {
+				mediaSurface, err := mediaadmin.New(&media.Service{})
+				if err != nil {
+					pickerFail(w, view, err)
+					return
+				}
+				w.Header().Set("Cache-Control", "private, no-store")
+				mediaSurface.Handler(w, r, view)
+				return
+			}
 			if r.Method == http.MethodGet && (r.URL.Path == "/editor.js" || r.URL.Path == "/editor.css") {
 				if r.URL.Path == "/editor.js" {
 					w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
@@ -55,6 +70,16 @@ func newControlSurface(sites []SiteConfig, service controlSiteManager, languages
 				return
 			}
 			if strings.HasPrefix(r.URL.Path, "/site/") {
+				parts := strings.SplitN(strings.TrimPrefix(r.URL.Path, "/site/"), "/", 3)
+				if len(parts) >= 2 && parts[1] == "media" {
+					manager, ok := service.(controlPickerManager)
+					if !ok {
+						pickerFail(w, view, media.ErrUnavailable)
+						return
+					}
+					serveControlMediaPicker(manager, w, r, view)
+					return
+				}
 				manager, ok := service.(controlDraftManager)
 				if !ok {
 					editorialHTTPFail(w, ErrEditorialUnavailable, "")

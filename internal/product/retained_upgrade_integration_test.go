@@ -72,7 +72,7 @@ func TestRetainedReleaseUpgrade(t *testing.T) {
 	}
 	verifyRetainedBaseline(t, binary)
 	// Pin the approved target profile independently of FoundationVersions() so
-	// this published-release upgrade must exercise the actual Media v0.5.0
+	// this published-release upgrade must exercise the actual Media v0.5.1
 	// transition, not quietly accept an accidental future module bump.
 	for module, expected := range map[string]string{
 		"github.com/AChWorks/achrix":              "v0.5.0",
@@ -80,7 +80,7 @@ func TestRetainedReleaseUpgrade(t *testing.T) {
 		"github.com/AChWorks/achrix/audit":        "v0.2.0",
 		"github.com/AChWorks/achrix/identity":     "v0.3.0",
 		"github.com/AChWorks/achrix/installation": "v0.2.0",
-		"github.com/AChWorks/achrix/media":        "v0.5.0",
+		"github.com/AChWorks/achrix/media":        "v0.5.1",
 		"github.com/AChWorks/achrix/multisite":    "v0.1.1",
 	} {
 		if achrix.DependencyVersion(module) != expected {
@@ -311,6 +311,70 @@ func TestRetainedReleaseUpgrade(t *testing.T) {
 			choice.Asset.ID != site.assetID || choice.Asset.Revision != ready.Assets[0].Revision ||
 			choice.Message == "" {
 			t.Fatalf("site %d retained picker exact selection mismatch: %v", i, err)
+		}
+		// The selected-site Control BFF exercises the *same retained media*
+		// with a Control-only session and explicit per-request site path.
+		// This is real HTTPS/Admin/PG18/Media, not a browser-side BFF mock.
+		{
+			pickerPath := "/admin/sites/site/" + raw.Sites[i].ID + "/media/picker"
+			var controlReady struct {
+				Assets []struct {
+					ID       string `json:"id"`
+					State    string `json:"state"`
+					MIME     string `json:"mime"`
+					Revision string `json:"revision"`
+				} `json:"assets"`
+			}
+			pageBytes := httpFixture.get("control.rixa.test", pickerPath+"/page", &control, http.StatusOK)
+			if err := json.Unmarshal(pageBytes, &controlReady); err != nil ||
+				len(controlReady.Assets) != 1 || controlReady.Assets[0].ID != site.assetID ||
+				controlReady.Assets[0].State != "ready" || controlReady.Assets[0].MIME != "image/png" ||
+				controlReady.Assets[0].Revision != ready.Assets[0].Revision ||
+				bytes.Contains(pageBytes, []byte("sha256")) || bytes.Contains(pageBytes, []byte("storage_root")) {
+				t.Fatalf("site %d Control picker did not preserve private retained scope: %s %v", i, pageBytes, err)
+			}
+			var controlChoice struct {
+				Asset struct {
+					ID       string `json:"id"`
+					Revision string `json:"revision"`
+				} `json:"asset"`
+				Message string `json:"message"`
+			}
+			selection := httpFixture.get("control.rixa.test", pickerPath+"/asset/"+site.assetID, &control, http.StatusOK)
+			if err := json.Unmarshal(selection, &controlChoice); err != nil ||
+				controlChoice.Asset.ID != site.assetID ||
+				controlChoice.Asset.Revision != ready.Assets[0].Revision || controlChoice.Message == "" {
+				t.Fatalf("site %d Control exact asset selection mismatch: %s %v", i, selection, err)
+			}
+			var messages struct {
+				Locale   string            `json:"locale"`
+				Messages map[string]string `json:"messages"`
+			}
+			localized := httpFixture.get("control.rixa.test", pickerPath+"/messages", &control, http.StatusOK)
+			if err := json.Unmarshal(localized, &messages); err != nil ||
+				messages.Locale != "en" || len(messages.Messages) != len(pickerMessageKeys) {
+				t.Fatalf("site %d Control Picker messages mismatch: %s %v", i, localized, err)
+			}
+			otherSite := sites[1-i]
+			httpFixture.get("control.rixa.test", pickerPath+"/asset/"+otherSite.assetID, &control, http.StatusNotFound)
+			// The shared Admin shell redirects unauthenticated GET requests;
+			// it returns 401 for POST, so a foreign cookie on this GET must
+			// yield the existing login redirect, never media data.
+			foreignPath := pickerPath + "/asset/" + site.assetID
+			foreignSession, err := httpFixture.request("control.rixa.test", http.MethodGet, foreignPath, "", nil, &site.session)
+			if err != nil {
+				t.Fatalf("foreign Site cookie on Control: %v", err)
+			}
+			if redirect := foreignSession.Header.Get("Location"); redirect != "/admin/login" {
+				foreignSession.Body.Close()
+				t.Fatalf("foreign Site cookie escaped Control authentication: status=%d redirect=%q", foreignSession.StatusCode, redirect)
+			}
+			httpFixture.read(foreignSession, http.MethodGet, foreignPath, http.StatusSeeOther)
+			if i == 0 {
+				for _, blockedSite := range []string{"disabled", "unknown"} {
+					httpFixture.get("control.rixa.test", "/admin/sites/site/"+blockedSite+"/media/picker/messages", &control, http.StatusForbidden)
+				}
+			}
 		}
 		httpFixture.get(site.host, site.assetPath, nil, http.StatusOK)
 		other := sites[1-i]
