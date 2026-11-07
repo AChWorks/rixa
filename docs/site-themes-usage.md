@@ -256,3 +256,5 @@ Standard error body is `{"code":"invalid_input|permission_denied|not_found|confl
 | Public page responds at /admin or carries session cookie | Treat as a trust-boundary defect; stop enablement/release until fixed. |
 
 **Still required before acceptance:** actual PostgreSQL and retained-state/transfer proof, real Chromium HTTPS evidence, security-negative testing, verified independent high-assurance review, and separate Owner approval for Merge/release/Production. Do not mark #74 accepted based on this guide alone.
+
+For an opt-in staging-only, account-authorized MCP content integration, see [Experimental remote content](remote-content.md). This does not yet expose remote Theme authoring or publishing.

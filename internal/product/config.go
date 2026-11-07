@@ -118,11 +118,29 @@ func (p PublicPolicyConfig) validate() error {
 	return nil
 }
 
+// RemoteClientConfig is an operator pre-enrolled, explicit client ceiling.
+// Approval and compatible metadata inspection happen outside OAuth requests.
+type RemoteClientConfig struct {
+	ID               string   `json:"id"`
+	Name             string   `json:"name,omitempty"`
+	RedirectURIs     []string `json:"redirect_uris"`
+	Enabled          bool     `json:"enabled"`
+	AllowDraftWrites bool     `json:"allow_draft_writes,omitempty"`
+}
+
+// RemoteConfig opts a site into the experimental, non-production OAuth/MCP
+// profile. A disabled site starts no external resource or OAuth database pool.
+type RemoteConfig struct {
+	Enabled bool                 `json:"enabled,omitempty"`
+	Clients []RemoteClientConfig `json:"clients,omitempty"`
+}
+
 type SiteConfig struct {
 	ID               string             `json:"id"`
 	Origin           string             `json:"origin"`
 	ManagementOrigin string             `json:"management_origin,omitempty"`
 	PreviewOrigin    string             `json:"preview_origin,omitempty"`
+	Remote           RemoteConfig       `json:"remote,omitempty"`
 	DatabaseEnv      string             `json:"database_env"`
 	MediaRoot        string             `json:"media_root"`
 	PublicRoot       string             `json:"public_root,omitempty"`
@@ -292,6 +310,32 @@ func (c Config) validateStructure() error {
 		}
 		authorities[authority] = true
 		hostnames[hostname] = true
+		if site.Remote.Enabled {
+			if site.Disabled || site.ManagementOrigin == "" || site.PreviewOrigin == "" ||
+				len(site.Remote.Clients) == 0 || len(site.Remote.Clients) > 128 {
+				return fmt.Errorf("%w: site remote requires isolated management and enrolled clients", ErrConfiguration)
+			}
+			clientIDs := make(map[string]bool, len(site.Remote.Clients))
+			for _, client := range site.Remote.Clients {
+				if len(client.ID) == 0 || len(client.ID) > 256 ||
+					clientIDs[client.ID] || len(client.Name) > 120 ||
+					len(client.RedirectURIs) == 0 || len(client.RedirectURIs) > 12 {
+					return fmt.Errorf("%w: site remote client", ErrConfiguration)
+				}
+				clientIDs[client.ID] = true
+				for _, redirect := range client.RedirectURIs {
+					target, e := url.Parse(redirect)
+					if e != nil || len(redirect) > 2048 || target.Scheme != "https" ||
+						target.Host == "" || target.User != nil || target.Fragment != "" ||
+						target.RawPath != "" || target.Opaque != "" || target.String() != redirect {
+						return fmt.Errorf("%w: site remote callback", ErrConfiguration)
+					}
+				}
+			}
+		} else if len(site.Remote.Clients) != 0 {
+			// Configuration must not imply latent credentials/registration.
+			return fmt.Errorf("%w: site remote must be explicitly enabled", ErrConfiguration)
+		}
 		if (site.ManagementOrigin == "") != (site.PreviewOrigin == "") {
 			return fmt.Errorf("%w: management and preview origins must be configured together", ErrConfiguration)
 		}

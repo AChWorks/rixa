@@ -33,6 +33,7 @@ type SiteRuntime struct {
 	Media            *media.Service
 	Editorial        *EditorialService
 	Themes           *ThemeService
+	Remote           *siteRemote
 	Access           *SiteAccess
 	Publication      *PublicationService
 	Handler          http.Handler
@@ -316,6 +317,10 @@ func buildSite(config Config, site ResolvedSite, adminPrincipal, operator achrix
 		return nil, fmt.Errorf("admin: %w", err)
 	}
 	management := managementHandler(web, adminShell)
+	remote, err := newSiteRemote(site, identityService, editorialService, access, app, operator, logger)
+	if err != nil {
+		return nil, fmt.Errorf("site remote: %w", err)
+	}
 	return &SiteRuntime{
 		ID:               site.ID,
 		Origin:           site.Origin,
@@ -326,9 +331,10 @@ func buildSite(config Config, site ResolvedSite, adminPrincipal, operator achrix
 		Media:            mediaService,
 		Editorial:        editorialService,
 		Themes:           themes,
+		Remote:           remote,
 		Access:           access,
 		Publication:      publicationService,
-		Handler:          isolatedSiteHandler(site, management, publicationService, themes.PreviewHandler()),
+		Handler:          isolatedSiteHandler(site, management, publicationService, themes.PreviewHandler(), remote),
 		adminPrincipal:   adminPrincipal,
 		operator:         operator,
 		catalogs:         []fs.FS{accounts.Catalogs, library.Catalogs},
@@ -394,7 +400,7 @@ func managementHandler(web *identity.Web, adminShell *shell.Shell) http.Handler 
 // isolatedSiteHandler prevents the public and preview JavaScript origins from
 // ever serving site authentication or the privileged Admin shell. Distinct
 // hostnames (not path or port aliases) are validated in Config.
-func isolatedSiteHandler(site ResolvedSite, management http.Handler, publication *PublicationService, preview http.Handler) http.Handler {
+func isolatedSiteHandler(site ResolvedSite, management http.Handler, publication *PublicationService, preview http.Handler, remote *siteRemote) http.Handler {
 	if site.ManagementOrigin == "" {
 		return siteRequestHandler(management, publication) // legacy code-free site
 	}
@@ -408,6 +414,9 @@ func isolatedSiteHandler(site ResolvedSite, management http.Handler, publication
 		}
 		switch r.Host {
 		case managementAuthority:
+			if remote != nil && remote.serve(w, r) {
+				return
+			}
 			if r.URL.Path == "/admin" || strings.HasPrefix(r.URL.Path, "/admin/") ||
 				r.URL.Path == "/auth" || strings.HasPrefix(r.URL.Path, "/auth/") {
 				management.ServeHTTP(w, r)
@@ -550,6 +559,11 @@ func (r *Runtime) Shutdown(parent context.Context) error {
 	var result error
 	for i := len(r.applications) - 1; i >= 0; i-- {
 		result = errors.Join(result, r.applications[i].Shutdown(ctx))
+	}
+	for _, site := range r.Sites {
+		if site.Remote != nil {
+			site.Remote.close()
+		}
 	}
 	r.mu.Lock()
 	r.started = false
